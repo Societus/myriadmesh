@@ -1,0 +1,19 @@
+[package]
+name = "myriadmesh-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+myriadmesh-crypto = { path = "../myriadmesh-crypto" }
+myriadmesh-protocol = { path = "../myriadmesh-protocol" }
+
+tokio = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

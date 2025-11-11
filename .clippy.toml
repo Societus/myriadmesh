@@ -1,0 +1,13 @@
+# MyriadMesh clippy configuration
+
+# Warn on common mistakes
+warn-on-all-wildcard-imports = true
+
+# Documentation
+missing-docs-in-crate-items = false
+
+# Cognitive complexity threshold
+cognitive-complexity-threshold = 50
+
+# Allow certain lints for cryptographic code
+allow-mixed-uninlined-format-args = true
