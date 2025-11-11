@@ -118,7 +118,8 @@ pub fn verify_signature(
     message: &[u8],
     signature: &Signature,
 ) -> Result<()> {
-    let sig = ed25519::Signature::new(*signature.as_bytes());
+    let sig = ed25519::Signature::from_bytes(signature.as_bytes())
+        .map_err(|_| CryptoError::InvalidSignature)?;
 
     if ed25519::verify_detached(&sig, message, public_key) {
         Ok(())

@@ -31,8 +31,8 @@ impl MessageId {
         hasher.update(source.as_bytes());
         hasher.update(destination.as_bytes());
         hasher.update(payload);
-        hasher.update(&timestamp.to_le_bytes());
-        hasher.update(&sequence.to_le_bytes());
+        hasher.update(timestamp.to_le_bytes());
+        hasher.update(sequence.to_le_bytes());
 
         let hash = hasher.finalize();
 

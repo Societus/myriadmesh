@@ -35,7 +35,7 @@ impl Nonce {
     }
 
     /// Convert to sodiumoxide nonce
-    fn to_sodiumoxide(&self) -> xsalsa20poly1305::Nonce {
+    fn to_sodiumoxide(self) -> xsalsa20poly1305::Nonce {
         xsalsa20poly1305::Nonce(self.0)
     }
 }

@@ -145,11 +145,6 @@ impl Frame {
     }
 }
 
-/// Utility function to calculate CRC32 checksum
-fn crc32fast_hash(data: &[u8]) -> u32 {
-    crc32fast::hash(data)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

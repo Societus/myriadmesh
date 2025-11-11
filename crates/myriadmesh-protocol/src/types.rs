@@ -46,8 +46,8 @@ impl NodeId {
     /// Calculate XOR distance between two node IDs (for Kademlia DHT)
     pub fn distance(&self, other: &NodeId) -> [u8; NODE_ID_SIZE] {
         let mut result = [0u8; NODE_ID_SIZE];
-        for i in 0..NODE_ID_SIZE {
-            result[i] = self.0[i] ^ other.0[i];
+        for (i, item) in result.iter_mut().enumerate() {
+            *item = self.0[i] ^ other.0[i];
         }
         result
     }
@@ -66,10 +66,11 @@ impl fmt::Display for NodeId {
 }
 
 /// Priority level for message routing
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 #[repr(u8)]
 pub enum Priority {
     Low = 0,
+    #[default]
     Normal = 1,
     High = 2,
     Urgent = 3,
@@ -90,12 +91,6 @@ impl Priority {
     /// Convert to u8
     pub fn to_u8(self) -> u8 {
         self as u8
-    }
-}
-
-impl Default for Priority {
-    fn default() -> Self {
-        Priority::Normal
     }
 }
 
