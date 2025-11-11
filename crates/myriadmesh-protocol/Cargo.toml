@@ -1,0 +1,17 @@
+[package]
+name = "myriadmesh-protocol"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+bincode = { workspace = true }
+thiserror = { workspace = true }
+blake2 = { workspace = true }
+hex = { workspace = true }
+crc32fast = "1.4"
+
+[dev-dependencies]
