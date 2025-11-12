@@ -8,9 +8,10 @@ use crate::api::ApiServer;
 use crate::storage::Storage;
 use crate::monitor::NetworkMonitor;
 
-use myriadmesh_network::AdapterManager;
+use myriadmesh_network::{AdapterManager, NetworkAdapter, adapters::*};
 use myriadmesh_routing::PriorityQueue;
 use myriadmesh_dht::routing_table::RoutingTable;
+use myriadmesh_protocol::NodeId;
 
 /// Main node orchestrator
 pub struct Node {
@@ -130,30 +131,116 @@ impl Node {
         // Start Ethernet adapter if enabled
         if self.config.network.adapters.ethernet.enabled {
             info!("  Starting Ethernet adapter...");
-            // TODO: Initialize and register Ethernet adapter
-            info!("  ✓ Ethernet adapter registered");
+            match self.initialize_ethernet_adapter().await {
+                Ok(()) => info!("  ✓ Ethernet adapter registered"),
+                Err(e) => warn!("  ✗ Ethernet adapter failed: {}", e),
+            }
         }
 
         // Start Bluetooth adapter if enabled
         if self.config.network.adapters.bluetooth.enabled {
             info!("  Starting Bluetooth adapter...");
-            // TODO: Initialize and register Bluetooth adapter
-            info!("  ✓ Bluetooth adapter registered");
+            match self.initialize_bluetooth_adapter().await {
+                Ok(()) => info!("  ✓ Bluetooth adapter registered"),
+                Err(e) => warn!("  ✗ Bluetooth adapter failed: {}", e),
+            }
         }
 
         // Start Bluetooth LE adapter if enabled
         if self.config.network.adapters.bluetooth_le.enabled {
             info!("  Starting Bluetooth LE adapter...");
-            // TODO: Initialize and register Bluetooth LE adapter
-            info!("  ✓ Bluetooth LE adapter registered");
+            match self.initialize_ble_adapter().await {
+                Ok(()) => info!("  ✓ Bluetooth LE adapter registered"),
+                Err(e) => warn!("  ✗ Bluetooth LE adapter failed: {}", e),
+            }
         }
 
         // Start Cellular adapter if enabled
         if self.config.network.adapters.cellular.enabled {
             info!("  Starting Cellular adapter...");
-            // TODO: Initialize and register Cellular adapter
-            info!("  ✓ Cellular adapter registered");
+            match self.initialize_cellular_adapter().await {
+                Ok(()) => info!("  ✓ Cellular adapter registered"),
+                Err(e) => warn!("  ✗ Cellular adapter failed: {}", e),
+            }
         }
+
+        Ok(())
+    }
+
+    async fn initialize_ethernet_adapter(&mut self) -> Result<()> {
+        let config = EthernetConfig::default();
+
+        // Get NodeId for the adapter
+        let node_id_bytes: [u8; 32] = self.config.node.id.as_slice().try_into()
+            .expect("Node ID must be 32 bytes");
+        let node_id = NodeId::from_bytes(node_id_bytes);
+
+        let mut adapter = EthernetAdapter::new(node_id, config);
+
+        adapter.initialize().await?;
+
+        if self.config.network.adapters.ethernet.auto_start {
+            adapter.start().await?;
+        }
+
+        self.adapter_manager.register_adapter(
+            "ethernet".to_string(),
+            Box::new(adapter)
+        ).await?;
+
+        Ok(())
+    }
+
+    async fn initialize_bluetooth_adapter(&mut self) -> Result<()> {
+        let config = BluetoothConfig::default();
+        let mut adapter = BluetoothAdapter::new(config);
+
+        adapter.initialize().await?;
+
+        if self.config.network.adapters.bluetooth.auto_start {
+            adapter.start().await?;
+        }
+
+        self.adapter_manager.register_adapter(
+            "bluetooth".to_string(),
+            Box::new(adapter)
+        ).await?;
+
+        Ok(())
+    }
+
+    async fn initialize_ble_adapter(&mut self) -> Result<()> {
+        let config = BleConfig::default();
+        let mut adapter = BleAdapter::new(config);
+
+        adapter.initialize().await?;
+
+        if self.config.network.adapters.bluetooth_le.auto_start {
+            adapter.start().await?;
+        }
+
+        self.adapter_manager.register_adapter(
+            "bluetooth_le".to_string(),
+            Box::new(adapter)
+        ).await?;
+
+        Ok(())
+    }
+
+    async fn initialize_cellular_adapter(&mut self) -> Result<()> {
+        let config = CellularConfig::default();
+        let mut adapter = CellularAdapter::new(config);
+
+        adapter.initialize().await?;
+
+        if self.config.network.adapters.cellular.auto_start {
+            adapter.start().await?;
+        }
+
+        self.adapter_manager.register_adapter(
+            "cellular".to_string(),
+            Box::new(adapter)
+        ).await?;
 
         Ok(())
     }
@@ -174,7 +261,9 @@ impl Node {
         self.monitor.stop().await?;
 
         info!("Stopping network adapters...");
-        // TODO: Stop all adapters
+        if let Err(e) = self.adapter_manager.stop_all().await {
+            error!("Failed to stop adapters: {}", e);
+        }
 
         if let Some(_api_server) = &self.api_server {
             info!("Stopping API server...");
