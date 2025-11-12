@@ -17,7 +17,12 @@ pub mod metrics;
 pub mod types;
 
 pub use adapter::{AdapterStatus, NetworkAdapter};
-pub use adapters::{EthernetAdapter, EthernetConfig};
+pub use adapters::{
+    EthernetAdapter, EthernetConfig,
+    BluetoothAdapter, BluetoothConfig,
+    BleAdapter, BleConfig,
+    CellularAdapter, CellularConfig, NetworkType,
+};
 pub use error::{NetworkError, Result};
 pub use i2p::{I2pAdapter, I2pRouterConfig};
 pub use manager::AdapterManager;

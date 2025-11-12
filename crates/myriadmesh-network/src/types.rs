@@ -12,6 +12,9 @@ pub enum Address {
     /// Bluetooth MAC address
     Bluetooth(String),
 
+    /// Bluetooth LE MAC address
+    BluetoothLE(String),
+
     /// Cellular phone number or IP
     Cellular(String),
 
@@ -34,6 +37,7 @@ impl Address {
         match self {
             Address::Ethernet(s) => s,
             Address::Bluetooth(s) => s,
+            Address::BluetoothLE(s) => s,
             Address::Cellular(s) => s,
             Address::LoRaWAN(s) => s,
             Address::Radio(s) => s,
@@ -47,6 +51,7 @@ impl Address {
         match self {
             Address::Ethernet(_) => AdapterType::Ethernet,
             Address::Bluetooth(_) => AdapterType::Bluetooth,
+            Address::BluetoothLE(_) => AdapterType::BluetoothLE,
             Address::Cellular(_) => AdapterType::Cellular,
             Address::LoRaWAN(_) => AdapterType::LoRaWAN,
             Address::Radio(_) => AdapterType::APRS,
