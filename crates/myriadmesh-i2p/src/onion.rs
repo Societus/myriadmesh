@@ -10,10 +10,13 @@
 //! - Route randomization prevents traffic correlation
 //! - Minimum 3 hops recommended for strong anonymity
 
+use myriadmesh_crypto::encryption::{decrypt, encrypt, EncryptedMessage};
+use myriadmesh_crypto::keyexchange::{client_session_keys, KeyExchangeKeypair, X25519PublicKey};
 use myriadmesh_protocol::NodeId;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Minimum number of hops for onion routing
@@ -74,27 +77,17 @@ pub struct OnionLayer {
     /// Node ID for this hop
     pub node_id: NodeId,
 
-    /// Next hop (encrypted)
-    pub next_hop: Option<Vec<u8>>,
-
-    /// Layer encryption key (in real implementation, this would be derived)
-    #[serde(skip)]
-    pub encryption_key: Option<[u8; 32]>,
+    /// Encrypted payload (contains next hop + inner layers)
+    pub encrypted_payload: Vec<u8>,
 }
 
 impl OnionLayer {
     /// Create new onion layer
-    pub fn new(node_id: NodeId) -> Self {
+    pub fn new(node_id: NodeId, encrypted_payload: Vec<u8>) -> Self {
         OnionLayer {
             node_id,
-            next_hop: None,
-            encryption_key: None,
+            encrypted_payload,
         }
-    }
-
-    /// Set next hop (encrypted)
-    pub fn set_next_hop(&mut self, next_hop: Vec<u8>) {
-        self.next_hop = Some(next_hop);
     }
 }
 
@@ -112,6 +105,10 @@ pub struct OnionRoute {
 
     /// Intermediate hops (excluding source and destination)
     pub hops: Vec<NodeId>,
+
+    /// Public keys for each hop (for encryption)
+    /// Maps NodeId -> X25519 public key
+    pub hop_public_keys: HashMap<NodeId, X25519PublicKey>,
 
     /// Route creation time
     pub created_at: u64,
@@ -139,10 +136,16 @@ impl OnionRoute {
             source,
             destination,
             hops,
+            hop_public_keys: HashMap::new(),
             created_at: now,
             expires_at: now + lifetime_secs,
             use_count: 0,
         }
+    }
+
+    /// Set public key for a hop
+    pub fn set_hop_public_key(&mut self, node_id: NodeId, public_key: X25519PublicKey) {
+        self.hop_public_keys.insert(node_id, public_key);
     }
 
     /// Check if route is expired
@@ -187,28 +190,37 @@ pub struct RouteNode {
     pub reliability: f64, // 0.0 to 1.0
     pub latency_ms: f64,
     pub available: bool,
+    /// X25519 public key for this node (for onion encryption)
+    pub public_key: X25519PublicKey,
 }
 
 /// Onion router for managing routes
 pub struct OnionRouter {
     config: OnionConfig,
     local_node_id: NodeId,
+    /// Local keypair for decrypting layers intended for this node
+    local_keypair: KeyExchangeKeypair,
     active_routes: Vec<OnionRoute>,
 }
 
 impl OnionRouter {
     /// Create new onion router
-    pub fn new(local_node_id: NodeId, config: OnionConfig) -> Self {
+    pub fn new(
+        local_node_id: NodeId,
+        local_keypair: KeyExchangeKeypair,
+        config: OnionConfig,
+    ) -> Self {
         OnionRouter {
             config,
             local_node_id,
+            local_keypair,
             active_routes: Vec::new(),
         }
     }
 
     /// Create with default configuration
-    pub fn new_default(local_node_id: NodeId) -> Self {
-        Self::new(local_node_id, OnionConfig::default())
+    pub fn new_default(local_node_id: NodeId, local_keypair: KeyExchangeKeypair) -> Self {
+        Self::new(local_node_id, local_keypair, OnionConfig::default())
     }
 
     /// Select route to destination
@@ -237,12 +249,19 @@ impl OnionRouter {
         let hops = self.select_hops(&candidates, self.config.num_hops)?;
 
         // Create route
-        let route = OnionRoute::new(
+        let mut route = OnionRoute::new(
             self.local_node_id,
             destination,
-            hops,
+            hops.clone(),
             self.config.max_route_lifetime,
         );
+
+        // Store public keys for selected hops
+        for node in available_nodes {
+            if hops.contains(&node.node_id) || node.node_id == destination {
+                route.set_hop_public_key(node.node_id, node.public_key);
+            }
+        }
 
         // Store active route
         self.active_routes.push(route.clone());
@@ -351,65 +370,136 @@ impl OnionRouter {
     /// Build onion layers for a route
     ///
     /// Creates encrypted layers for each hop in the route.
-    /// In a real implementation, each layer would be encrypted with the hop's public key.
-    pub fn build_onion_layers(&self, route: &OnionRoute, _payload: &[u8]) -> Vec<OnionLayer> {
-        let mut layers = Vec::new();
+    /// Each layer is encrypted with the hop's public key using X25519 key exchange.
+    pub fn build_onion_layers(
+        &self,
+        route: &OnionRoute,
+        payload: &[u8],
+    ) -> Result<Vec<OnionLayer>, String> {
         let path = route.full_path();
 
-        // Build layers in reverse order (destination first)
+        // Start with the final payload
+        let mut current_payload = payload.to_vec();
+        let mut layers = Vec::new();
+
+        // Build layers in reverse order (destination first, working back to source)
         for i in (0..path.len()).rev() {
             let node_id = path[i];
-            let mut layer = OnionLayer::new(node_id);
 
-            // For real implementation:
-            // 1. Encrypt payload with this hop's key
-            // 2. Add routing info for next hop
-            // 3. This becomes the payload for the previous layer
+            // Get public key for this hop
+            let hop_public_key = route
+                .hop_public_keys
+                .get(&node_id)
+                .ok_or_else(|| format!("No public key for hop {}", node_id))?;
 
-            // For now, just store the node info
-            if i < path.len() - 1 {
-                // Not the last hop, add next hop info
-                let next_node = path[i + 1];
-                layer.set_next_hop(next_node.as_bytes().to_vec());
-            }
+            // Generate ephemeral keypair for this layer
+            let ephemeral_keypair = KeyExchangeKeypair::generate();
 
+            // Derive shared secret using ECDH
+            let session_keys = client_session_keys(&ephemeral_keypair, hop_public_key)
+                .map_err(|e| format!("Key exchange failed: {}", e))?;
+
+            // Add next hop info if not the last hop
+            let layer_data = if i < path.len() - 1 {
+                let next_hop = path[i + 1];
+                // Serialize: next_hop (32 bytes) + payload
+                let mut data = Vec::with_capacity(32 + current_payload.len());
+                data.extend_from_slice(next_hop.as_bytes());
+                data.extend_from_slice(&current_payload);
+                data
+            } else {
+                // Last hop, just the payload
+                current_payload.clone()
+            };
+
+            // Encrypt the layer data
+            let encrypted = encrypt(&session_keys.tx_key, &layer_data)
+                .map_err(|e| format!("Encryption failed: {}", e))?;
+
+            // Serialize encrypted message (nonce + ciphertext)
+            let mut encrypted_bytes = Vec::new();
+            encrypted_bytes.extend_from_slice(encrypted.nonce.as_bytes());
+            encrypted_bytes.extend_from_slice(&encrypted.ciphertext);
+
+            // Prepend ephemeral public key so recipient can derive shared secret
+            let mut full_layer = Vec::new();
+            full_layer.extend_from_slice(ephemeral_keypair.public_bytes());
+            full_layer.extend_from_slice(&encrypted_bytes);
+
+            // Create the layer
+            let layer = OnionLayer::new(node_id, full_layer.clone());
             layers.push(layer);
+
+            // This encrypted layer becomes the payload for the next iteration
+            current_payload = full_layer;
         }
 
         // Reverse to get correct order (source first)
         layers.reverse();
-        layers
+        Ok(layers)
     }
 
     /// Peel one layer from onion (at intermediate hop)
     ///
-    /// Decrypts outer layer and returns next hop info and remaining onion.
-    pub fn peel_layer(&self, layers: &[OnionLayer]) -> Result<(NodeId, Vec<OnionLayer>), String> {
-        if layers.is_empty() {
-            return Err("No layers to peel".to_string());
-        }
-
-        let current_layer = &layers[0];
+    /// Decrypts outer layer and returns next hop info and remaining onion payload.
+    /// Returns (next_hop, decrypted_payload) where decrypted_payload is the inner layers.
+    pub fn peel_layer(&self, layer: &OnionLayer) -> Result<(Option<NodeId>, Vec<u8>), String> {
+        use myriadmesh_crypto::encryption::Nonce;
+        use myriadmesh_crypto::keyexchange::server_session_keys;
 
         // Verify this layer is for us
-        if current_layer.node_id != self.local_node_id {
+        if layer.node_id != self.local_node_id {
             return Err("Layer not intended for this node".to_string());
         }
 
-        // Get next hop
-        let next_hop_bytes = current_layer
-            .next_hop
-            .as_ref()
-            .ok_or("No next hop in layer")?;
+        let encrypted_payload = &layer.encrypted_payload;
 
-        let mut bytes = [0u8; 32];
-        bytes.copy_from_slice(next_hop_bytes);
-        let next_hop = NodeId::from_bytes(bytes);
+        // Extract ephemeral public key (first 32 bytes)
+        if encrypted_payload.len() < 32 {
+            return Err("Encrypted payload too short".to_string());
+        }
 
-        // Return remaining layers
-        let remaining = layers[1..].to_vec();
+        let mut ephemeral_public_bytes = [0u8; 32];
+        ephemeral_public_bytes.copy_from_slice(&encrypted_payload[0..32]);
+        let ephemeral_public = X25519PublicKey::from_bytes(ephemeral_public_bytes);
 
-        Ok((next_hop, remaining))
+        // Derive shared secret using our secret key
+        let session_keys = server_session_keys(&self.local_keypair, &ephemeral_public)
+            .map_err(|e| format!("Key exchange failed: {}", e))?;
+
+        // Extract nonce (24 bytes after public key)
+        if encrypted_payload.len() < 32 + 24 {
+            return Err("Encrypted payload missing nonce".to_string());
+        }
+
+        let mut nonce_bytes = [0u8; 24];
+        nonce_bytes.copy_from_slice(&encrypted_payload[32..56]);
+        let nonce = Nonce::from_bytes(nonce_bytes);
+
+        // Extract ciphertext (remainder)
+        let ciphertext = encrypted_payload[56..].to_vec();
+
+        // Decrypt the layer
+        let encrypted_msg = EncryptedMessage { nonce, ciphertext };
+        let decrypted = decrypt(&session_keys.rx_key, &encrypted_msg)
+            .map_err(|e| format!("Decryption failed: {}", e))?;
+
+        // Check if this layer contains next hop info (intermediate hop)
+        // or if it's the final destination
+        if decrypted.len() >= 32 {
+            // This is an intermediate hop, extract next hop
+            let mut next_hop_bytes = [0u8; 32];
+            next_hop_bytes.copy_from_slice(&decrypted[0..32]);
+            let next_hop = NodeId::from_bytes(next_hop_bytes);
+
+            // Remaining payload is the inner layers
+            let inner_payload = decrypted[32..].to_vec();
+
+            Ok((Some(next_hop), inner_payload))
+        } else {
+            // This is the final destination, no next hop
+            Ok((None, decrypted))
+        }
     }
 }
 
@@ -423,11 +513,13 @@ mod tests {
             .map(|i| {
                 let mut bytes = [0u8; 32];
                 bytes[0] = i as u8;
+                let keypair = KeyExchangeKeypair::generate();
                 RouteNode {
                     node_id: NodeId::from_bytes(bytes),
                     reliability: 0.9,
                     latency_ms: 50.0,
                     available: true,
+                    public_key: X25519PublicKey::from(&keypair.public_key),
                 }
             })
             .collect()
@@ -462,11 +554,13 @@ mod tests {
 
     #[test]
     fn test_route_selection_random() {
+        myriadmesh_crypto::init().unwrap();
         let local = NodeId::from_bytes([0u8; 32]);
         let dest = NodeId::from_bytes([255u8; 32]);
         let nodes = create_test_nodes(10);
 
-        let mut router = OnionRouter::new_default(local);
+        let keypair = KeyExchangeKeypair::generate();
+        let mut router = OnionRouter::new_default(local, keypair);
         let route = router.select_route(dest, &nodes).unwrap();
 
         assert_eq!(route.source, local);
@@ -478,11 +572,13 @@ mod tests {
 
     #[test]
     fn test_route_selection_insufficient_nodes() {
+        myriadmesh_crypto::init().unwrap();
         let local = NodeId::from_bytes([0u8; 32]);
         let dest = NodeId::from_bytes([255u8; 32]);
         let nodes = create_test_nodes(2); // Not enough for 3 hops
 
-        let mut router = OnionRouter::new_default(local);
+        let keypair = KeyExchangeKeypair::generate();
+        let mut router = OnionRouter::new_default(local, keypair);
         let result = router.select_route(dest, &nodes);
 
         assert!(result.is_err());
@@ -490,11 +586,13 @@ mod tests {
 
     #[test]
     fn test_cleanup_expired_routes() {
+        myriadmesh_crypto::init().unwrap();
         let local = NodeId::from_bytes([0u8; 32]);
         let dest = NodeId::from_bytes([255u8; 32]);
         let nodes = create_test_nodes(10);
 
-        let mut router = OnionRouter::new_default(local);
+        let keypair = KeyExchangeKeypair::generate();
+        let mut router = OnionRouter::new_default(local, keypair);
 
         // Create a route with short lifetime
         let config = OnionConfig {
@@ -515,15 +613,34 @@ mod tests {
 
     #[test]
     fn test_onion_layer_building() {
+        myriadmesh_crypto::init().unwrap();
         let local = NodeId::from_bytes([0u8; 32]);
         let dest = NodeId::from_bytes([255u8; 32]);
         let hops = vec![NodeId::from_bytes([1u8; 32]), NodeId::from_bytes([2u8; 32])];
 
-        let route = OnionRoute::new(local, dest, hops, 3600);
-        let router = OnionRouter::new_default(local);
+        let mut route = OnionRoute::new(local, dest, hops, 3600);
+
+        // Add public keys for all nodes in the path
+        let local_kp = KeyExchangeKeypair::generate();
+        let hop1_kp = KeyExchangeKeypair::generate();
+        let hop2_kp = KeyExchangeKeypair::generate();
+        let dest_kp = KeyExchangeKeypair::generate();
+
+        route.set_hop_public_key(local, X25519PublicKey::from(&local_kp.public_key));
+        route.set_hop_public_key(
+            NodeId::from_bytes([1u8; 32]),
+            X25519PublicKey::from(&hop1_kp.public_key),
+        );
+        route.set_hop_public_key(
+            NodeId::from_bytes([2u8; 32]),
+            X25519PublicKey::from(&hop2_kp.public_key),
+        );
+        route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
+
+        let router = OnionRouter::new_default(local, local_kp);
 
         let payload = b"test message";
-        let layers = router.build_onion_layers(&route, payload);
+        let layers = router.build_onion_layers(&route, payload).unwrap();
 
         assert_eq!(layers.len(), 4); // source + 2 hops + dest
         assert_eq!(layers[0].node_id, local);
@@ -532,23 +649,34 @@ mod tests {
 
     #[test]
     fn test_layer_peeling() {
+        myriadmesh_crypto::init().unwrap();
+
+        // Create nodes with keypairs
         let local = NodeId::from_bytes([0u8; 32]);
         let next = NodeId::from_bytes([1u8; 32]);
         let dest = NodeId::from_bytes([2u8; 32]);
 
-        let mut layer1 = OnionLayer::new(local);
-        layer1.set_next_hop(next.as_bytes().to_vec());
+        let local_kp = KeyExchangeKeypair::generate();
+        let next_kp = KeyExchangeKeypair::generate();
+        let dest_kp = KeyExchangeKeypair::generate();
 
-        let layer2 = OnionLayer::new(next);
-        let layer3 = OnionLayer::new(dest);
+        // Create route
+        let mut route = OnionRoute::new(local, dest, vec![next], 3600);
+        route.set_hop_public_key(local, X25519PublicKey::from(&local_kp.public_key));
+        route.set_hop_public_key(next, X25519PublicKey::from(&next_kp.public_key));
+        route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
 
-        let layers = vec![layer1, layer2, layer3];
-        let router = OnionRouter::new_default(local);
+        // Build onion layers
+        let payload = b"test message";
+        let router = OnionRouter::new_default(local, local_kp);
+        let layers = router.build_onion_layers(&route, payload).unwrap();
 
-        let (next_hop, remaining) = router.peel_layer(&layers).unwrap();
+        // First hop peels their layer
+        let next_router = OnionRouter::new_default(next, next_kp);
+        let (next_hop, inner_payload) = next_router.peel_layer(&layers[1]).unwrap();
 
-        assert_eq!(next_hop, next);
-        assert_eq!(remaining.len(), 2);
+        assert_eq!(next_hop, Some(dest));
+        assert!(!inner_payload.is_empty());
     }
 
     #[test]
@@ -566,5 +694,59 @@ mod tests {
         assert!(!route.should_retire(10));
         route.use_count = 10;
         assert!(route.should_retire(10));
+    }
+
+    #[test]
+    fn test_end_to_end_onion_encryption() {
+        myriadmesh_crypto::init().unwrap();
+
+        // Create a 3-hop route: source -> hop1 -> hop2 -> dest
+        let source = NodeId::from_bytes([0u8; 32]);
+        let hop1 = NodeId::from_bytes([1u8; 32]);
+        let hop2 = NodeId::from_bytes([2u8; 32]);
+        let dest = NodeId::from_bytes([3u8; 32]);
+
+        let source_kp = KeyExchangeKeypair::generate();
+        let hop1_kp = KeyExchangeKeypair::generate();
+        let hop2_kp = KeyExchangeKeypair::generate();
+        let dest_kp = KeyExchangeKeypair::generate();
+
+        // Create route
+        let mut route = OnionRoute::new(source, dest, vec![hop1, hop2], 3600);
+        route.set_hop_public_key(source, X25519PublicKey::from(&source_kp.public_key));
+        route.set_hop_public_key(hop1, X25519PublicKey::from(&hop1_kp.public_key));
+        route.set_hop_public_key(hop2, X25519PublicKey::from(&hop2_kp.public_key));
+        route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
+
+        // Build onion layers at source
+        let original_payload = b"Secret message for destination";
+        let source_router = OnionRouter::new_default(source, source_kp);
+        let layers = source_router
+            .build_onion_layers(&route, original_payload)
+            .unwrap();
+
+        assert_eq!(layers.len(), 4); // source + hop1 + hop2 + dest
+
+        // Hop1 peels their layer
+        let hop1_router = OnionRouter::new_default(hop1, hop1_kp);
+        let (next1, payload1) = hop1_router.peel_layer(&layers[1]).unwrap();
+        assert_eq!(next1, Some(hop2));
+
+        // Parse payload1 as next layer
+        let layer2 = OnionLayer::new(hop2, payload1);
+
+        // Hop2 peels their layer
+        let hop2_router = OnionRouter::new_default(hop2, hop2_kp);
+        let (next2, payload2) = hop2_router.peel_layer(&layer2).unwrap();
+        assert_eq!(next2, Some(dest));
+
+        // Parse payload2 as final layer
+        let layer3 = OnionLayer::new(dest, payload2);
+
+        // Destination decrypts final layer
+        let dest_router = OnionRouter::new_default(dest, dest_kp);
+        let (next_final, final_payload) = dest_router.peel_layer(&layer3).unwrap();
+        assert_eq!(next_final, None); // No next hop at destination
+        assert_eq!(final_payload, original_payload);
     }
 }

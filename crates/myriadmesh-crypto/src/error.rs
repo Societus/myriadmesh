@@ -47,4 +47,7 @@ pub enum CryptoError {
 
     #[error("Deserialization error: {0}")]
     DeserializationError(String),
+
+    #[error("Invalid state: {0}")]
+    InvalidState(String),
 }

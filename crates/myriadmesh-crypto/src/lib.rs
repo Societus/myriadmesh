@@ -6,7 +6,9 @@
 //! - Message encryption (XSalsa20-Poly1305 AEAD)
 //! - Message signing (Ed25519 signatures)
 //! - Key derivation (HKDF)
+//! - Encrypted channels for end-to-end encryption
 
+pub mod channel;
 pub mod encryption;
 pub mod error;
 pub mod identity;

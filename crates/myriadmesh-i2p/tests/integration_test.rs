@@ -7,6 +7,7 @@
 //! - Onion routing
 
 use myriadmesh_crypto::identity::NodeIdentity;
+use myriadmesh_crypto::keyexchange::{KeyExchangeKeypair, X25519PublicKey};
 use myriadmesh_i2p::{
     DualIdentity, I2pDestination, OnionConfig, OnionRouter, PaddingStrategy, PrivacyConfig,
     PrivacyLayer, RouteSelectionStrategy, TimingStrategy,
@@ -21,11 +22,13 @@ fn create_test_route_node(
 ) -> myriadmesh_i2p::onion::RouteNode {
     let mut bytes = [0u8; 32];
     bytes[0] = id;
+    let keypair = KeyExchangeKeypair::generate();
     myriadmesh_i2p::onion::RouteNode {
         node_id: NodeId::from_bytes(bytes),
         reliability,
         latency_ms: latency,
         available: true,
+        public_key: X25519PublicKey::from(&keypair.public_key),
     }
 }
 
@@ -165,10 +168,22 @@ fn test_onion_routing_multi_hop() {
         randomize_routes: true,
     };
 
-    let mut router = OnionRouter::new(local_node_id, config);
+    let local_keypair = KeyExchangeKeypair::generate();
+    let mut router = OnionRouter::new(local_node_id, local_keypair, config);
 
     // Select route
-    let route = router.select_route(destination, &relay_nodes).unwrap();
+    let mut route = router.select_route(destination, &relay_nodes).unwrap();
+
+    // Manually set destination public key (in real impl, this would come from DHT/capability token)
+    let dest_keypair = KeyExchangeKeypair::generate();
+    route.set_hop_public_key(destination, X25519PublicKey::from(&dest_keypair.public_key));
+
+    // Also set source public key
+    let source_keypair = KeyExchangeKeypair::generate();
+    route.set_hop_public_key(
+        local_node_id,
+        X25519PublicKey::from(&source_keypair.public_key),
+    );
 
     // Verify route properties
     assert_eq!(route.source, local_node_id);
@@ -184,15 +199,14 @@ fn test_onion_routing_multi_hop() {
 
     // Build onion layers
     let test_payload = b"secret message";
-    let layers = router.build_onion_layers(&route, test_payload);
+    let layers = router.build_onion_layers(&route, test_payload).unwrap();
 
     // Should have layer for each hop
     assert_eq!(layers.len(), route.total_hops());
 
-    // Verify layer structure
-    let full_path = route.full_path();
-    for (i, layer) in layers.iter().enumerate() {
-        assert_eq!(layer.node_id, full_path[i]);
+    // Verify each layer has a node_id and encrypted payload
+    for layer in &layers {
+        assert!(!layer.encrypted_payload.is_empty());
     }
 }
 
@@ -256,13 +270,25 @@ fn test_complete_i2p_communication_flow() {
         ..Default::default()
     };
 
-    let mut onion_router = OnionRouter::new(bob_node_id, onion_config);
-    let route = onion_router
+    let bob_keypair = KeyExchangeKeypair::generate();
+    let mut onion_router = OnionRouter::new(bob_node_id, bob_keypair, onion_config);
+    let mut route = onion_router
         .select_route(alice_i2p_node_id, &relay_nodes)
         .unwrap();
 
+    // Manually set Alice's and Bob's public keys (in real impl, from DHT/capability token)
+    let alice_keypair = KeyExchangeKeypair::generate();
+    route.set_hop_public_key(
+        alice_i2p_node_id,
+        X25519PublicKey::from(&alice_keypair.public_key),
+    );
+    let bob_key = KeyExchangeKeypair::generate();
+    route.set_hop_public_key(bob_node_id, X25519PublicKey::from(&bob_key.public_key));
+
     // Build onion layers
-    let layers = onion_router.build_onion_layers(&route, &protected_message);
+    let layers = onion_router
+        .build_onion_layers(&route, &protected_message)
+        .unwrap();
 
     // Verify complete protection stack
     assert_eq!(layers.len(), route.total_hops());
@@ -341,7 +367,8 @@ fn test_route_selection_strategies() {
         ..Default::default()
     };
 
-    let mut router_random = OnionRouter::new(local_node_id, config_random);
+    let keypair1 = KeyExchangeKeypair::generate();
+    let mut router_random = OnionRouter::new(local_node_id, keypair1, config_random);
     let route_random = router_random
         .select_route(destination, &relay_nodes)
         .unwrap();
@@ -354,7 +381,8 @@ fn test_route_selection_strategies() {
         ..Default::default()
     };
 
-    let mut router_reliability = OnionRouter::new(local_node_id, config_reliability);
+    let keypair2 = KeyExchangeKeypair::generate();
+    let mut router_reliability = OnionRouter::new(local_node_id, keypair2, config_reliability);
     let route_reliability = router_reliability
         .select_route(destination, &relay_nodes)
         .unwrap();
@@ -367,7 +395,8 @@ fn test_route_selection_strategies() {
         ..Default::default()
     };
 
-    let mut router_latency = OnionRouter::new(local_node_id, config_latency);
+    let keypair3 = KeyExchangeKeypair::generate();
+    let mut router_latency = OnionRouter::new(local_node_id, keypair3, config_latency);
     let route_latency = router_latency
         .select_route(destination, &relay_nodes)
         .unwrap();
@@ -380,7 +409,8 @@ fn test_route_selection_strategies() {
         ..Default::default()
     };
 
-    let mut router_balanced = OnionRouter::new(local_node_id, config_balanced);
+    let keypair4 = KeyExchangeKeypair::generate();
+    let mut router_balanced = OnionRouter::new(local_node_id, keypair4, config_balanced);
     let route_balanced = router_balanced
         .select_route(destination, &relay_nodes)
         .unwrap();

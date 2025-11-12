@@ -41,6 +41,7 @@ pub mod capability_token;
 pub mod dual_identity;
 pub mod onion;
 pub mod privacy;
+pub mod secure_token_exchange;
 
 pub use capability_token::{I2pCapabilityToken, I2pDestination, TokenStorage};
 pub use dual_identity::DualIdentity;
@@ -48,6 +49,7 @@ pub use onion::{
     OnionConfig, OnionLayer as OnionRouteLayer, OnionRoute, OnionRouter, RouteSelectionStrategy,
 };
 pub use privacy::{PaddingStrategy, PrivacyConfig, PrivacyLayer, TimingStrategy};
+pub use secure_token_exchange::{EncryptedTokenMessage, SecureTokenExchange};
 
 #[cfg(test)]
 mod tests {
