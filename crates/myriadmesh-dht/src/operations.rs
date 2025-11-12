@@ -1,6 +1,6 @@
 //! DHT operations (FIND_NODE, STORE, FIND_VALUE)
 
-use crate::node_info::NodeInfo;
+use crate::node_info::PublicNodeInfo;
 use myriadmesh_protocol::NodeId;
 use serde::{Deserialize, Serialize};
 
@@ -39,13 +39,17 @@ impl FindNodeRequest {
 }
 
 /// FIND_NODE response
+///
+/// SECURITY: Returns PublicNodeInfo which excludes adapter addresses
+/// to prevent de-anonymization of i2p/Tor nodes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FindNodeResponse {
     /// Query ID matching the request
     pub query_id: QueryId,
 
     /// Closest nodes to the target (up to k nodes)
-    pub nodes: Vec<NodeInfo>,
+    /// Uses PublicNodeInfo to preserve privacy
+    pub nodes: Vec<PublicNodeInfo>,
 }
 
 /// STORE request
@@ -107,6 +111,9 @@ impl FindValueRequest {
 }
 
 /// FIND_VALUE response
+///
+/// SECURITY: Returns PublicNodeInfo which excludes adapter addresses
+/// to prevent de-anonymization of i2p/Tor nodes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FindValueResponse {
     /// Value was found
@@ -118,7 +125,11 @@ pub enum FindValueResponse {
     },
 
     /// Value not found, here are closer nodes
-    NotFound { query_id: QueryId, nodes: Vec<NodeInfo> },
+    /// Uses PublicNodeInfo to preserve privacy
+    NotFound {
+        query_id: QueryId,
+        nodes: Vec<PublicNodeInfo>,
+    },
 }
 
 #[cfg(test)]

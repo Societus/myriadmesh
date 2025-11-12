@@ -28,8 +28,8 @@ pub struct AdapterInfo {
     pub active: bool,
 }
 
-/// Node capabilities
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Node capabilities (safe for public sharing in DHT)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NodeCapabilities {
     /// Can relay messages
     pub can_relay: bool,
@@ -37,10 +37,21 @@ pub struct NodeCapabilities {
     /// Can store DHT data
     pub can_store: bool,
 
+    /// Supports store-and-forward
+    pub store_and_forward: bool,
+
+    /// Has i2p capability (Mode 2: Selective Disclosure)
+    /// TRUE means node can be reached via i2p, but destination is NOT public
+    /// Use capability tokens for private i2p discovery
+    pub i2p_capable: bool,
+
+    /// Has Tor capability (similar privacy model to i2p)
+    pub tor_capable: bool,
+
     /// Maximum message size this node can handle
     pub max_message_size: usize,
 
-    /// Available storage (bytes)
+    /// Available storage (bytes) - 0 means not advertising
     pub available_storage: u64,
 }
 
@@ -49,6 +60,9 @@ impl Default for NodeCapabilities {
         NodeCapabilities {
             can_relay: true,
             can_store: true,
+            store_and_forward: false,
+            i2p_capable: false,
+            tor_capable: false,
             max_message_size: 1024 * 1024, // 1MB
             available_storage: 100 * 1024 * 1024, // 100MB
         }
@@ -145,6 +159,68 @@ impl NodeInfo {
     pub fn distance_to(&self, other: &ProtocolNodeId) -> [u8; 32] {
         self.node_id.distance(other)
     }
+
+    /// Convert to public node info (safe for DHT sharing)
+    /// SECURITY: This removes adapter addresses to prevent de-anonymization
+    pub fn to_public(&self) -> PublicNodeInfo {
+        PublicNodeInfo {
+            node_id: self.node_id,
+            capabilities: self.capabilities.clone(),
+            reputation: self.reputation.clone(),
+            last_seen: self.last_seen,
+            rtt_ms: self.rtt_ms,
+        }
+    }
+}
+
+/// Public node information (safe for DHT distribution)
+///
+/// SECURITY: This structure is shared publicly in DHT queries.
+/// It MUST NOT contain any adapter addresses that could de-anonymize users.
+///
+/// For i2p/Tor: Use capability flags (i2p_capable, tor_capable) to indicate
+/// support, but never include the actual destination/onion address here.
+/// Private discovery uses capability tokens exchanged out-of-band.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicNodeInfo {
+    /// Node identifier (32 bytes)
+    pub node_id: ProtocolNodeId,
+
+    /// Node capabilities (includes privacy-preserving flags)
+    pub capabilities: NodeCapabilities,
+
+    /// Reputation tracking
+    pub reputation: NodeReputation,
+
+    /// Last successful communication (Unix timestamp)
+    pub last_seen: u64,
+
+    /// Round-trip time in milliseconds
+    pub rtt_ms: f64,
+}
+
+impl PublicNodeInfo {
+    /// Create new public node info
+    pub fn new(node_id: ProtocolNodeId, capabilities: NodeCapabilities) -> Self {
+        PublicNodeInfo {
+            node_id,
+            capabilities,
+            reputation: NodeReputation::new(),
+            last_seen: now(),
+            rtt_ms: 0.0,
+        }
+    }
+
+    /// Calculate XOR distance to another node
+    pub fn distance_to(&self, other: &ProtocolNodeId) -> [u8; 32] {
+        self.node_id.distance(other)
+    }
+
+    /// Check if node is likely stale
+    pub fn is_stale(&self, max_age_secs: u64) -> bool {
+        let age = now().saturating_sub(self.last_seen);
+        age > max_age_secs
+    }
 }
 
 #[cfg(test)]
@@ -217,5 +293,71 @@ mod tests {
         let node = NodeInfo::with_adapters(node_id, adapters.clone());
         assert_eq!(node.adapters.len(), 1);
         assert!(node.get_best_adapter().is_some());
+    }
+
+    #[test]
+    fn test_to_public_removes_adapter_addresses() {
+        let node_id = ProtocolNodeId::from_bytes([1u8; 32]);
+        let adapters = vec![
+            AdapterInfo {
+                adapter_type: AdapterType::Ethernet,
+                address: "192.168.1.1:4001".to_string(),
+                active: true,
+            },
+            AdapterInfo {
+                adapter_type: AdapterType::I2P,
+                address: "ukeu3k5o...b32.i2p".to_string(),
+                active: true,
+            },
+        ];
+
+        let mut node = NodeInfo::with_adapters(node_id, adapters);
+        node.capabilities.i2p_capable = true;
+
+        // Convert to public
+        let public = node.to_public();
+
+        // Public version should not have adapter addresses
+        // but should preserve capability flags
+        assert_eq!(public.node_id, node.node_id);
+        assert!(public.capabilities.i2p_capable);
+        assert_eq!(public.reputation.score(), node.reputation.score());
+    }
+
+    #[test]
+    fn test_public_node_info_creation() {
+        let node_id = ProtocolNodeId::from_bytes([1u8; 32]);
+        let mut caps = NodeCapabilities::default();
+        caps.i2p_capable = true;
+        caps.tor_capable = false;
+
+        let public = PublicNodeInfo::new(node_id, caps.clone());
+
+        assert_eq!(public.node_id, node_id);
+        assert_eq!(public.capabilities, caps);
+        assert!(public.reputation.is_trustworthy());
+    }
+
+    #[test]
+    fn test_public_node_info_is_stale() {
+        let node_id = ProtocolNodeId::from_bytes([1u8; 32]);
+        let mut public = PublicNodeInfo::new(node_id, NodeCapabilities::default());
+
+        // Fresh node is not stale
+        assert!(!public.is_stale(3600));
+
+        // Old node is stale
+        public.last_seen = now() - 7200; // 2 hours ago
+        assert!(public.is_stale(3600)); // Max age 1 hour
+    }
+
+    #[test]
+    fn test_node_capabilities_default() {
+        let caps = NodeCapabilities::default();
+        assert!(caps.can_relay);
+        assert!(caps.can_store);
+        assert!(!caps.store_and_forward);
+        assert!(!caps.i2p_capable);
+        assert!(!caps.tor_capable);
     }
 }

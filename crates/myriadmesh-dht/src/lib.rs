@@ -16,7 +16,7 @@ pub mod storage;
 
 pub use error::{DhtError, Result};
 pub use kbucket::KBucket;
-pub use node_info::NodeInfo;
+pub use node_info::{AdapterInfo, NodeCapabilities, NodeInfo, PublicNodeInfo};
 pub use operations::{FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse};
 pub use reputation::{NodeReputation, ReputationManager};
 pub use routing_table::RoutingTable;
