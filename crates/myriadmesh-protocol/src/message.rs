@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::{ProtocolError, Result};
-use crate::routing::{ContentTag, RoutingFlags};
-use crate::types::{NodeId, Priority};
+use crate::routing::{ContentTag, Priority, RoutingFlags};
+use crate::types::NodeId;
 
 /// Size of a message ID in bytes
 pub const MESSAGE_ID_SIZE: usize = 32;

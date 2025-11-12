@@ -339,8 +339,10 @@ mod tests {
 
     async fn create_test_router() -> MessageRouter {
         let identity = Arc::new(NodeIdentity::generate().unwrap());
+        // Convert crypto NodeId to protocol NodeId
+        let protocol_node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
         let dht = Arc::new(DhtManager::new(
-            identity.node_id,
+            protocol_node_id,
             DhtConfig::default(),
         ));
         MessageRouter::new(identity, dht, RouterConfig::default())

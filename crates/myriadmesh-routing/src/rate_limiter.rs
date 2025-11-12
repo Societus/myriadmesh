@@ -82,7 +82,7 @@ pub struct RateLimiter {
 }
 
 /// Rate limiter configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct RateLimiterConfig {
     /// Per-node rate (messages/second)
     pub per_node_rate: u32,
@@ -281,6 +281,7 @@ mod tests {
     #[tokio::test]
     async fn test_available_tokens() {
         let config = RateLimiterConfig::default();
+        let expected_burst = config.per_node_burst as f64;
         let limiter = RateLimiter::new(config);
 
         let node = create_node_id(1);
@@ -288,7 +289,7 @@ mod tests {
         // Initially should have burst amount
         assert_eq!(
             limiter.available_tokens(&node),
-            config.per_node_burst as f64
+            expected_burst
         );
 
         // Consume some tokens

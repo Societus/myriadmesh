@@ -203,7 +203,7 @@ pub enum QueueError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use myriadmesh_protocol::{FrameHeader, MAGIC_BYTES, PROTOCOL_VERSION};
+    use myriadmesh_protocol::frame::{FrameHeader, MAGIC_BYTES, PROTOCOL_VERSION};
 
     fn create_test_frame(priority: Priority) -> Frame {
         Frame {

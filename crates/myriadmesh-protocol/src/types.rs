@@ -65,35 +65,6 @@ impl fmt::Display for NodeId {
     }
 }
 
-/// Priority level for message routing
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
-#[repr(u8)]
-pub enum Priority {
-    Low = 0,
-    #[default]
-    Normal = 1,
-    High = 2,
-    Urgent = 3,
-}
-
-impl Priority {
-    /// Create priority from u8
-    pub fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(Priority::Low),
-            1 => Some(Priority::Normal),
-            2 => Some(Priority::High),
-            3 => Some(Priority::Urgent),
-            _ => None,
-        }
-    }
-
-    /// Convert to u8
-    pub fn to_u8(self) -> u8 {
-        self as u8
-    }
-}
-
 /// Network adapter type identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
@@ -204,18 +175,6 @@ mod tests {
 
         let distance2 = id2.distance(&id1);
         assert_eq!(distance, distance2); // XOR is symmetric
-    }
-
-    #[test]
-    fn test_priority_conversion() {
-        assert_eq!(Priority::from_u8(0), Some(Priority::Low));
-        assert_eq!(Priority::from_u8(1), Some(Priority::Normal));
-        assert_eq!(Priority::from_u8(2), Some(Priority::High));
-        assert_eq!(Priority::from_u8(3), Some(Priority::Urgent));
-        assert_eq!(Priority::from_u8(4), None);
-
-        assert_eq!(Priority::Low.to_u8(), 0);
-        assert_eq!(Priority::Normal.to_u8(), 1);
     }
 
     #[test]
