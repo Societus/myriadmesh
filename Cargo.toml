@@ -5,6 +5,7 @@ members = [
     "crates/myriadmesh-protocol",
     "crates/myriadmesh-dht",
     "crates/myriadmesh-routing",
+    "crates/myriadmesh-network",
 ]
 resolver = "2"
 

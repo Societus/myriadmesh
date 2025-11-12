@@ -1,0 +1,31 @@
+[package]
+name = "myriadmesh-network"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Workspace dependencies
+myriadmesh-protocol = { path = "../myriadmesh-protocol" }
+myriadmesh-crypto = { path = "../myriadmesh-crypto" }
+
+# Serialization
+serde.workspace = true
+bincode.workspace = true
+
+# Async runtime
+tokio.workspace = true
+async-trait = "0.1"
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+# Utilities
+blake2.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
