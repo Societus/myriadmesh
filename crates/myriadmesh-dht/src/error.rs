@@ -32,6 +32,12 @@ pub enum DhtError {
     #[error("Insufficient nodes for operation")]
     InsufficientNodes,
 
+    #[error("No known nodes in routing table")]
+    NoKnownNodes,
+
+    #[error("DHT store operation failed")]
+    StoreFailed,
+
     #[error("Bucket full")]
     BucketFull,
 

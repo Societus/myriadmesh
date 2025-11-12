@@ -11,6 +11,9 @@ pub enum RoutingError {
     #[error("Destination not found: {0}")]
     DestinationNotFound(String),
 
+    #[error("Destination unknown")]
+    DestinationUnknown,
+
     #[error("No route to destination")]
     NoRoute,
 
@@ -20,14 +23,17 @@ pub enum RoutingError {
     #[error("Invalid signature")]
     InvalidSignature,
 
-    #[error("Invalid timestamp (drift: {drift_ms}ms)")]
-    InvalidTimestamp { drift_ms: i64 },
+    #[error("Invalid timestamp")]
+    InvalidTimestamp,
 
-    #[error("Rate limit exceeded")]
-    RateLimitExceeded,
+    #[error("Rate limit exceeded: {0}")]
+    RateLimitExceeded(String),
 
     #[error("Global rate limit exceeded")]
     GlobalRateLimitExceeded,
+
+    #[error("Queue full: {0}")]
+    QueueFull(String),
 
     #[error("Cache full")]
     CacheFull,
