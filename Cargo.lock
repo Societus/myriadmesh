@@ -413,7 +413,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "myriadmesh-crypto",
+ "myriadmesh-dht",
+ "myriadmesh-i2p",
+ "myriadmesh-network",
  "myriadmesh-protocol",
+ "myriadmesh-routing",
  "serde",
  "thiserror",
  "tokio",
