@@ -4,6 +4,7 @@ This directory contains detailed design documents for each phase of the MyriadMe
 
 ## Phase 2: Core Protocol
 
+**Version**: 2.0 (Updated with Comprehensive Privacy Protections)
 **Status**: Ready for Review
 
 ### Documents
@@ -13,7 +14,13 @@ This directory contains detailed design documents for each phase of the MyriadMe
    - Open questions that need your input
    - 5-minute read
 
-2. **[Detailed Design](./phase2-detailed-design.md)**
+2. **[Privacy Protections](./phase2-privacy-protections.md)** 🔒 **IMPORTANT**
+   - Comprehensive privacy strategy (8 layers)
+   - Network-adaptive privacy with user transparency
+   - Protection against malicious relay surveillance
+   - 15-minute read
+
+3. **[Detailed Design](./phase2-detailed-design.md)**
    - Complete technical specification
    - Architecture diagrams
    - Code examples
@@ -27,6 +34,7 @@ This directory contains detailed design documents for each phase of the MyriadMe
 - ✅ **Reputation-based** Sybil resistance
 - ✅ **Availability-first** protocol with security-first principles for designated sensitive traffic
 - ✅ **Strict resource limits** to prevent DoS
+- ✅ **NEW: Comprehensive privacy protections** (8 layers, network-adaptive)
 
 ### Your Input Needed
 
@@ -40,13 +48,15 @@ Please review the executive summary and provide feedback on:
 
 ### Timeline
 
-**Estimated**: 12 weeks (3 months)
+**Estimated**: 14 weeks (~3.5 months)
 - Weeks 1-2: DHT Implementation
 - Weeks 3-4: Message Router
 - Weeks 5-6: Network Abstraction Layer
 - Weeks 7-8: Ethernet Adapter
-- Weeks 9-10: Integration & Testing
-- Weeks 11-12: Security Review & Hardening
+- **Week 9: Privacy Layer Integration** (NEW)
+- **Week 10: Onion Routing** (NEW)
+- Weeks 11-12: Integration & Testing (expanded scope)
+- Weeks 13-14: Security Review & Hardening (expanded scope)
 
 ---
 

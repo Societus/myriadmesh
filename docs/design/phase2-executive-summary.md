@@ -1,7 +1,9 @@
 # Phase 2 Design - Executive Summary
 
+**Version**: 2.0 (Updated with Comprehensive Privacy Protections)
 **Status**: Ready for Review
 **Full Design**: [phase2-detailed-design.md](./phase2-detailed-design.md)
+**Privacy Details**: [phase2-privacy-protections.md](./phase2-privacy-protections.md)
 
 ## Key Design Decisions
 
@@ -92,6 +94,89 @@ Message Structure:
 - Content tagging for bandwidth optimization
 - Relay filtering policies (as relay operator)
 - Anonymous routing (via i2p, Phase 4)
+
+### 6. ✅ **NEW**: Comprehensive Privacy Protections
+
+**Decision**: Implement layered defense-in-depth privacy protections that adapt to network constraints
+
+**Key Innovation**: Network-adaptive privacy with user transparency
+
+**Privacy Layers** (see [detailed privacy document](./phase2-privacy-protections.md)):
+
+1. **Route Randomization** (Always On, Free)
+   - Select from top 5 relays instead of always "best"
+   - Limits surveillance to 1/5 of traffic per relay
+
+2. **Relay Rotation** (Always On, Free)
+   - Change relays every hour or 100 messages
+   - Prevents long-term surveillance
+
+3. **Iterative DHT Lookup Privacy** (Optional)
+   - Don't reveal who you're looking up
+   - Start from random nodes, use blinded targets
+
+4. **Network-Adaptive Message Padding** (Always On, Intelligent)
+   - Ethernet/Cellular: 30% overhead, buckets [512, 2K, 8K, 32K, 128K]
+   - LoRaWAN: 10% overhead, buckets [51, 115, 222] - **NOTIFY USER** if exceeds
+   - Dial-up/APRS: Disabled - **NOTIFY USER**
+   - User gets explicit notification when padding reduced/disabled
+
+5. **Context-Aware Timing Obfuscation** (Optional)
+   - Only for single-recipient messages (not groups/broadcasts)
+   - Random 0-500ms delay
+   - Prevents request/response correlation
+
+6. **Lightweight Onion Routing** (SENSITIVE messages, Can Opt-Out)
+   - 3-hop onion routing for SENSITIVE flag
+   - Sender can disable with `NO_ONION_ROUTING` flag
+   - **Both sender and recipient notified** when disabled
+   - Each relay only knows prev/next hop
+
+7. **HVT-Based Adaptive Decoy Traffic** (Off by Default, Opt-In)
+   - Network-aware rates:
+     - Ethernet: 60/hour
+     - LoRaWAN: 1/hour (duty cycle!)
+     - APRS: 1 per 10 hours (shared spectrum)
+   - Only for designated High-Value Targets
+   - Prevents traffic analysis
+
+8. **Full i2p Integration** (Phase 4, Multiple Modes)
+   - Application-level: Apps choose i2p routing
+   - Relay mode: Share bandwidth to help i2p network
+   - Exit mode: Allow i2p → clearnet (legal considerations)
+
+**Critical Features**:
+- ✅ **User Transparency**: Explicit notifications when privacy reduced
+- ✅ **Network-Aware**: Adapts to LoRa/Dial-up constraints
+- ✅ **Availability-First**: Privacy degrades gracefully, not availability
+- ✅ **User Control**: Sender can opt-out with full disclosure
+
+**Example**: LoRaWAN Privacy
+```
+User sends 200-byte message on LoRa:
+1. Padding would bump to 222 bytes (10% overhead) ✅
+2. If padding exceeds duty cycle budget:
+   → User notified: "Padding exceeds LoRa spectrum budget"
+   → Options:
+     - Reduce to minimum priority (send later)
+     - Resend without padding (privacy loss warning)
+     - Queue for better adapter (Ethernet/Cellular)
+```
+
+**Privacy vs Performance Matrix**:
+
+| Feature | Bandwidth | Latency | Privacy Gain | Default |
+|---------|-----------|---------|--------------|---------|
+| Route Randomization | 0% | 0-5% | Medium | ✅ ON |
+| Relay Rotation | 0% | 0% | Medium | ✅ ON |
+| DHT Lookup Privacy | 0% | 50-100% | Low | ⚠️ OFF |
+| Message Padding | 0-30% | 0% | High | ✅ ON |
+| Timing Obfuscation | 0% | 10-20% | Low-Med | ⚠️ OFF |
+| Onion Routing (3-hop) | 200-300% | 200-300% | Very High | ✅ SENSITIVE |
+| Decoy Traffic | User-defined | 0% | High | ⚠️ OFF |
+| i2p Integration | ~100% | 1000-5000% | Maximum | ⏸️ Phase 4 |
+
+**Timeline Impact**: +2 weeks (14 weeks total)
 
 ---
 
@@ -241,14 +326,26 @@ ANONYMOUS         (0x10) - Route via i2p (Phase 4)
 
 ## Timeline
 
-**Total**: 12 weeks (3 months)
+**Total**: 14 weeks (~3.5 months)
 
 - Week 1-2: DHT Implementation
 - Week 3-4: Message Router
 - Week 5-6: Network Abstraction
 - Week 7-8: Ethernet Adapter
-- Week 9-10: Integration & Testing
-- Week 11-12: Security Review & Hardening
+- **Week 9: Privacy Layer Integration** (NEW)
+  - Adaptive padding system
+  - Route randomization/rotation
+  - Privacy notification system
+- **Week 10: Onion Routing** (NEW)
+  - 3-hop onion routing implementation
+  - Sender opt-out mechanism
+  - Recipient notifications
+- Week 11-12: Integration & Testing (expanded scope)
+  - Privacy protection testing
+  - Network-adaptive behavior testing
+- Week 13-14: Security Review & Hardening (expanded scope)
+  - Privacy layer security audit
+  - Metadata leakage analysis
 
 ---
 

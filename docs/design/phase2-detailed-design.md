@@ -1,7 +1,7 @@
 # Phase 2: Core Protocol - Detailed Design Document
 
-**Version:** 1.0
-**Date:** 2025-11-11
+**Version:** 2.0 (Updated with Comprehensive Privacy Protections)
+**Date:** 2025-11-12
 **Status:** Review
 
 ## Executive Summary
@@ -14,19 +14,25 @@ This document provides the detailed design for Phase 2 of MyriadMesh, implementi
 3. ✅ **E2E encryption** with optional content tagging for relay filtering
 4. ✅ **Availability-first** with security-first principles for designated sensitive traffic
 5. ✅ **Strict resource limits** to prevent DoS attacks
+6. ✅ **NEW: Comprehensive privacy protections** (defense-in-depth, network-adaptive)
+
+**Related Documents:**
+- [Executive Summary](./phase2-executive-summary.md) - Quick overview
+- [**Privacy Protections**](./phase2-privacy-protections.md) - **Comprehensive privacy strategy** ⭐ **READ THIS**
 
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
 2. [Security Model](#security-model)
-3. [DHT Implementation](#dht-implementation)
-4. [Message Router](#message-router)
-5. [Network Abstraction Layer](#network-abstraction-layer)
-6. [Ethernet Adapter](#ethernet-adapter)
-7. [Resource Limits](#resource-limits)
-8. [Testing Strategy](#testing-strategy)
-9. [Migration Path](#migration-path)
-10. [Open Questions](#open-questions)
+3. [**Privacy Protections**](#privacy-protections) ⭐ **NEW** - See [detailed document](./phase2-privacy-protections.md)
+4. [DHT Implementation](#dht-implementation)
+5. [Message Router](#message-router)
+6. [Network Abstraction Layer](#network-abstraction-layer)
+7. [Ethernet Adapter](#ethernet-adapter)
+8. [Resource Limits](#resource-limits)
+9. [Testing Strategy](#testing-strategy)
+10. [Migration Path](#migration-path)
+11. [Open Questions](#open-questions)
 
 ---
 
@@ -368,6 +374,113 @@ if contains_private_keys(data) || is_personal_health_info(data) {
     msg.content_tags = infer_tags(data);  // Optional
 }
 ```
+
+---
+
+## Privacy Protections
+
+**🔒 Comprehensive Privacy Strategy**
+
+MyriadMesh implements layered defense-in-depth privacy protections against malicious relay surveillance and metadata harvesting.
+
+**Key Innovation**: **Network-adaptive privacy with user transparency**
+
+### Threat: Malicious "Honest But Curious" Relays
+
+The reputation system prevents *active* attacks (message dropping), but doesn't protect against *passive* surveillance by relays with high reputation that harvest metadata without dropping messages.
+
+**What Malicious Relays Can See**:
+- Source and destination node IDs
+- Message timestamps and sizes
+- Content tags (if used)
+- Traffic patterns (who talks to whom, when, how often)
+
+### Defense-in-Depth Protections
+
+This design implements **8 layers of privacy protection**, detailed in the comprehensive [Privacy Protections Document](./phase2-privacy-protections.md).
+
+**Quick Summary**:
+
+1. **Route Randomization** (Always On, Free)
+   - Select from top 5 relays instead of always "best"
+   - Limits surveillance to 1/5 of traffic per relay
+
+2. **Relay Rotation** (Always On, Free)
+   - Change relays every hour or 100 messages
+   - Prevents long-term surveillance
+
+3. **Iterative DHT Lookup Privacy** (Optional)
+   - Don't reveal who you're looking up
+   - Start from random nodes, use blinded targets
+
+4. **Network-Adaptive Message Padding** (Always On, Intelligent) ⭐
+   - Ethernet/Cellular: 30% overhead
+   - LoRaWAN: 10% overhead (spectrum-constrained)
+   - **Notify user** when padding reduced/disabled
+   - Prevents message size correlation
+
+5. **Context-Aware Timing Obfuscation** (Optional)
+   - Only for single-recipient messages (not groups)
+   - Random 0-500ms delay
+   - Prevents timing correlation
+
+6. **Lightweight Onion Routing** (SENSITIVE messages, Can Opt-Out) ⭐
+   - 3-hop onion routing for SENSITIVE flag
+   - Sender can disable with `NO_ONION_ROUTING` flag
+   - **Notify both sender and recipient** when disabled
+   - Each relay only knows prev/next hop
+
+7. **HVT-Based Adaptive Decoy Traffic** (Off by Default, Opt-In)
+   - Network-aware rates (1/hour on LoRa, 60/hour on Ethernet)
+   - Only for designated High-Value Targets
+   - Prevents traffic analysis
+
+8. **Full i2p Integration** (Phase 4, Multiple Modes)
+   - Application-level, relay, or exit node modes
+   - Maximum anonymity
+
+### Privacy vs Performance Trade-Offs
+
+| Feature | Bandwidth | Latency | Privacy Gain | Default |
+|---------|-----------|---------|--------------|---------|
+| Route Randomization | 0% | 0-5% | Medium | ✅ ON |
+| Relay Rotation | 0% | 0% | Medium | ✅ ON |
+| Message Padding | 0-30% | 0% | High | ✅ ON |
+| Onion Routing (3-hop) | 200-300% | 200-300% | Very High | ✅ SENSITIVE |
+
+### User Transparency
+
+Applications receive **explicit notifications** when privacy is reduced:
+
+```rust
+pub enum PrivacyNotification {
+    PaddingExceedsBudget {
+        adapter: AdapterType,
+        options: PaddingOptions,  // User chooses action
+    },
+    OnionRoutingDisabled {
+        reason: String,
+    },
+    // ... more notifications
+}
+```
+
+**Example**: User sends message on LoRaWAN
+1. Padding would exceed spectrum budget
+2. User notified with options:
+   - Reduce to minimum priority (send later)
+   - Resend without padding (**privacy loss warning**)
+   - Queue for better adapter (Ethernet when available)
+
+### Implementation Details
+
+See the comprehensive [Privacy Protections Document](./phase2-privacy-protections.md) for:
+- Complete implementation specifications
+- Configuration examples
+- Code samples for all 8 layers
+- Privacy notification system
+- HVT decoy traffic system
+- i2p integration modes
 
 ---
 
