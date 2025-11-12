@@ -3,11 +3,10 @@
 //! This adapter provides connectivity through Bluetooth Classic (BR/EDR) for
 //! short-range device-to-device communication. Typical range: 10-100 meters.
 
-use crate::adapter::{AdapterStatus, NetworkAdapter};
+use crate::adapter::{AdapterStatus, NetworkAdapter, PeerInfo, TestResults};
 use crate::error::{NetworkError, Result};
-use crate::metrics::AdapterMetrics;
 use crate::types::{AdapterCapabilities, Address, PowerConsumption};
-use myriadmesh_protocol::{AdapterType, Frame};
+use myriadmesh_protocol::{types::AdapterType, Frame, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -53,7 +52,7 @@ struct BluetoothPeer {
 pub struct BluetoothAdapter {
     config: BluetoothConfig,
     status: Arc<RwLock<AdapterStatus>>,
-    metrics: Arc<RwLock<AdapterMetrics>>,
+    capabilities: AdapterCapabilities,
     peers: Arc<RwLock<HashMap<String, BluetoothPeer>>>,
     local_address: Option<String>,
 }
@@ -61,10 +60,23 @@ pub struct BluetoothAdapter {
 impl BluetoothAdapter {
     /// Create a new Bluetooth Classic adapter
     pub fn new(config: BluetoothConfig) -> Self {
+        let capabilities = AdapterCapabilities {
+            adapter_type: AdapterType::Bluetooth,
+            max_message_size: 1024 * 64, // 64 KB typical for Bluetooth Classic
+            typical_latency_ms: 50.0,
+            typical_bandwidth_bps: 3_000_000, // ~3 Mbps for Bluetooth 2.0+EDR
+            reliability: 0.95, // Generally reliable within range
+            range_meters: 100.0, // Class 1 Bluetooth can reach 100m
+            power_consumption: PowerConsumption::Low,
+            cost_per_mb: 0.0, // No data cost
+            supports_broadcast: false,
+            supports_multicast: false,
+        };
+
         Self {
             config,
-            status: Arc::new(RwLock::new(AdapterStatus::Inactive)),
-            metrics: Arc::new(RwLock::new(AdapterMetrics::default())),
+            status: Arc::new(RwLock::new(AdapterStatus::Uninitialized)),
+            capabilities,
             peers: Arc::new(RwLock::new(HashMap::new())),
             local_address: None,
         }
@@ -80,7 +92,7 @@ impl BluetoothAdapter {
     }
 
     /// Pair with a Bluetooth device
-    async fn pair_device(&self, address: &str) -> Result<()> {
+    async fn _pair_device(&self, address: &str) -> Result<()> {
         // TODO: Implement Bluetooth pairing
         // This involves:
         // 1. Initiating pairing request
@@ -96,7 +108,7 @@ impl BluetoothAdapter {
     }
 
     /// Create RFCOMM connection to peer
-    async fn connect_rfcomm(&self, _address: &str) -> Result<()> {
+    async fn _connect_rfcomm(&self, _address: &str) -> Result<()> {
         // TODO: Implement RFCOMM socket connection
         // This creates a reliable byte stream over Bluetooth
 
@@ -129,11 +141,24 @@ impl NetworkAdapter for BluetoothAdapter {
         // Register SDP service
         self.register_sdp_service().await?;
 
-        *self.status.write().await = AdapterStatus::Active;
+        *self.status.write().await = AdapterStatus::Ready;
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<()> {
+    async fn start(&mut self) -> Result<()> {
+        let status = self.status.read().await;
+        if *status != AdapterStatus::Ready {
+            return Err(NetworkError::AdapterNotReady);
+        }
+
+        // TODO: Start accepting connections
+        // 1. Start listening for RFCOMM connections
+        // 2. Start advertising if configured
+
+        Ok(())
+    }
+
+    async fn stop(&mut self) -> Result<()> {
         *self.status.write().await = AdapterStatus::ShuttingDown;
 
         // TODO: Cleanup Bluetooth resources
@@ -141,20 +166,20 @@ impl NetworkAdapter for BluetoothAdapter {
         // 2. Unregister SDP service
         // 3. Make device non-discoverable
 
-        *self.status.write().await = AdapterStatus::Inactive;
+        *self.status.write().await = AdapterStatus::Uninitialized;
         Ok(())
     }
 
     async fn send(&self, destination: &Address, frame: &Frame) -> Result<()> {
         let status = self.status.read().await;
-        if *status != AdapterStatus::Active {
+        if *status != AdapterStatus::Ready {
             return Err(NetworkError::AdapterNotReady);
         }
 
         // Extract Bluetooth address from destination
-        let bt_address = match destination {
+        let _bt_address = match destination {
             Address::Bluetooth(addr) => addr,
-            _ => return Err(NetworkError::InvalidAddress),
+            _ => return Err(NetworkError::InvalidAddress("Expected Bluetooth address".to_string())),
         };
 
         // TODO: Send frame over RFCOMM connection
@@ -163,22 +188,17 @@ impl NetworkAdapter for BluetoothAdapter {
         // 3. Send over RFCOMM socket
         // 4. Handle transmission errors and retries
 
-        // Update metrics
-        let mut metrics = self.metrics.write().await;
-        metrics.bytes_sent += frame.payload.len() as u64;
-        metrics.messages_sent += 1;
-
         Ok(())
     }
 
-    async fn receive(&self) -> Result<(Address, Frame)> {
+    async fn receive(&self, _timeout_ms: u64) -> Result<(Address, Frame)> {
         let status = self.status.read().await;
-        if *status != AdapterStatus::Active {
+        if *status != AdapterStatus::Ready {
             return Err(NetworkError::AdapterNotReady);
         }
 
         // TODO: Receive frame from any connected peer
-        // 1. Listen on RFCOMM sockets
+        // 1. Listen on RFCOMM sockets with timeout
         // 2. Deserialize incoming bytes to Frame
         // 3. Return source address and frame
 
@@ -186,59 +206,9 @@ impl NetworkAdapter for BluetoothAdapter {
         Err(NetworkError::Timeout)
     }
 
-    async fn test_connection(&self, destination: &Address) -> Result<u64> {
+    async fn discover_peers(&self) -> Result<Vec<PeerInfo>> {
         let status = self.status.read().await;
-        if *status != AdapterStatus::Active {
-            return Err(NetworkError::AdapterNotReady);
-        }
-
-        let bt_address = match destination {
-            Address::Bluetooth(addr) => addr,
-            _ => return Err(NetworkError::InvalidAddress),
-        };
-
-        // TODO: Implement connection test
-        // 1. Send test packet
-        // 2. Measure round-trip time
-        // 3. Return latency in milliseconds
-
-        // Placeholder: Return simulated latency
-        Ok(50) // ~50ms typical for Bluetooth
-    }
-
-    fn adapter_type(&self) -> AdapterType {
-        AdapterType::Bluetooth
-    }
-
-    fn capabilities(&self) -> AdapterCapabilities {
-        AdapterCapabilities {
-            max_message_size: 1024 * 64, // 64 KB typical for Bluetooth Classic
-            typical_latency_ms: 50.0,
-            reliability: 0.95, // Generally reliable within range
-            range_meters: 100.0, // Class 1 Bluetooth can reach 100m
-            cost_per_mb: 0.0, // No data cost
-            typical_bandwidth_bps: 3_000_000, // ~3 Mbps for Bluetooth 2.0+EDR
-            power_consumption: PowerConsumption::Low,
-        }
-    }
-
-    async fn status(&self) -> AdapterStatus {
-        *self.status.read().await
-    }
-
-    async fn get_local_address(&self) -> Option<Address> {
-        self.local_address
-            .as_ref()
-            .map(|addr| Address::Bluetooth(addr.clone()))
-    }
-
-    async fn metrics(&self) -> AdapterMetrics {
-        self.metrics.read().await.clone()
-    }
-
-    async fn discover_peers(&self) -> Result<Vec<Address>> {
-        let status = self.status.read().await;
-        if *status != AdapterStatus::Active {
+        if *status != AdapterStatus::Ready {
             return Err(NetworkError::AdapterNotReady);
         }
 
@@ -256,12 +226,74 @@ impl NetworkAdapter for BluetoothAdapter {
             peers.insert(peer.address.clone(), peer);
         }
 
-        // Return list of discovered addresses
+        // Convert to PeerInfo (placeholder NodeIds)
         Ok(peers
             .values()
             .filter(|p| now - p.last_seen < 300) // Only peers seen in last 5 minutes
-            .map(|p| Address::Bluetooth(p.address.clone()))
+            .map(|p| PeerInfo {
+                node_id: NodeId::from_bytes([0u8; 32]), // TODO: Get actual node ID
+                address: Address::Bluetooth(p.address.clone()),
+            })
             .collect())
+    }
+
+    fn get_status(&self) -> AdapterStatus {
+        // Use blocking read for sync method
+        futures::executor::block_on(self.status.read()).clone()
+    }
+
+    fn get_capabilities(&self) -> &AdapterCapabilities {
+        &self.capabilities
+    }
+
+    async fn test_connection(&self, destination: &Address) -> Result<TestResults> {
+        let status = self.status.read().await;
+        if *status != AdapterStatus::Ready {
+            return Err(NetworkError::AdapterNotReady);
+        }
+
+        let _bt_address = match destination {
+            Address::Bluetooth(addr) => addr,
+            _ => return Err(NetworkError::InvalidAddress("Expected Bluetooth address".to_string())),
+        };
+
+        // TODO: Implement connection test
+        // 1. Send test packet
+        // 2. Measure round-trip time
+        // 3. Return result
+
+        // Placeholder: Return simulated result
+        Ok(TestResults {
+            success: true,
+            rtt_ms: Some(50.0), // ~50ms typical for Bluetooth
+            error: None,
+        })
+    }
+
+    fn get_local_address(&self) -> Option<Address> {
+        self.local_address
+            .as_ref()
+            .map(|addr| Address::Bluetooth(addr.clone()))
+    }
+
+    fn parse_address(&self, addr_str: &str) -> Result<Address> {
+        // Validate Bluetooth MAC address format (XX:XX:XX:XX:XX:XX)
+        let parts: Vec<&str> = addr_str.split(':').collect();
+        if parts.len() != 6 {
+            return Err(NetworkError::InvalidAddress("Bluetooth address must be in format XX:XX:XX:XX:XX:XX".to_string()));
+        }
+
+        for part in &parts {
+            if part.len() != 2 || !part.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err(NetworkError::InvalidAddress("Bluetooth address must contain hex digits only".to_string()));
+            }
+        }
+
+        Ok(Address::Bluetooth(addr_str.to_uppercase()))
+    }
+
+    fn supports_address(&self, address: &Address) -> bool {
+        matches!(address, Address::Bluetooth(_))
     }
 }
 
@@ -274,18 +306,18 @@ mod tests {
         let config = BluetoothConfig::default();
         let adapter = BluetoothAdapter::new(config);
 
-        assert_eq!(adapter.adapter_type(), AdapterType::Bluetooth);
-        assert_eq!(adapter.status().await, AdapterStatus::Inactive);
+        assert_eq!(adapter.get_capabilities().adapter_type, AdapterType::Bluetooth);
+        assert_eq!(adapter.get_status(), AdapterStatus::Uninitialized);
     }
 
     #[tokio::test]
     async fn test_bluetooth_capabilities() {
         let config = BluetoothConfig::default();
         let adapter = BluetoothAdapter::new(config);
-        let caps = adapter.capabilities();
+        let caps = adapter.get_capabilities();
 
         assert_eq!(caps.max_message_size, 1024 * 64);
-        assert_eq!(caps.typical_latency_ms, 50);
+        assert_eq!(caps.typical_latency_ms, 50.0);
     }
 
     #[test]
@@ -294,5 +326,29 @@ mod tests {
         assert_eq!(config.device_name, "MyriadMesh-Node");
         assert!(config.discoverable);
         assert_eq!(config.rfcomm_channel, 1);
+    }
+
+    #[test]
+    fn test_parse_address() {
+        let config = BluetoothConfig::default();
+        let adapter = BluetoothAdapter::new(config);
+
+        // Valid address
+        let addr = adapter.parse_address("00:11:22:33:44:55").unwrap();
+        assert_eq!(addr, Address::Bluetooth("00:11:22:33:44:55".to_string()));
+
+        // Invalid addresses
+        assert!(adapter.parse_address("invalid").is_err());
+        assert!(adapter.parse_address("00:11:22:33:44").is_err());
+        assert!(adapter.parse_address("XX:11:22:33:44:55").is_err());
+    }
+
+    #[test]
+    fn test_supports_address() {
+        let config = BluetoothConfig::default();
+        let adapter = BluetoothAdapter::new(config);
+
+        assert!(adapter.supports_address(&Address::Bluetooth("00:11:22:33:44:55".to_string())));
+        assert!(!adapter.supports_address(&Address::Ethernet("192.168.1.1".to_string())));
     }
 }

@@ -32,6 +32,15 @@ pub enum NetworkError {
     #[error("Invalid address: {0}")]
     InvalidAddress(String),
 
+    #[error("Adapter not ready")]
+    AdapterNotReady,
+
+    #[error("Operation timed out")]
+    Timeout,
+
+    #[error("Data quota exceeded")]
+    QuotaExceeded,
+
     #[error("Discovery failed: {0}")]
     DiscoveryFailed(String),
 
