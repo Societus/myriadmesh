@@ -1,0 +1,29 @@
+[package]
+name = "myriadmesh-dht"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Internal dependencies
+myriadmesh-protocol = { path = "../myriadmesh-protocol" }
+myriadmesh-crypto = { path = "../myriadmesh-crypto" }
+
+# Workspace dependencies
+serde = { workspace = true }
+bincode = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+blake2 = { workspace = true }
+rand = { workspace = true }
+dashmap = { workspace = true }
+lru = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+criterion = { workspace = true }
