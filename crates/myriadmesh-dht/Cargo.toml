@@ -22,7 +22,7 @@ blake2 = { workspace = true }
 rand = { workspace = true }
 dashmap = { workspace = true }
 lru = { workspace = true }
-chrono = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
