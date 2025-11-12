@@ -9,6 +9,7 @@ mod api;
 mod node;
 mod storage;
 mod monitor;
+mod scoring;
 
 use config::Config;
 use node::Node;

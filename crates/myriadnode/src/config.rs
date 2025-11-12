@@ -58,6 +58,7 @@ pub struct NetworkConfig {
     pub adapters: AdapterConfigs,
     pub monitoring: MonitoringConfig,
     pub failover: FailoverConfig,
+    pub scoring: ScoringConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +89,21 @@ pub struct FailoverConfig {
     pub latency_threshold_multiplier: f32,
     pub loss_threshold: f32,
     pub retry_attempts: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScoringConfig {
+    pub mode: String, // "default", "battery", "performance", "reliability"
+    pub weight_latency: f64,
+    pub weight_bandwidth: f64,
+    pub weight_reliability: f64,
+    pub weight_power: f64,
+    #[serde(default = "default_recalculation_interval")]
+    pub recalculation_interval_secs: u64,
+}
+
+fn default_recalculation_interval() -> u64 {
+    60 // Recalculate scores every minute
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,6 +237,14 @@ impl Config {
                     latency_threshold_multiplier: 5.0,
                     loss_threshold: 0.25,
                     retry_attempts: 3,
+                },
+                scoring: ScoringConfig {
+                    mode: "default".to_string(),
+                    weight_latency: 0.30,
+                    weight_bandwidth: 0.25,
+                    weight_reliability: 0.35,
+                    weight_power: 0.10,
+                    recalculation_interval_secs: 60,
                 },
             },
             security: SecurityConfig {
