@@ -120,6 +120,42 @@ impl AdapterManager {
 
     /// Select best adapter for sending a frame
     pub fn select_best_adapter(&self, frame: &Frame, priority: u8) -> Option<AdapterId> {
+        self.select_best_adapter_internal(frame, priority, None)
+    }
+
+    /// Select best adapter for a specific destination address
+    pub async fn select_adapter_for_destination(
+        &self,
+        destination: &crate::types::Address,
+        frame: &Frame,
+        priority: u8,
+    ) -> Option<AdapterId> {
+        // First filter adapters that support this address type
+        let mut candidates = Vec::new();
+
+        for (id, adapter) in &self.adapters {
+            let adapter = adapter.read().await;
+            if adapter.supports_address(destination) {
+                candidates.push(id.clone());
+            }
+        }
+
+        // If no adapters support this address type, fall back to any adapter
+        if candidates.is_empty() {
+            return self.select_best_adapter(frame, priority);
+        }
+
+        // Select best from candidates
+        self.select_best_adapter_internal(frame, priority, Some(&candidates))
+    }
+
+    /// Internal adapter selection with optional candidate filter
+    fn select_best_adapter_internal(
+        &self,
+        frame: &Frame,
+        priority: u8,
+        candidates: Option<&[AdapterId]>,
+    ) -> Option<AdapterId> {
         if self.adapters.is_empty() {
             return None;
         }
@@ -127,7 +163,12 @@ impl AdapterManager {
         let mut best_adapter = None;
         let mut best_score = f64::MIN;
 
-        for id in self.adapters.keys() {
+        let iter: Box<dyn Iterator<Item = &String>> = match candidates {
+            Some(ids) => Box::new(ids.iter()),
+            None => Box::new(self.adapters.keys()),
+        };
+
+        for id in iter {
             if let Some(caps) = self.capabilities.get(id) {
                 // Check if adapter can handle message size
                 if frame.size() > caps.max_message_size {
