@@ -186,9 +186,9 @@ impl MessageRouter {
         self.dedup_cache.write().await.mark_seen(message_id);
 
         // Check timestamp (±5 minutes)
-        let now_ms = (now() * 1000) as i64;
+        let now_secs = now() as i64;
         let msg_timestamp = message.timestamp as i64;
-        if (now_ms - msg_timestamp).abs() > 5 * 60 * 1000 {
+        if (now_secs - msg_timestamp).abs() > 5 * 60 {
             self.stats.write().await.invalid_timestamps += 1;
             return Err(RoutingError::InvalidTimestamp);
         }
@@ -400,7 +400,7 @@ mod tests {
     use super::*;
     use myriadmesh_crypto::identity::NodeIdentity;
     use myriadmesh_dht::DhtConfig;
-    use myriadmesh_protocol::types::Priority;
+    use myriadmesh_protocol::MessageType;
 
     fn create_test_identity() -> NodeIdentity {
         myriadmesh_crypto::init().unwrap();
@@ -450,7 +450,11 @@ mod tests {
         let message = create_test_message(NodeId::from_bytes([1u8; 32]), node_id);
 
         // First receive should succeed
-        assert!(router.handle_incoming(message.clone()).await.is_ok());
+        let result = router.handle_incoming(message.clone()).await;
+        if let Err(e) = &result {
+            panic!("First handle_incoming failed with error: {:?}", e);
+        }
+        assert!(result.is_ok());
 
         // Second receive should be rejected (replay)
         assert!(matches!(

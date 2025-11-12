@@ -264,20 +264,28 @@ impl DhtManager {
         let _signature = sign_message(&self.identity, &data_to_sign)
             .map_err(|e| DhtError::Other(format!("Signing failed: {}", e)))?;
 
-        // Find k closest nodes
-        let target = NodeId::from_bytes(key);
-        let closest = self.lookup_node(target).await?;
-
-        if closest.is_empty() {
-            return Err(DhtError::NoKnownNodes);
-        }
-
         // Store locally first
         let local_node_id = self.local_node_id().await;
         self.storage
             .write()
             .await
             .store(key, value.clone(), ttl as u64, Some(*local_node_id.as_bytes()))?;
+
+        // Find k closest nodes for replication
+        let target = NodeId::from_bytes(key);
+        let closest = match self.lookup_node(target).await {
+            Ok(nodes) => nodes,
+            Err(DhtError::NoKnownNodes) => {
+                // No known nodes, but we stored locally so that's fine
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
+
+        if closest.is_empty() {
+            // No nodes to replicate to, but local storage succeeded
+            return Ok(());
+        }
 
         // Send STORE requests to k closest nodes (placeholder)
         let mut success_count = 0;
