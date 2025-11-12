@@ -93,11 +93,12 @@ pub struct FailoverConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoringConfig {
-    pub mode: String, // "default", "battery", "performance", "reliability"
+    pub mode: String, // "default", "battery", "performance", "reliability", "privacy"
     pub weight_latency: f64,
     pub weight_bandwidth: f64,
     pub weight_reliability: f64,
     pub weight_power: f64,
+    pub weight_privacy: f64,
     #[serde(default = "default_recalculation_interval")]
     pub recalculation_interval_secs: u64,
 }
@@ -240,10 +241,11 @@ impl Config {
                 },
                 scoring: ScoringConfig {
                     mode: "default".to_string(),
-                    weight_latency: 0.30,
-                    weight_bandwidth: 0.25,
-                    weight_reliability: 0.35,
+                    weight_latency: 0.25,
+                    weight_bandwidth: 0.20,
+                    weight_reliability: 0.30,
                     weight_power: 0.10,
+                    weight_privacy: 0.15,
                     recalculation_interval_secs: 60,
                 },
             },
