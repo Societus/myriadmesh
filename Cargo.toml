@@ -3,6 +3,10 @@ members = [
     "crates/myriadmesh-core",
     "crates/myriadmesh-crypto",
     "crates/myriadmesh-protocol",
+    "crates/myriadmesh-dht",
+    "crates/myriadmesh-routing",
+    "crates/myriadmesh-network",
+    "crates/myriadmesh-i2p",
 ]
 resolver = "2"
 

@@ -9,6 +9,10 @@ repository.workspace = true
 [dependencies]
 myriadmesh-crypto = { path = "../myriadmesh-crypto" }
 myriadmesh-protocol = { path = "../myriadmesh-protocol" }
+myriadmesh-dht = { path = "../myriadmesh-dht" }
+myriadmesh-routing = { path = "../myriadmesh-routing" }
+myriadmesh-network = { path = "../myriadmesh-network" }
+myriadmesh-i2p = { path = "../myriadmesh-i2p" }
 
 tokio = { workspace = true }
 serde = { workspace = true }
