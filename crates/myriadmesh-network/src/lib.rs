@@ -11,6 +11,7 @@
 pub mod adapter;
 pub mod adapters;
 pub mod error;
+pub mod i2p;
 pub mod manager;
 pub mod metrics;
 pub mod types;
@@ -18,6 +19,7 @@ pub mod types;
 pub use adapter::{AdapterStatus, NetworkAdapter};
 pub use adapters::{EthernetAdapter, EthernetConfig};
 pub use error::{NetworkError, Result};
+pub use i2p::{I2pAdapter, I2pRouterConfig};
 pub use manager::AdapterManager;
 pub use metrics::AdapterMetrics;
 pub use types::{AdapterCapabilities, Address, PowerConsumption};
