@@ -14,5 +14,6 @@ blake2 = { workspace = true }
 hex = { workspace = true }
 crc32fast = "1.4"
 bitflags = { workspace = true }
+rand = { workspace = true }
 
 [dev-dependencies]

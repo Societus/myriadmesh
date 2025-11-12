@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::{ProtocolError, Result};
+use crate::routing::{ContentTag, RoutingFlags};
 use crate::types::{NodeId, Priority};
 
 /// Size of a message ID in bytes
@@ -19,7 +20,7 @@ pub struct MessageId([u8; MESSAGE_ID_SIZE]);
 
 impl MessageId {
     /// Generate a new message ID from message contents
-    pub fn generate(
+    pub fn generate_from(
         source: &NodeId,
         destination: &NodeId,
         payload: &[u8],
@@ -40,6 +41,14 @@ impl MessageId {
         let mut id = [0u8; MESSAGE_ID_SIZE];
         id.copy_from_slice(&hash[..MESSAGE_ID_SIZE]);
 
+        MessageId(id)
+    }
+
+    /// Generate a new random message ID
+    pub fn generate() -> Self {
+        use rand::RngCore;
+        let mut id = [0u8; MESSAGE_ID_SIZE];
+        rand::thread_rng().fill_bytes(&mut id);
         MessageId(id)
     }
 
@@ -171,6 +180,12 @@ pub struct Message {
     /// Sequence number (for ordering)
     pub sequence: u32,
 
+    /// Routing flags
+    pub routing_flags: RoutingFlags,
+
+    /// Content tags for optional relay filtering
+    pub content_tags: Vec<ContentTag>,
+
     /// Message payload
     pub payload: Vec<u8>,
 }
@@ -196,7 +211,7 @@ impl Message {
             .as_secs();
 
         let sequence = 0; // Should be managed by higher layers
-        let id = MessageId::generate(&source, &destination, &payload, timestamp, sequence);
+        let id = MessageId::generate_from(&source, &destination, &payload, timestamp, sequence);
 
         Ok(Message {
             id,
@@ -207,6 +222,8 @@ impl Message {
             ttl: 32, // Default TTL
             timestamp,
             sequence,
+            routing_flags: RoutingFlags::E2E_STRICT,
+            content_tags: Vec::new(),
             payload,
         })
     }
@@ -281,14 +298,14 @@ mod tests {
         let timestamp = 1234567890;
         let sequence = 42;
 
-        let id1 = MessageId::generate(&source, &dest, payload, timestamp, sequence);
-        let id2 = MessageId::generate(&source, &dest, payload, timestamp, sequence);
+        let id1 = MessageId::generate_from(&source, &dest, payload, timestamp, sequence);
+        let id2 = MessageId::generate_from(&source, &dest, payload, timestamp, sequence);
 
         // Same inputs should produce same ID
         assert_eq!(id1, id2);
 
         // Different inputs should produce different ID
-        let id3 = MessageId::generate(&source, &dest, payload, timestamp, sequence + 1);
+        let id3 = MessageId::generate_from(&source, &dest, payload, timestamp, sequence + 1);
         assert_ne!(id1, id3);
     }
 
@@ -355,7 +372,7 @@ mod tests {
     fn test_message_id_hex() {
         let source = NodeId::from_bytes([1u8; 32]);
         let dest = NodeId::from_bytes([2u8; 32]);
-        let id = MessageId::generate(&source, &dest, b"test", 123, 0);
+        let id = MessageId::generate_from(&source, &dest, b"test", 123, 0);
 
         let hex = id.to_hex();
         let parsed = MessageId::from_hex(&hex).unwrap();

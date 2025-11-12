@@ -609,6 +609,7 @@ dependencies = [
  "blake2",
  "crc32fast",
  "hex",
+ "rand",
  "serde",
  "thiserror",
 ]
