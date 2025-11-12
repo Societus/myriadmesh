@@ -1,5 +1,6 @@
 use anyhow::Result;
-use tokio::sync::mpsc;
+use std::sync::Arc;
+use tokio::sync::{mpsc, RwLock};
 use tokio::signal;
 use tracing::{info, warn, error};
 
@@ -16,8 +17,8 @@ use myriadmesh_protocol::NodeId;
 /// Main node orchestrator
 pub struct Node {
     config: Config,
-    storage: Storage,
-    adapter_manager: AdapterManager,
+    storage: Arc<RwLock<Storage>>,
+    adapter_manager: Arc<RwLock<AdapterManager>>,
     message_queue: PriorityQueue,
     dht: RoutingTable,
     api_server: Option<ApiServer>,
@@ -31,11 +32,11 @@ impl Node {
         info!("Initializing node components...");
 
         // Initialize storage
-        let storage = Storage::new(&config.data_directory).await?;
+        let storage = Arc::new(RwLock::new(Storage::new(&config.data_directory).await?));
         info!("✓ Storage initialized");
 
         // Initialize adapter manager
-        let adapter_manager = AdapterManager::new();
+        let adapter_manager = Arc::new(RwLock::new(AdapterManager::new()));
         info!("✓ Adapter manager initialized");
 
         // Initialize message queue
@@ -50,7 +51,11 @@ impl Node {
         info!("✓ DHT routing table initialized");
 
         // Initialize network monitor
-        let monitor = NetworkMonitor::new(config.network.monitoring.clone());
+        let monitor = NetworkMonitor::new(
+            config.network.monitoring.clone(),
+            Arc::clone(&adapter_manager),
+            Arc::clone(&storage),
+        );
         info!("✓ Network monitor initialized");
 
         // Initialize API server if enabled
@@ -183,7 +188,8 @@ impl Node {
             adapter.start().await?;
         }
 
-        self.adapter_manager.register_adapter(
+        let mut manager = self.adapter_manager.write().await;
+        manager.register_adapter(
             "ethernet".to_string(),
             Box::new(adapter)
         ).await?;
@@ -201,7 +207,8 @@ impl Node {
             adapter.start().await?;
         }
 
-        self.adapter_manager.register_adapter(
+        let mut manager = self.adapter_manager.write().await;
+        manager.register_adapter(
             "bluetooth".to_string(),
             Box::new(adapter)
         ).await?;
@@ -219,7 +226,8 @@ impl Node {
             adapter.start().await?;
         }
 
-        self.adapter_manager.register_adapter(
+        let mut manager = self.adapter_manager.write().await;
+        manager.register_adapter(
             "bluetooth_le".to_string(),
             Box::new(adapter)
         ).await?;
@@ -237,7 +245,8 @@ impl Node {
             adapter.start().await?;
         }
 
-        self.adapter_manager.register_adapter(
+        let mut manager = self.adapter_manager.write().await;
+        manager.register_adapter(
             "cellular".to_string(),
             Box::new(adapter)
         ).await?;
@@ -261,8 +270,11 @@ impl Node {
         self.monitor.stop().await?;
 
         info!("Stopping network adapters...");
-        if let Err(e) = self.adapter_manager.stop_all().await {
-            error!("Failed to stop adapters: {}", e);
+        {
+            let mut manager = self.adapter_manager.write().await;
+            if let Err(e) = manager.stop_all().await {
+                error!("Failed to stop adapters: {}", e);
+            }
         }
 
         if let Some(_api_server) = &self.api_server {
@@ -271,7 +283,10 @@ impl Node {
         }
 
         info!("Closing storage...");
-        self.storage.close().await?;
+        {
+            let mut storage = self.storage.write().await;
+            storage.close().await?;
+        }
 
         info!("Shutdown complete");
         Ok(())
