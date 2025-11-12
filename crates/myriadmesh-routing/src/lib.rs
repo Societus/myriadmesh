@@ -7,13 +7,15 @@
 //! - Message deduplication
 //! - Content tag filtering (optional)
 
+pub mod deduplication;
 pub mod error;
 pub mod priority_queue;
-pub mod router;
+pub mod rate_limiter;
 
+pub use deduplication::DeduplicationCache;
 pub use error::{RoutingError, Result};
-pub use priority_queue::PriorityQueue;
-pub use router::{MessageRouter, RoutingConfig};
+pub use priority_queue::{PriorityLevel, PriorityQueue};
+pub use rate_limiter::RateLimiter;
 
 /// Maximum cached messages per destination
 pub const MAX_CACHED_MESSAGES_PER_DEST: usize = 100;
