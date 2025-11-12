@@ -508,6 +508,8 @@ impl I2pAdapter {
 
 ```yaml
 i2p:
+  # DEFAULT MODE: Mode 2 (Selective Disclosure) - Best balance of privacy and availability
+  # For relays/exit nodes, consider Mode 4 (transport) for better performance
   mode: "selective_disclosure"  # i2p_only, selective_disclosure, rendezvous, transport
 
   # Identity configuration
@@ -515,7 +517,7 @@ i2p:
     separate_i2p_identity: true  # Use different NodeID for i2p
     i2p_keypair_file: "~/.myriadmesh/i2p_identity.key"
 
-  # Capability tokens
+  # Capability tokens (Mode 2 only)
   capability_tokens:
     enabled: true
     expiry_days: 30
@@ -537,46 +539,416 @@ i2p:
 
 ## Recommendations
 
+### **DEFAULT: Mode 2 (Selective Disclosure)** - Recommended for Most Users ⭐
+
+**Best balance of privacy and usability**
+
+✅ **Use Mode 2 for:**
+- Regular users seeking privacy
+- Journalists communicating with sources
+- Privacy-conscious individuals
+- Applications requiring selective anonymity
+
+**Benefits:**
+- ✅ Separate i2p and clearnet identities
+- ✅ Capability tokens for authorized contacts
+- ✅ No public linkage in DHT
+- ✅ Can communicate with both clearnet and i2p nodes
+- ✅ Full control over who knows your i2p destination
+
+**Configuration:**
+```yaml
+i2p:
+  mode: "selective_disclosure"  # DEFAULT
+  identity:
+    separate_i2p_identity: true
+```
+
+---
+
+### Mode Selection by Node Type
+
+#### **Regular Nodes / End Users**
+**Recommended: Mode 2 (Selective Disclosure)**
+- Privacy by default
+- Selective disclosure of i2p destination
+- Best for general use
+
+#### **Relay Nodes**
+**Recommended: Mode 4 (i2p Transport) or Mode 2**
+
+Choose Mode 4 if:
+- ✅ Running high-traffic relay
+- ✅ Need maximum throughput
+- ✅ IP anonymity is sufficient
+- ⚠️ **Trade-off:** NodeID linkage is public
+
+Choose Mode 2 if:
+- ✅ Want relay privacy (separate identity)
+- ✅ Willing to accept some performance overhead
+- ✅ Want to keep i2p usage private
+
+**App UI should display:**
+```
+⚙️ Relay Node Configuration
+
+Mode Selection:
+○ Mode 2: Selective Disclosure (Private)
+  ✓ Your i2p destination stays private
+  ✓ Separate identity for i2p traffic
+  ✗ Slightly lower throughput
+
+● Mode 4: Transport (Public, High Performance)
+  ✓ Maximum relay throughput
+  ✓ Simple configuration
+  ✗ Your NodeID linked to i2p destination publicly
+  ✗ Less privacy (metadata visible)
+
+[Learn more about modes]
+```
+
+#### **Exit Nodes**
+**Recommended: Mode 4 (i2p Transport)**
+- Exit nodes are already semi-public
+- Performance is critical
+- Metadata linkage is acceptable trade-off
+
+**App UI should display:**
+```
+⚠️ Exit Node Configuration
+
+For exit nodes, Mode 4 (Transport) is recommended:
+• Maximum performance for exit traffic
+• Lower overhead for high-volume routing
+• Exit nodes are inherently less private
+
+Legal Notice: Running an exit node may expose you to legal risks.
+Consult legal counsel in your jurisdiction.
+
+[Configure Exit Node]  [Learn About Risks]
+```
+
+---
+
 ### For Maximum Anonymity:
 ✅ Use **Mode 1: i2p-Only Identity**
 - Separate identity
 - No clearnet presence
 - i2p-only DHT
 
-### For Dual Identity with Privacy:
-✅ Use **Mode 2: Selective Disclosure**
-- Separate i2p and clearnet identities
-- Capability tokens for authorized contacts
-- No public linkage in DHT
+**When to use:**
+- Whistleblowers
+- High-risk activists
+- Maximum anonymity requirement
+- No need for clearnet connectivity
+
+---
 
 ### For Easier Discovery:
 ⚠️ Use **Mode 3: Anonymous Rendezvous**
 - Encrypted pointers in DHT
 - Trade-off: weaker security for convenience
+- Only obfuscation, not true anonymity
 
-### NOT Recommended for Anonymity:
-❌ **Mode 4: i2p Transport Only**
+**When to use:**
+- Semi-public i2p availability
+- Easier discovery needed
+- Accept deterministic key weakness
+
+---
+
+### NOT Recommended for Privacy-Focused Applications:
+❌ **Mode 4: i2p Transport Only** (for regular users)
 - Use only if you need IP anonymity but not identity anonymity
 - Clearnet routing metadata still visible
+- **Acceptable for relays/exit nodes** with proper disclosure
+
+---
+
+## Application UI Guidance: Explaining Risks and Benefits
+
+Applications must clearly communicate the privacy implications and trade-offs of each i2p mode to users.
+
+### Mode Comparison Table for Users
+
+```
+╔══════════════════════════════════════════════════════════════════════════╗
+║                         i2p Mode Comparison                               ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║ Feature              │ Mode 1  │ Mode 2   │ Mode 3   │ Mode 4            ║
+║                      │ i2p Only│ Selective│ Rendezvous│ Transport        ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║ Privacy Level        │ ★★★★★   │ ★★★★☆    │ ★★★☆☆    │ ★★☆☆☆            ║
+║ Anonymity            │ Maximum │ High     │ Medium   │ Low (IP only)    ║
+║ Clearnet Access      │ No      │ Yes      │ Yes      │ Yes              ║
+║ i2p Linkage Public   │ N/A     │ No       │ Encrypted│ Yes              ║
+║ Setup Complexity     │ Medium  │ Medium   │ Low      │ Low              ║
+║ Performance          │ Good    │ Good     │ Good     │ Best             ║
+║ Recommended For      │ Activists│ Default │ Discovery│ Relays/Exits     ║
+╚══════════════════════════════════════════════════════════════════════════╝
+```
+
+### User-Facing Descriptions
+
+#### **When User Selects Mode 2 (Selective Disclosure)** - DEFAULT ✅
+
+```
+✅ Selective Disclosure Mode (Recommended)
+
+PRIVACY PROTECTION:
+• Your i2p destination is NOT publicly linked to your identity
+• You control who can reach you via i2p using capability tokens
+• Separate identities for clearnet and i2p traffic
+• No correlation between your clearnet and i2p activities
+
+HOW IT WORKS:
+• You can be reached via regular internet (clearnet)
+• You can also be reached via i2p for private communications
+• You share your i2p address only with trusted contacts
+• Like having both a public phone number and a private one
+
+BEST FOR:
+✓ Privacy-conscious users
+✓ Journalists protecting sources
+✓ Anyone who wants selective anonymity
+✓ General everyday use
+
+[Use This Mode (Recommended)]
+```
+
+#### **When User Selects Mode 1 (i2p-Only Identity)**
+
+```
+⚠️ i2p-Only Mode (Maximum Anonymity)
+
+PRIVACY PROTECTION:
+• Maximum anonymity - you only exist on i2p
+• No clearnet presence at all
+• Completely separate identity
+• Cannot be linked to any clearnet activity
+
+LIMITATIONS:
+⚠️ Cannot communicate with clearnet-only nodes
+⚠️ Only reachable via i2p network
+⚠️ More complex setup
+
+BEST FOR:
+• Whistleblowers
+• High-risk activists
+• Maximum anonymity requirements
+
+⚠️ This mode significantly limits connectivity.
+Only use if you truly need maximum anonymity.
+
+[I Understand] [Go Back]
+```
+
+#### **When User Selects Mode 3 (Anonymous Rendezvous)**
+
+```
+⚠️ Anonymous Rendezvous Mode
+
+PRIVACY PROTECTION:
+• i2p destination is encrypted in public DHT
+• Discoverable by anyone who knows your NodeID
+• Easier for contacts to find you
+
+SECURITY TRADE-OFFS:
+⚠️ Weaker security than Mode 2
+⚠️ Deterministic key derivation
+⚠️ Provides obfuscation, not true anonymity
+
+BEST FOR:
+• Semi-public i2p availability
+• When easier discovery is important
+• When you need convenience over maximum privacy
+
+Not recommended for high-security applications.
+Consider Mode 2 instead for better privacy.
+
+[Use Mode 2 Instead] [I Understand, Continue]
+```
+
+#### **When User Selects Mode 4 (i2p Transport)** - For Relays/Exits
+
+```
+⚠️ i2p Transport Mode
+
+PRIVACY TRADE-OFFS:
+⚠️ Your NodeID is publicly linked to your i2p destination
+⚠️ Metadata about your connections is visible
+⚠️ Lower privacy than other modes
+
+BENEFITS:
+✓ IP address anonymity
+✓ Best performance
+✓ Simpler configuration
+✓ Good for relay nodes
+
+BEST FOR:
+• Relay nodes (high traffic)
+• Exit nodes
+• When IP anonymity is sufficient
+
+⚠️ NOT RECOMMENDED for privacy-focused end users.
+For better privacy, use Mode 2 (Selective Disclosure).
+
+[Use Mode 2 Instead] [Continue as Relay/Exit]
+```
+
+### Implementation Guidelines for Applications
+
+```rust
+pub struct I2pModeConfig {
+    pub mode: I2pMode,
+    pub user_acknowledged_risks: bool,
+    pub show_privacy_warning: bool,
+}
+
+impl ApplicationUI {
+    /// Display mode selection dialog with risks/benefits
+    pub async fn select_i2p_mode(&self) -> Result<I2pModeConfig> {
+        // Default to Mode 2
+        let default_mode = I2pMode::SelectiveDisclosure;
+
+        // Show comparison table
+        self.display_mode_comparison_table().await;
+
+        // Get user selection
+        let selected_mode = self.show_mode_selection_dialog(default_mode).await?;
+
+        // Show appropriate warning/confirmation based on selection
+        match selected_mode {
+            I2pMode::SelectiveDisclosure => {
+                // No warning needed - this is the recommended mode
+                Ok(I2pModeConfig {
+                    mode: selected_mode,
+                    user_acknowledged_risks: true,
+                    show_privacy_warning: false,
+                })
+            }
+
+            I2pMode::I2pOnly => {
+                // Warn about connectivity limitations
+                let confirmed = self.show_warning_dialog(
+                    "Maximum Anonymity Mode",
+                    "This mode limits connectivity to i2p-only. \
+                     You will not be able to communicate with clearnet nodes. \
+                     Are you sure?",
+                ).await?;
+
+                Ok(I2pModeConfig {
+                    mode: selected_mode,
+                    user_acknowledged_risks: confirmed,
+                    show_privacy_warning: false,
+                })
+            }
+
+            I2pMode::AnonymousRendezvous => {
+                // Warn about weaker security
+                let confirmed = self.show_warning_dialog(
+                    "Weaker Security Trade-off",
+                    "This mode provides weaker security than Selective Disclosure. \
+                     We recommend using Mode 2 instead for better privacy. \
+                     Continue anyway?",
+                ).await?;
+
+                Ok(I2pModeConfig {
+                    mode: selected_mode,
+                    user_acknowledged_risks: confirmed,
+                    show_privacy_warning: true,
+                })
+            }
+
+            I2pMode::Transport => {
+                // Check if relay/exit node
+                if !self.is_relay_or_exit_node().await {
+                    // Strongly discourage for regular users
+                    let override_confirmed = self.show_warning_dialog(
+                        "Not Recommended for End Users",
+                        "This mode publicly links your NodeID to your i2p destination. \
+                         It is designed for relay and exit nodes. \
+                         \n\n\
+                         For privacy, we strongly recommend Mode 2 (Selective Disclosure). \
+                         \n\n\
+                         Continue with Transport mode anyway?",
+                    ).await?;
+
+                    if !override_confirmed {
+                        // User chose to go back - show Mode 2 instead
+                        return self.configure_mode_2().await;
+                    }
+                }
+
+                Ok(I2pModeConfig {
+                    mode: selected_mode,
+                    user_acknowledged_risks: true,
+                    show_privacy_warning: true,
+                })
+            }
+        }
+    }
+}
+```
+
+### Persistent Privacy Indicators
+
+Applications should display the current i2p mode prominently:
+
+```
+┌─────────────────────────────────────┐
+│ MyriadMesh                      [≡] │
+├─────────────────────────────────────┤
+│                                     │
+│ Privacy Status: Mode 2 🔒           │
+│ (Selective Disclosure)              │
+│                                     │
+│ • Separate i2p identity active      │
+│ • i2p destination private           │
+│ • Capability tokens: 3 active       │
+│                                     │
+│ [View Privacy Settings]             │
+└─────────────────────────────────────┘
+```
+
+For Mode 4 (if used by relay):
+```
+┌─────────────────────────────────────┐
+│ MyriadMesh Relay                [≡] │
+├─────────────────────────────────────┤
+│                                     │
+│ Privacy Status: Mode 4 ⚠️            │
+│ (Transport - Public)                │
+│                                     │
+│ ⚠️ NodeID publicly linked to i2p    │
+│ • IP anonymity: Active              │
+│ • Relay throughput: High            │
+│                                     │
+│ [View Relay Settings]               │
+└─────────────────────────────────────┘
+```
 
 ---
 
 ## Implementation Priority
 
-**Phase 2**: Basic i2p transport (Mode 4)
-- Simplest implementation
-- Provides IP anonymity
-- Foundation for other modes
-
-**Phase 3**: Selective disclosure (Mode 2)
+**Phase 2**: **Selective Disclosure (Mode 2)** - DEFAULT MODE ⭐
 - Capability token system
+- Separate identity management
 - Path verification
 - Application policies
+- **Best balance of privacy and functionality**
+- **Recommended for all regular users**
 
-**Phase 4**: Full anonymity modes (Mode 1 & 3)
-- Separate identity support
-- i2p-only nodes
-- Anonymous rendezvous
+**Phase 3**: Additional modes and optimizations
+- **Mode 4 (Transport)**: For relay/exit nodes requiring high performance
+- **Mode 3 (Rendezvous)**: For easier discovery scenarios
+- Path-specific keys and enhanced verification
+
+**Phase 4**: Maximum anonymity mode
+- **Mode 1 (i2p-Only)**: For maximum anonymity requirements
+- i2p-only nodes (no clearnet presence)
+- Enhanced anonymity protections
 
 ---
 

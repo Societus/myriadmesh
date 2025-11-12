@@ -695,24 +695,37 @@ privacy:
 **Benefit**: Maximum anonymity
 **Applies To**: Application choice or ANONYMOUS flag
 
-Multiple i2p modes:
+**DEFAULT: Mode 2 (Selective Disclosure)** - See [i2p Architecture Document](./i2p-anonymity-architecture.md)
+
+Multiple i2p integration modes:
 
 ```rust
-pub enum I2pMode {
-    /// App-level: Applications choose to use i2p
-    Application,
-
-    /// Relay: Help i2p network (share bandwidth)
-    Relay {
-        max_bandwidth_kbps: u64,
-        share_percent: f64,
+pub enum I2pIntegrationMode {
+    /// Mode 2: Selective Disclosure (DEFAULT) - Best for most users
+    /// Separate i2p identity, capability tokens, no public linkage
+    SelectiveDisclosure {
+        capability_tokens_enabled: bool,
+        separate_identity: bool,
     },
 
-    /// Exit: Allow i2p -> clearnet (legal considerations!)
-    Exit {
+    /// Mode 1: i2p-Only Identity - Maximum anonymity
+    /// No clearnet presence
+    I2pOnly {
+        i2p_dht_only: bool,
+    },
+
+    /// Mode 3: Anonymous Rendezvous - Easier discovery
+    /// Encrypted pointers in DHT (weaker security)
+    AnonymousRendezvous {
+        rendezvous_key_rotation_hours: u64,
+    },
+
+    /// Mode 4: i2p Transport - For relays/exit nodes
+    /// Public linkage, best performance
+    Transport {
+        relay_traffic: bool,
+        exit_traffic: bool,
         max_bandwidth_kbps: u64,
-        allowed_ports: Vec<u16>,
-        blocked_countries: Vec<String>,
     },
 
     /// Disabled
@@ -720,40 +733,75 @@ pub enum I2pMode {
 }
 
 pub struct I2pConfig {
-    pub mode: I2pMode,
+    /// DEFAULT: SelectiveDisclosure (Mode 2)
+    /// For relays/exits, consider Transport (Mode 4)
+    pub mode: I2pIntegrationMode,
+
     pub sam_host: String,
     pub sam_port: u16,
     pub tunnel_length: usize,        // 3 recommended
     pub tunnel_quantity: usize,      // 2 recommended
     pub tunnel_backup_quantity: usize, // 1
     pub publish_destination: bool,
+
+    /// User acknowledgment of mode risks
+    pub user_acknowledged_mode_risks: bool,
 }
 
 impl MessageRouter {
     async fn route_via_i2p(&self, msg: MessageFrame) -> Result<()> {
         // Check if i2p available
-        match self.config.i2p.mode {
-            I2pMode::Disabled => return Err(RoutingError::I2pNotAvailable),
-            _ => {}
+        match &self.config.i2p.mode {
+            I2pIntegrationMode::Disabled => {
+                return Err(RoutingError::I2pNotAvailable)
+            },
+            I2pIntegrationMode::SelectiveDisclosure { .. } => {
+                // Mode 2: Use capability tokens for private routing
+                self.route_via_capability_token(msg).await
+            }
+            I2pIntegrationMode::I2pOnly { .. } => {
+                // Mode 1: i2p-only routing
+                self.route_i2p_only(msg).await
+            }
+            I2pIntegrationMode::AnonymousRendezvous { .. } => {
+                // Mode 3: Rendezvous lookup
+                self.route_via_rendezvous(msg).await
+            }
+            I2pIntegrationMode::Transport { .. } => {
+                // Mode 4: Direct i2p transport
+                self.route_via_i2p_transport(msg).await
+            }
+        }
+    }
+
+    async fn route_via_capability_token(&self, msg: MessageFrame) -> Result<()> {
+        // Mode 2: Look up capability token
+        let token = self.get_i2p_capability_token(msg.dest_node_id)?;
+
+        // Verify token is valid
+        if token.is_expired() {
+            return Err(RoutingError::I2pTokenExpired);
         }
 
-        // Look up destination's i2p address
-        let i2p_dest = self.dht
-            .find_i2p_destination(msg.dest_node_id)
-            .await?;
-
-        // Send through i2p
-        self.i2p_client.send(i2p_dest, &msg.to_bytes()).await?;
-
+        // Send through i2p using token destination
+        self.i2p_client.send(token.i2p_destination, &msg.to_bytes()).await?;
         Ok(())
     }
 }
 ```
 
-**Configuration**:
+**Configuration** (Default: Mode 2):
 ```yaml
 i2p:
-  mode: "relay"  # application, relay, exit, disabled
+  # DEFAULT MODE 2: Selective Disclosure (recommended for most users)
+  mode:
+    type: "selective_disclosure"  # selective_disclosure, i2p_only, rendezvous, transport
+
+    # Mode 2 specific settings
+    selective_disclosure:
+      capability_tokens_enabled: true
+      separate_identity: true
+      token_expiry_days: 30
 
   sam:
     host: "127.0.0.1"
@@ -764,19 +812,30 @@ i2p:
     quantity: 2
     backup_quantity: 1
 
-  publish_destination: true
+  # For Mode 2, destination is NOT published publicly
+  # Only shared via capability tokens
+  publish_destination: false
 
-  # Relay mode config
-  relay:
-    max_bandwidth_kbps: 1024  # 1 Mbps
-    share_percent: 20.0       # Share 20% of bandwidth
+  # User must acknowledge mode selection
+  user_acknowledged_risks: false
 
-  # Exit mode config (LEGAL CONSIDERATIONS!)
-  exit:
-    max_bandwidth_kbps: 2048
-    allowed_ports: [80, 443]
-    blocked_countries: []  # Consult legal counsel
+# Alternative: Mode 4 for Relay/Exit nodes
+i2p_relay_config:
+  mode:
+    type: "transport"  # Mode 4: For high-performance relays
+
+    transport:
+      relay_traffic: true
+      exit_traffic: false  # Set true for exit nodes (legal considerations!)
+      max_bandwidth_kbps: 2048
+      allowed_ports: [80, 443]  # For exit nodes only
 ```
+
+See the [i2p Anonymity Architecture document](./i2p-anonymity-architecture.md) for:
+- Detailed mode comparisons
+- Security trade-offs
+- Application UI guidance
+- User-facing risk/benefit explanations
 
 ---
 
@@ -791,7 +850,7 @@ i2p:
 | Timing Obfuscation | ⚠️ OFF | 100-500ms latency | Single-user msgs | Context-aware |
 | Onion Routing | ✅ ON (SENSITIVE) | 2-3x resources | Sensitive msgs | Can opt-out |
 | Decoy Traffic | ⚠️ OFF | User-defined | HVTs only | Network-aware |
-| i2p Integration | ⚠️ OFF | 10x latency | Maximum anonymity | Phase 4 |
+| i2p Integration | ✅ Mode 2 (DEFAULT) | 2-5x latency | Privacy-conscious users | See i2p architecture doc |
 
 ---
 
@@ -903,10 +962,10 @@ privacy:
     hvt_targets: []
     # adapter_limits auto-configured
 
-  # i2p integration (Phase 4)
+  # i2p integration (DEFAULT: Mode 2 - Selective Disclosure)
   i2p:
-    mode: "disabled"  # application, relay, exit
-    # ... (see i2p section)
+    mode: "selective_disclosure"  # selective_disclosure (default), i2p_only, rendezvous, transport, disabled
+    # See docs/design/i2p-anonymity-architecture.md for detailed mode documentation
 ```
 
 ---
