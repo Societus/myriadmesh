@@ -63,11 +63,11 @@ impl I2pAdapter {
 
         let capabilities = AdapterCapabilities {
             adapter_type: myriadmesh_protocol::types::AdapterType::I2P,
-            max_message_size: 32768, // i2p supports large messages
-            typical_latency_ms: 5000.0, // i2p has high latency
+            max_message_size: 32768,          // i2p supports large messages
+            typical_latency_ms: 5000.0,       // i2p has high latency
             typical_bandwidth_bps: 1_024_000, // ~1 Mbps
-            reliability: 0.95, // i2p is quite reliable
-            range_meters: 0.0, // global reach
+            reliability: 0.95,                // i2p is quite reliable
+            range_meters: 0.0,                // global reach
             power_consumption: PowerConsumption::Medium,
             cost_per_mb: 0.0, // free
             supports_broadcast: false,
@@ -119,12 +119,13 @@ impl I2pAdapter {
 
         // Generate new destination
         let sam_addr = self.sam_address();
-        let mut conn = super::sam_client::SamConnection::connect(&sam_addr)
-            .map_err(|e| NetworkError::InitializationFailed(format!("SAM connect failed: {}", e)))?;
+        let mut conn = super::sam_client::SamConnection::connect(&sam_addr).map_err(|e| {
+            NetworkError::InitializationFailed(format!("SAM connect failed: {}", e))
+        })?;
 
-        let dest = conn
-            .generate_destination()
-            .map_err(|e| NetworkError::InitializationFailed(format!("Dest generation failed: {}", e)))?;
+        let dest = conn.generate_destination().map_err(|e| {
+            NetworkError::InitializationFailed(format!("Dest generation failed: {}", e))
+        })?;
 
         // Save to disk
         if let Some(parent) = self.keys_path.parent() {
@@ -197,9 +198,9 @@ impl I2pAdapter {
 
         // Need to create new connection
         let mut session = self.session.write().await;
-        let session = session.as_mut().ok_or_else(|| {
-            NetworkError::InitializationFailed("No SAM session".to_string())
-        })?;
+        let session = session
+            .as_mut()
+            .ok_or_else(|| NetworkError::InitializationFailed("No SAM session".to_string()))?;
 
         let stream = session
             .connect(destination)
@@ -243,9 +244,9 @@ impl I2pAdapter {
         // In a production system, you'd want to manage multiple connections
 
         let mut session = self.session.write().await;
-        let session = session.as_mut().ok_or_else(|| {
-            NetworkError::ReceiveFailed("No SAM session".to_string())
-        })?;
+        let session = session
+            .as_mut()
+            .ok_or_else(|| NetworkError::ReceiveFailed("No SAM session".to_string()))?;
 
         // Set timeout on accept
         let (mut stream, remote_dest) = session
@@ -269,8 +270,9 @@ impl I2pAdapter {
             .map_err(|e| NetworkError::ReceiveFailed(format!("Read frame failed: {}", e)))?;
 
         // Deserialize frame
-        let frame: Frame = bincode::deserialize(&frame_bytes)
-            .map_err(|e| NetworkError::ReceiveFailed(format!("Frame deserialization failed: {}", e)))?;
+        let frame: Frame = bincode::deserialize(&frame_bytes).map_err(|e| {
+            NetworkError::ReceiveFailed(format!("Frame deserialization failed: {}", e))
+        })?;
 
         Ok((remote_dest.destination, frame))
     }

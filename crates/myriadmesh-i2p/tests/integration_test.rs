@@ -180,7 +180,10 @@ fn test_onion_routing_multi_hop() {
 
     // Also set source public key
     let source_keypair = KeyExchangeKeypair::generate();
-    route.set_hop_public_key(local_node_id, X25519PublicKey::from(&source_keypair.public_key));
+    route.set_hop_public_key(
+        local_node_id,
+        X25519PublicKey::from(&source_keypair.public_key),
+    );
 
     // Verify route properties
     assert_eq!(route.source, local_node_id);
@@ -275,12 +278,17 @@ fn test_complete_i2p_communication_flow() {
 
     // Manually set Alice's and Bob's public keys (in real impl, from DHT/capability token)
     let alice_keypair = KeyExchangeKeypair::generate();
-    route.set_hop_public_key(alice_i2p_node_id, X25519PublicKey::from(&alice_keypair.public_key));
+    route.set_hop_public_key(
+        alice_i2p_node_id,
+        X25519PublicKey::from(&alice_keypair.public_key),
+    );
     let bob_key = KeyExchangeKeypair::generate();
     route.set_hop_public_key(bob_node_id, X25519PublicKey::from(&bob_key.public_key));
 
     // Build onion layers
-    let layers = onion_router.build_onion_layers(&route, &protected_message).unwrap();
+    let layers = onion_router
+        .build_onion_layers(&route, &protected_message)
+        .unwrap();
 
     // Verify complete protection stack
     assert_eq!(layers.len(), route.total_hops());

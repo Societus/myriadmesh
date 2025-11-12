@@ -98,7 +98,7 @@ impl SecureTokenExchange {
     pub fn decrypt_token(
         &self,
         encrypted_msg: &EncryptedTokenMessage,
-        kx_request: &KeyExchangeRequest,
+        _kx_request: &KeyExchangeRequest,
         kx_response: &KeyExchangeResponse,
     ) -> Result<I2pCapabilityToken, String> {
         // Create channel and establish it
@@ -244,7 +244,9 @@ mod tests {
             .decrypt_token(&encrypted, &kx_request, &kx_response)
             .unwrap();
 
-        bob_identity.store_capability_token(decrypted_token.clone()).unwrap();
+        bob_identity
+            .store_capability_token(decrypted_token.clone())
+            .unwrap();
 
         // Verify Bob can now access Alice's i2p info
         let alice_token = bob_identity

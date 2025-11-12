@@ -79,15 +79,11 @@ pub struct SamConnection {
 impl SamConnection {
     /// Connect to SAM bridge
     pub fn connect(sam_addr: &str) -> Result<Self> {
-        let stream = TcpStream::connect(sam_addr)
-            .map_err(|e| SamError::ConnectionFailed(e.to_string()))?;
+        let stream =
+            TcpStream::connect(sam_addr).map_err(|e| SamError::ConnectionFailed(e.to_string()))?;
 
-        stream
-            .set_read_timeout(Some(Duration::from_secs(30)))
-            .ok();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(30)))
-            .ok();
+        stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(30))).ok();
 
         let reader = BufReader::new(
             stream
@@ -98,7 +94,10 @@ impl SamConnection {
         let mut connection = SamConnection { stream, reader };
 
         // Send HELLO
-        connection.send_command(&format!("HELLO VERSION MIN={} MAX={}\n", SAM_VERSION, SAM_VERSION))?;
+        connection.send_command(&format!(
+            "HELLO VERSION MIN={} MAX={}\n",
+            SAM_VERSION, SAM_VERSION
+        ))?;
         let response = connection.read_response()?;
 
         if !response.starts_with("HELLO REPLY") || !response.contains("RESULT=OK") {
@@ -182,9 +181,7 @@ impl SamConnection {
         }
 
         // Return the underlying stream for data transfer
-        self.stream
-            .try_clone()
-            .map_err(|e| SamError::IoError(e))
+        self.stream.try_clone().map_err(SamError::IoError)
     }
 
     /// Accept incoming stream connections
@@ -205,10 +202,7 @@ impl SamConnection {
         let remote_dest = Self::extract_value(&response, "DESTINATION=")
             .ok_or_else(|| SamError::ProtocolError("No destination in response".to_string()))?;
 
-        let stream = self
-            .stream
-            .try_clone()
-            .map_err(|e| SamError::IoError(e))?;
+        let stream = self.stream.try_clone().map_err(SamError::IoError)?;
 
         Ok((stream, SamDestination::new(remote_dest)))
     }
@@ -217,8 +211,8 @@ impl SamConnection {
     fn send_command(&mut self, command: &str) -> Result<()> {
         self.stream
             .write_all(command.as_bytes())
-            .map_err(|e| SamError::IoError(e))?;
-        self.stream.flush().map_err(|e| SamError::IoError(e))
+            .map_err(SamError::IoError)?;
+        self.stream.flush().map_err(SamError::IoError)
     }
 
     /// Read a response from SAM bridge
@@ -226,7 +220,7 @@ impl SamConnection {
         let mut line = String::new();
         self.reader
             .read_line(&mut line)
-            .map_err(|e| SamError::IoError(e))?;
+            .map_err(SamError::IoError)?;
         Ok(line.trim().to_string())
     }
 
@@ -265,11 +259,7 @@ impl SamSession {
     ) -> Result<Self> {
         let mut connection = SamConnection::connect(sam_addr)?;
 
-        let dest = connection.create_session(
-            &session_id,
-            style,
-            destination.as_deref(),
-        )?;
+        let dest = connection.create_session(&session_id, style, destination.as_deref())?;
 
         Ok(SamSession {
             connection,
@@ -297,7 +287,8 @@ impl SamSession {
             ));
         }
 
-        self.connection.stream_connect(&self.session_id, destination)
+        self.connection
+            .stream_connect(&self.session_id, destination)
     }
 
     /// Accept incoming connection (for STREAM sessions)

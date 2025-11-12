@@ -124,10 +124,7 @@ transittunnels = {}
         );
 
         if let Some(limit) = self.bandwidth_limit_kbps {
-            config.push_str(&format!(
-                "ntcpsoft = {}\nntcphard = {}\n",
-                limit, limit
-            ));
+            config.push_str(&format!("ntcpsoft = {}\nntcphard = {}\n", limit, limit));
         }
 
         config
@@ -199,9 +196,7 @@ impl EmbeddedI2pRouter {
         for name in &["i2pd", "i2pd.exe"] {
             if let Ok(output) = Command::new("which").arg(name).output() {
                 if output.status.success() {
-                    let path = String::from_utf8_lossy(&output.stdout)
-                        .trim()
-                        .to_string();
+                    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     if !path.is_empty() {
                         return Ok(PathBuf::from(path));
                     }
@@ -221,15 +216,13 @@ impl EmbeddedI2pRouter {
         if let Some(stderr) = self.process.stderr.take() {
             std::thread::spawn(move || {
                 let reader = BufReader::new(stderr);
-                for line in reader.lines() {
-                    if let Ok(line) = line {
-                        // Check for startup completion indicators
-                        if line.contains("SAM session created")
-                            || line.contains("SAM bridge started")
-                            || line.contains("Router started")
-                        {
-                            ready.store(true, Ordering::SeqCst);
-                        }
+                for line in reader.lines().map_while(|r| r.ok()) {
+                    // Check for startup completion indicators
+                    if line.contains("SAM session created")
+                        || line.contains("SAM bridge started")
+                        || line.contains("Router started")
+                    {
+                        ready.store(true, Ordering::SeqCst);
                     }
                 }
             });
@@ -259,8 +252,7 @@ impl EmbeddedI2pRouter {
 
     /// Check if SAM port is available
     fn check_sam_available(port: u16) -> bool {
-        std::net::TcpStream::connect(format!("127.0.0.1:{}", port))
-            .is_ok()
+        std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok()
     }
 
     /// Get SAM port

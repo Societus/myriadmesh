@@ -10,8 +10,8 @@
 //! - Route randomization prevents traffic correlation
 //! - Minimum 3 hops recommended for strong anonymity
 
-use myriadmesh_crypto::encryption::{encrypt, decrypt, EncryptedMessage};
-use myriadmesh_crypto::keyexchange::{KeyExchangeKeypair, X25519PublicKey, client_session_keys};
+use myriadmesh_crypto::encryption::{decrypt, encrypt, EncryptedMessage};
+use myriadmesh_crypto::keyexchange::{client_session_keys, KeyExchangeKeypair, X25519PublicKey};
 use myriadmesh_protocol::NodeId;
 use rand::seq::SliceRandom;
 use rand::Rng;
@@ -205,7 +205,11 @@ pub struct OnionRouter {
 
 impl OnionRouter {
     /// Create new onion router
-    pub fn new(local_node_id: NodeId, local_keypair: KeyExchangeKeypair, config: OnionConfig) -> Self {
+    pub fn new(
+        local_node_id: NodeId,
+        local_keypair: KeyExchangeKeypair,
+        config: OnionConfig,
+    ) -> Self {
         OnionRouter {
             config,
             local_node_id,
@@ -367,7 +371,11 @@ impl OnionRouter {
     ///
     /// Creates encrypted layers for each hop in the route.
     /// Each layer is encrypted with the hop's public key using X25519 key exchange.
-    pub fn build_onion_layers(&self, route: &OnionRoute, payload: &[u8]) -> Result<Vec<OnionLayer>, String> {
+    pub fn build_onion_layers(
+        &self,
+        route: &OnionRoute,
+        payload: &[u8],
+    ) -> Result<Vec<OnionLayer>, String> {
         let path = route.full_path();
 
         // Start with the final payload
@@ -379,7 +387,9 @@ impl OnionRouter {
             let node_id = path[i];
 
             // Get public key for this hop
-            let hop_public_key = route.hop_public_keys.get(&node_id)
+            let hop_public_key = route
+                .hop_public_keys
+                .get(&node_id)
                 .ok_or_else(|| format!("No public key for hop {}", node_id))?;
 
             // Generate ephemeral keypair for this layer
@@ -617,8 +627,14 @@ mod tests {
         let dest_kp = KeyExchangeKeypair::generate();
 
         route.set_hop_public_key(local, X25519PublicKey::from(&local_kp.public_key));
-        route.set_hop_public_key(NodeId::from_bytes([1u8; 32]), X25519PublicKey::from(&hop1_kp.public_key));
-        route.set_hop_public_key(NodeId::from_bytes([2u8; 32]), X25519PublicKey::from(&hop2_kp.public_key));
+        route.set_hop_public_key(
+            NodeId::from_bytes([1u8; 32]),
+            X25519PublicKey::from(&hop1_kp.public_key),
+        );
+        route.set_hop_public_key(
+            NodeId::from_bytes([2u8; 32]),
+            X25519PublicKey::from(&hop2_kp.public_key),
+        );
         route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
 
         let router = OnionRouter::new_default(local, local_kp);
@@ -705,7 +721,9 @@ mod tests {
         // Build onion layers at source
         let original_payload = b"Secret message for destination";
         let source_router = OnionRouter::new_default(source, source_kp);
-        let layers = source_router.build_onion_layers(&route, original_payload).unwrap();
+        let layers = source_router
+            .build_onion_layers(&route, original_payload)
+            .unwrap();
 
         assert_eq!(layers.len(), 4); // source + hop1 + hop2 + dest
 

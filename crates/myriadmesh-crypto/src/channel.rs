@@ -340,7 +340,9 @@ mod tests {
         assert_eq!(alice_channel.state(), ChannelState::KeyExchangeSent);
 
         // Bob processes request
-        let kx_response = bob_channel.process_key_exchange_request(&kx_request).unwrap();
+        let kx_response = bob_channel
+            .process_key_exchange_request(&kx_request)
+            .unwrap();
 
         assert_eq!(bob_channel.state(), ChannelState::Established);
         assert!(bob_channel.is_established());
@@ -370,7 +372,9 @@ mod tests {
         let kx_request = alice_channel
             .create_key_exchange_request(bob_node_id)
             .unwrap();
-        let kx_response = bob_channel.process_key_exchange_request(&kx_request).unwrap();
+        let kx_response = bob_channel
+            .process_key_exchange_request(&kx_request)
+            .unwrap();
         alice_channel
             .process_key_exchange_response(&kx_response)
             .unwrap();
@@ -442,7 +446,9 @@ mod tests {
         let kx_request = alice_channel
             .create_key_exchange_request(bob_node_id)
             .unwrap();
-        let kx_response = bob_channel.process_key_exchange_request(&kx_request).unwrap();
+        let kx_response = bob_channel
+            .process_key_exchange_request(&kx_request)
+            .unwrap();
         alice_channel
             .process_key_exchange_response(&kx_response)
             .unwrap();

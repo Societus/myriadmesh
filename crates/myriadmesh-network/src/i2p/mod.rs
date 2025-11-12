@@ -6,10 +6,10 @@
 //! - Persisting i2p destination keys across restarts
 //! - Providing SAM (Simple Anonymous Messaging) protocol client
 
+pub mod adapter;
 pub mod embedded_router;
 pub mod sam_client;
-pub mod adapter;
 
-pub use embedded_router::{EmbeddedI2pRouter, I2pRouterMode, I2pRouterConfig, I2pRouterError};
-pub use sam_client::{SamConnection, SamDestination, SamSession, SessionStyle, SamError};
 pub use adapter::I2pAdapter;
+pub use embedded_router::{EmbeddedI2pRouter, I2pRouterConfig, I2pRouterError, I2pRouterMode};
+pub use sam_client::{SamConnection, SamDestination, SamError, SamSession, SessionStyle};
