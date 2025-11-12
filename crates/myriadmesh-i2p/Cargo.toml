@@ -1,0 +1,27 @@
+[package]
+name = "myriadmesh-i2p"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Workspace dependencies
+myriadmesh-protocol = { path = "../myriadmesh-protocol" }
+myriadmesh-crypto = { path = "../myriadmesh-crypto" }
+
+# Serialization
+serde.workspace = true
+bincode.workspace = true
+
+# Cryptography
+blake2.workspace = true
+sodiumoxide.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+# Time handling
+[dev-dependencies]

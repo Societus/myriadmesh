@@ -448,6 +448,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "myriadmesh-i2p"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "blake2",
+ "myriadmesh-crypto",
+ "myriadmesh-protocol",
+ "serde",
+ "sodiumoxide",
+ "thiserror",
+]
+
+[[package]]
 name = "myriadmesh-network"
 version = "0.1.0"
 dependencies = [
