@@ -410,8 +410,8 @@ mod tests {
         let should_send = layer.should_send_cover_traffic(Duration::from_secs(0));
         assert!(!should_send);
 
-        // Should send after enough time
-        let should_send = layer.should_send_cover_traffic(Duration::from_secs(400));
+        // Should send after enough time (3600/10 = 360s, with jitter up to 432s, use 500s to be safe)
+        let should_send = layer.should_send_cover_traffic(Duration::from_secs(500));
         assert!(should_send);
     }
 
