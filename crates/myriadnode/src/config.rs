@@ -15,6 +15,7 @@ pub struct Config {
     pub i2p: I2pConfig,
     pub routing: RoutingConfig,
     pub logging: LoggingConfig,
+    pub heartbeat: HeartbeatConfig,
 
     #[serde(skip)]
     config_file_path: PathBuf,
@@ -74,6 +75,9 @@ pub struct AdapterConfig {
     pub enabled: bool,
     #[serde(default)]
     pub auto_start: bool,
+    /// Allow mesh networking on backhaul interfaces (IP adapters only)
+    #[serde(default)]
+    pub allow_backhaul_mesh: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,6 +135,16 @@ pub struct RoutingConfig {
 pub struct LoggingConfig {
     pub level: String,
     pub file: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatConfig {
+    pub enabled: bool,
+    pub interval_secs: u64,
+    pub timeout_secs: u64,
+    pub include_geolocation: bool,
+    pub store_remote_geolocation: bool,
+    pub max_nodes: usize,
 }
 
 impl Config {
@@ -214,18 +228,22 @@ impl Config {
                     ethernet: AdapterConfig {
                         enabled: true,
                         auto_start: true,
+                        allow_backhaul_mesh: false,
                     },
                     bluetooth: AdapterConfig {
                         enabled: false,
                         auto_start: false,
+                        allow_backhaul_mesh: false,
                     },
                     bluetooth_le: AdapterConfig {
                         enabled: false,
                         auto_start: false,
+                        allow_backhaul_mesh: false,
                     },
                     cellular: AdapterConfig {
                         enabled: false,
                         auto_start: false,
+                        allow_backhaul_mesh: false,
                     },
                 },
                 monitoring: MonitoringConfig {
@@ -266,6 +284,14 @@ impl Config {
             logging: LoggingConfig {
                 level: "info".to_string(),
                 file: Some(data_dir.join("logs").join("myriadnode.log")),
+            },
+            heartbeat: HeartbeatConfig {
+                enabled: true,
+                interval_secs: 60,
+                timeout_secs: 300,
+                include_geolocation: false,
+                store_remote_geolocation: false,
+                max_nodes: 1000,
             },
             config_file_path: config_path.clone(),
             data_directory: data_dir,

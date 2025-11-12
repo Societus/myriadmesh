@@ -110,6 +110,7 @@ pub struct AdapterScore {
 }
 
 /// Adapter scoring calculator
+#[derive(Clone)]
 pub struct AdapterScorer {
     weights: ScoringWeights,
     // Reference values for normalization

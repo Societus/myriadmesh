@@ -8,6 +8,10 @@ use crate::config::Config;
 use crate::api::ApiServer;
 use crate::storage::Storage;
 use crate::monitor::NetworkMonitor;
+use crate::failover::FailoverManager;
+use crate::scoring::ScoringWeights;
+use crate::backhaul::{BackhaulDetector, BackhaulConfig, BackhaulStatus};
+use crate::heartbeat::HeartbeatService;
 
 use myriadmesh_network::{AdapterManager, NetworkAdapter, adapters::*};
 use myriadmesh_routing::PriorityQueue;
@@ -23,6 +27,8 @@ pub struct Node {
     dht: RoutingTable,
     api_server: Option<ApiServer>,
     monitor: NetworkMonitor,
+    failover_manager: FailoverManager,
+    heartbeat_service: HeartbeatService,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
 }
@@ -58,6 +64,35 @@ impl Node {
         );
         info!("✓ Network monitor initialized");
 
+        // Initialize failover manager
+        let scoring_weights = match config.network.scoring.mode.as_str() {
+            "battery" => ScoringWeights::battery_optimized(),
+            "performance" => ScoringWeights::performance_optimized(),
+            "reliability" => ScoringWeights::reliability_optimized(),
+            "privacy" => ScoringWeights::privacy_optimized(),
+            _ => ScoringWeights::default(),
+        };
+        let failover_manager = FailoverManager::new(
+            config.network.failover.clone(),
+            Arc::clone(&adapter_manager),
+            scoring_weights,
+        );
+        info!("✓ Failover manager initialized (mode: {})", config.network.scoring.mode);
+
+        // Initialize heartbeat service
+        let heartbeat_service = HeartbeatService::new(
+            crate::heartbeat::HeartbeatConfig {
+                enabled: config.heartbeat.enabled,
+                interval_secs: config.heartbeat.interval_secs,
+                timeout_secs: config.heartbeat.timeout_secs,
+                include_geolocation: config.heartbeat.include_geolocation,
+                store_remote_geolocation: config.heartbeat.store_remote_geolocation,
+                max_nodes: config.heartbeat.max_nodes,
+            },
+            node_id,
+        );
+        info!("✓ Heartbeat service initialized (interval: {}s)", config.heartbeat.interval_secs);
+
         // Initialize API server if enabled
         let api_server = if config.api.enabled {
             let server = ApiServer::new(config.api.clone()).await?;
@@ -78,6 +113,8 @@ impl Node {
             dht,
             api_server,
             monitor,
+            failover_manager,
+            heartbeat_service,
             shutdown_tx,
             shutdown_rx,
         })
@@ -105,6 +142,22 @@ impl Node {
         // Start network monitor
         self.monitor.start().await?;
         info!("✓ Network monitor running");
+
+        // Start failover manager
+        self.failover_manager.start().await?;
+        if self.config.network.failover.auto_failover {
+            info!("✓ Automatic failover enabled");
+        } else {
+            info!("  Automatic failover disabled");
+        }
+
+        // Start heartbeat service
+        self.heartbeat_service.start().await?;
+        if self.config.heartbeat.enabled {
+            info!("✓ Heartbeat service running (NodeMap discovery enabled)");
+        } else {
+            info!("  Heartbeat service disabled");
+        }
 
         // Start DHT (if enabled)
         if self.config.dht.enabled {
@@ -184,8 +237,36 @@ impl Node {
 
         adapter.initialize().await?;
 
+        // Check for backhaul status before auto-starting
         if self.config.network.adapters.ethernet.auto_start {
-            adapter.start().await?;
+            let backhaul_config = BackhaulConfig {
+                allow_backhaul_mesh: self.config.network.adapters.ethernet.allow_backhaul_mesh,
+                check_interval_secs: 300,
+            };
+            let detector = BackhaulDetector::new(backhaul_config);
+
+            // Try to detect all backhaul interfaces
+            match detector.detect_all_backhauls() {
+                Ok(backhauls) => {
+                    if !backhauls.is_empty() {
+                        info!("  Detected backhaul interfaces: {:?}", backhauls);
+
+                        if !self.config.network.adapters.ethernet.allow_backhaul_mesh {
+                            warn!("  Ethernet adapter may be backhaul - not auto-starting");
+                            warn!("  Set 'allow_backhaul_mesh: true' to override");
+                        } else {
+                            adapter.start().await?;
+                        }
+                    } else {
+                        adapter.start().await?;
+                    }
+                }
+                Err(e) => {
+                    warn!("  Failed to detect backhaul status: {}", e);
+                    // Start anyway if detection fails
+                    adapter.start().await?;
+                }
+            }
         }
 
         let mut manager = self.adapter_manager.write().await;
