@@ -7,7 +7,7 @@
 
 use crate::adapter::{AdapterStatus, NetworkAdapter, PeerInfo, TestResults};
 use crate::error::{NetworkError, Result};
-use crate::types::{Address, AdapterCapabilities, PowerConsumption};
+use crate::types::{AdapterCapabilities, Address, PowerConsumption};
 use myriadmesh_protocol::types::AdapterType;
 use myriadmesh_protocol::{Frame, Message, MessageType, NodeId};
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
@@ -124,7 +124,7 @@ impl EthernetAdapter {
 
     /// Get local socket address
     pub fn local_address(&self) -> Option<SocketAddr> {
-        self.local_addr.try_read().ok()?.clone()
+        *self.local_addr.try_read().ok()?
     }
 
     /// Setup multicast socket for peer discovery
@@ -133,22 +133,29 @@ impl EthernetAdapter {
             return Ok(());
         }
 
-        let multicast_addr: Ipv4Addr = self
-            .config
-            .multicast_addr
-            .parse()
-            .map_err(|e| NetworkError::InvalidAddress(format!("Invalid multicast address: {}", e)))?;
+        let multicast_addr: Ipv4Addr = self.config.multicast_addr.parse().map_err(|e| {
+            NetworkError::InvalidAddress(format!("Invalid multicast address: {}", e))
+        })?;
 
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", self.config.multicast_port))
-            .map_err(|e| NetworkError::InitializationFailed(format!("Failed to bind multicast socket: {}", e)))?;
+        let socket =
+            UdpSocket::bind(format!("0.0.0.0:{}", self.config.multicast_port)).map_err(|e| {
+                NetworkError::InitializationFailed(format!(
+                    "Failed to bind multicast socket: {}",
+                    e
+                ))
+            })?;
 
         socket
             .join_multicast_v4(&multicast_addr, &Ipv4Addr::UNSPECIFIED)
-            .map_err(|e| NetworkError::InitializationFailed(format!("Failed to join multicast group: {}", e)))?;
+            .map_err(|e| {
+                NetworkError::InitializationFailed(format!("Failed to join multicast group: {}", e))
+            })?;
 
         socket
             .set_read_timeout(Some(Duration::from_secs(1)))
-            .map_err(|e| NetworkError::InitializationFailed(format!("Failed to set timeout: {}", e)))?;
+            .map_err(|e| {
+                NetworkError::InitializationFailed(format!("Failed to set timeout: {}", e))
+            })?;
 
         *self.multicast_socket.blocking_lock() = Some(socket);
 
@@ -162,13 +169,19 @@ impl EthernetAdapter {
         }
 
         let multicast_guard = self.multicast_socket.lock().await;
-        let socket = multicast_guard
-            .as_ref()
-            .ok_or_else(|| NetworkError::InitializationFailed("Multicast socket not initialized".to_string()))?;
+        let socket = multicast_guard.as_ref().ok_or_else(|| {
+            NetworkError::InitializationFailed("Multicast socket not initialized".to_string())
+        })?;
 
         // Simple discovery message with NodeId
-        let message = format!("MYRIADMESH_DISCOVER:{}", hex::encode(self.local_node_id.as_bytes()));
-        let dest = format!("{}:{}", self.config.multicast_addr, self.config.multicast_port);
+        let message = format!(
+            "MYRIADMESH_DISCOVER:{}",
+            hex::encode(self.local_node_id.as_bytes())
+        );
+        let dest = format!(
+            "{}:{}",
+            self.config.multicast_addr, self.config.multicast_port
+        );
 
         socket
             .send_to(message.as_bytes(), dest)
@@ -184,9 +197,9 @@ impl EthernetAdapter {
         }
 
         let multicast_guard = self.multicast_socket.blocking_lock();
-        let socket = multicast_guard
-            .as_ref()
-            .ok_or_else(|| NetworkError::InitializationFailed("Multicast socket not initialized".to_string()))?;
+        let socket = multicast_guard.as_ref().ok_or_else(|| {
+            NetworkError::InitializationFailed("Multicast socket not initialized".to_string())
+        })?;
 
         let mut discovered = Vec::new();
         let mut buf = [0u8; 1024];
@@ -240,18 +253,21 @@ impl NetworkAdapter for EthernetAdapter {
 
         // Bind UDP socket
         let bind_addr = format!("{}:{}", self.config.bind_addr, self.config.port);
-        let std_socket = std::net::UdpSocket::bind(&bind_addr)
-            .map_err(|e| NetworkError::InitializationFailed(format!("Failed to bind UDP socket: {}", e)))?;
+        let std_socket = std::net::UdpSocket::bind(&bind_addr).map_err(|e| {
+            NetworkError::InitializationFailed(format!("Failed to bind UDP socket: {}", e))
+        })?;
 
-        std_socket.set_nonblocking(true)
-            .map_err(|e| NetworkError::InitializationFailed(format!("Failed to set non-blocking: {}", e)))?;
+        std_socket.set_nonblocking(true).map_err(|e| {
+            NetworkError::InitializationFailed(format!("Failed to set non-blocking: {}", e))
+        })?;
 
-        let socket = TokioUdpSocket::from_std(std_socket)
-            .map_err(|e| NetworkError::InitializationFailed(format!("Failed to create tokio socket: {}", e)))?;
+        let socket = TokioUdpSocket::from_std(std_socket).map_err(|e| {
+            NetworkError::InitializationFailed(format!("Failed to create tokio socket: {}", e))
+        })?;
 
-        let local_addr = socket
-            .local_addr()
-            .map_err(|e| NetworkError::InitializationFailed(format!("Failed to get local address: {}", e)))?;
+        let local_addr = socket.local_addr().map_err(|e| {
+            NetworkError::InitializationFailed(format!("Failed to get local address: {}", e))
+        })?;
 
         {
             let mut addr = self.local_addr.write().await;
@@ -338,14 +354,18 @@ impl NetworkAdapter for EthernetAdapter {
 
         let mut buf = vec![0u8; MAX_UDP_SIZE + 1024];
 
-        let (size, source_addr) = timeout(Duration::from_millis(timeout_ms), socket.recv_from(&mut buf))
-            .await
-            .map_err(|_| NetworkError::ReceiveFailed("Receive timeout".to_string()))?
-            .map_err(|e| NetworkError::ReceiveFailed(format!("UDP receive failed: {}", e)))?;
+        let (size, source_addr) = timeout(
+            Duration::from_millis(timeout_ms),
+            socket.recv_from(&mut buf),
+        )
+        .await
+        .map_err(|_| NetworkError::ReceiveFailed("Receive timeout".to_string()))?
+        .map_err(|e| NetworkError::ReceiveFailed(format!("UDP receive failed: {}", e)))?;
 
         // Deserialize frame
-        let frame: Frame = bincode::deserialize(&buf[..size])
-            .map_err(|e| NetworkError::ReceiveFailed(format!("Failed to deserialize frame: {}", e)))?;
+        let frame: Frame = bincode::deserialize(&buf[..size]).map_err(|e| {
+            NetworkError::ReceiveFailed(format!("Failed to deserialize frame: {}", e))
+        })?;
 
         let source_address = Address::Ethernet(source_addr.to_string());
 
@@ -378,7 +398,10 @@ impl NetworkAdapter for EthernetAdapter {
     }
 
     fn get_status(&self) -> AdapterStatus {
-        self.status.try_read().map(|s| *s).unwrap_or(AdapterStatus::Error)
+        self.status
+            .try_read()
+            .map(|s| *s)
+            .unwrap_or(AdapterStatus::Error)
     }
 
     fn get_capabilities(&self) -> &AdapterCapabilities {
@@ -457,7 +480,10 @@ mod tests {
         let adapter = EthernetAdapter::new_default(node_id);
 
         assert_eq!(adapter.get_status(), AdapterStatus::Uninitialized);
-        assert_eq!(adapter.get_capabilities().adapter_type, AdapterType::Ethernet);
+        assert_eq!(
+            adapter.get_capabilities().adapter_type,
+            AdapterType::Ethernet
+        );
         assert_eq!(adapter.get_capabilities().max_message_size, MAX_UDP_SIZE);
     }
 

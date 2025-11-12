@@ -63,7 +63,7 @@ impl Default for NodeCapabilities {
             store_and_forward: false,
             i2p_capable: false,
             tor_capable: false,
-            max_message_size: 1024 * 1024, // 1MB
+            max_message_size: 1024 * 1024,        // 1MB
             available_storage: 100 * 1024 * 1024, // 100MB
         }
     }
@@ -327,9 +327,11 @@ mod tests {
     #[test]
     fn test_public_node_info_creation() {
         let node_id = ProtocolNodeId::from_bytes([1u8; 32]);
-        let mut caps = NodeCapabilities::default();
-        caps.i2p_capable = true;
-        caps.tor_capable = false;
+        let caps = NodeCapabilities {
+            i2p_capable: true,
+            tor_capable: false,
+            ..Default::default()
+        };
 
         let public = PublicNodeInfo::new(node_id, caps.clone());
 

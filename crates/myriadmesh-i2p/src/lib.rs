@@ -39,13 +39,15 @@
 
 pub mod capability_token;
 pub mod dual_identity;
-pub mod privacy;
 pub mod onion;
+pub mod privacy;
 
 pub use capability_token::{I2pCapabilityToken, I2pDestination, TokenStorage};
 pub use dual_identity::DualIdentity;
-pub use privacy::{PrivacyConfig, PrivacyLayer, PaddingStrategy, TimingStrategy};
-pub use onion::{OnionRouter, OnionRoute, OnionLayer as OnionRouteLayer, OnionConfig, RouteSelectionStrategy};
+pub use onion::{
+    OnionConfig, OnionLayer as OnionRouteLayer, OnionRoute, OnionRouter, RouteSelectionStrategy,
+};
+pub use privacy::{PaddingStrategy, PrivacyConfig, PrivacyLayer, TimingStrategy};
 
 #[cfg(test)]
 mod tests {

@@ -110,7 +110,11 @@ impl KBucket {
         let node_id = node.node_id;
 
         // Remove if already in cache
-        if let Some(pos) = self.replacement_cache.iter().position(|n| n.node_id == node_id) {
+        if let Some(pos) = self
+            .replacement_cache
+            .iter()
+            .position(|n| n.node_id == node_id)
+        {
             self.replacement_cache.remove(pos);
         }
 

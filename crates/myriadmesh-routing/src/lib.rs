@@ -13,7 +13,7 @@ pub mod priority_queue;
 pub mod rate_limiter;
 
 pub use deduplication::DeduplicationCache;
-pub use error::{RoutingError, Result};
+pub use error::{Result, RoutingError};
 pub use priority_queue::{PriorityLevel, PriorityQueue};
 pub use rate_limiter::RateLimiter;
 

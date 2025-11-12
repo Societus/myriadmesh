@@ -14,7 +14,7 @@ use myriadmesh_protocol::NodeId;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Minimum number of hops for onion routing
 pub const MIN_HOPS: usize = 3;
@@ -125,12 +125,7 @@ pub struct OnionRoute {
 
 impl OnionRoute {
     /// Create new onion route
-    pub fn new(
-        source: NodeId,
-        destination: NodeId,
-        hops: Vec<NodeId>,
-        lifetime_secs: u64,
-    ) -> Self {
+    pub fn new(source: NodeId, destination: NodeId, hops: Vec<NodeId>, lifetime_secs: u64) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -227,9 +222,7 @@ impl OnionRouter {
         // Filter out unavailable nodes, source, and destination
         let candidates: Vec<_> = available_nodes
             .iter()
-            .filter(|n| {
-                n.available && n.node_id != self.local_node_id && n.node_id != destination
-            })
+            .filter(|n| n.available && n.node_id != self.local_node_id && n.node_id != destination)
             .collect();
 
         if candidates.len() < self.config.num_hops {
@@ -310,7 +303,8 @@ impl OnionRouter {
                 let mut scored: Vec<_> = candidates
                     .iter()
                     .map(|n| {
-                        let score = n.reliability * 0.5 + (1.0 - (n.latency_ms / 1000.0).min(1.0)) * 0.5;
+                        let score =
+                            n.reliability * 0.5 + (1.0 - (n.latency_ms / 1000.0).min(1.0)) * 0.5;
                         (n, score)
                     })
                     .collect();
@@ -348,14 +342,17 @@ impl OnionRouter {
 
     /// Get number of active routes
     pub fn active_route_count(&self) -> usize {
-        self.active_routes.iter().filter(|r| !r.is_expired()).count()
+        self.active_routes
+            .iter()
+            .filter(|r| !r.is_expired())
+            .count()
     }
 
     /// Build onion layers for a route
     ///
     /// Creates encrypted layers for each hop in the route.
     /// In a real implementation, each layer would be encrypted with the hop's public key.
-    pub fn build_onion_layers(&self, route: &OnionRoute, payload: &[u8]) -> Vec<OnionLayer> {
+    pub fn build_onion_layers(&self, route: &OnionRoute, _payload: &[u8]) -> Vec<OnionLayer> {
         let mut layers = Vec::new();
         let path = route.full_path();
 
@@ -419,6 +416,7 @@ impl OnionRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn create_test_nodes(count: usize) -> Vec<RouteNode> {
         (0..count)
@@ -439,10 +437,7 @@ mod tests {
     fn test_onion_route_creation() {
         let source = NodeId::from_bytes([1u8; 32]);
         let dest = NodeId::from_bytes([2u8; 32]);
-        let hops = vec![
-            NodeId::from_bytes([3u8; 32]),
-            NodeId::from_bytes([4u8; 32]),
-        ];
+        let hops = vec![NodeId::from_bytes([3u8; 32]), NodeId::from_bytes([4u8; 32])];
 
         let route = OnionRoute::new(source, dest, hops.clone(), 3600);
 
@@ -502,8 +497,10 @@ mod tests {
         let mut router = OnionRouter::new_default(local);
 
         // Create a route with short lifetime
-        let mut config = OnionConfig::default();
-        config.max_route_lifetime = 0;
+        let config = OnionConfig {
+            max_route_lifetime: 0,
+            ..Default::default()
+        };
         router.config = config;
 
         router.select_route(dest, &nodes).unwrap();
@@ -520,10 +517,7 @@ mod tests {
     fn test_onion_layer_building() {
         let local = NodeId::from_bytes([0u8; 32]);
         let dest = NodeId::from_bytes([255u8; 32]);
-        let hops = vec![
-            NodeId::from_bytes([1u8; 32]),
-            NodeId::from_bytes([2u8; 32]),
-        ];
+        let hops = vec![NodeId::from_bytes([1u8; 32]), NodeId::from_bytes([2u8; 32])];
 
         let route = OnionRoute::new(local, dest, hops, 3600);
         let router = OnionRouter::new_default(local);

@@ -1,9 +1,9 @@
 //! Network adapter manager
 
-use crate::adapter::{NetworkAdapter, AdapterStatus};
+use crate::adapter::{AdapterStatus, NetworkAdapter};
 use crate::error::{NetworkError, Result};
 use crate::metrics::AdapterMetrics;
-use crate::types::{Address, AdapterCapabilities};
+use crate::types::AdapterCapabilities;
 use myriadmesh_protocol::types::AdapterType;
 use myriadmesh_protocol::Frame;
 use std::collections::HashMap;
@@ -65,8 +65,7 @@ impl AdapterManager {
         self.metrics.insert(id.clone(), AdapterMetrics::new());
 
         // Store adapter
-        self.adapters
-            .insert(id, Arc::new(RwLock::new(adapter)));
+        self.adapters.insert(id, Arc::new(RwLock::new(adapter)));
 
         Ok(())
     }
@@ -128,7 +127,7 @@ impl AdapterManager {
         let mut best_adapter = None;
         let mut best_score = f64::MIN;
 
-        for (id, _adapter) in &self.adapters {
+        for id in self.adapters.keys() {
             if let Some(caps) = self.capabilities.get(id) {
                 // Check if adapter can handle message size
                 if frame.size() > caps.max_message_size {
@@ -213,6 +212,7 @@ impl Default for AdapterManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::Address;
 
     // Mock adapter for testing
     struct MockAdapter {
@@ -256,7 +256,10 @@ mod tests {
             &self.capabilities
         }
 
-        async fn test_connection(&self, _destination: &Address) -> Result<crate::adapter::TestResults> {
+        async fn test_connection(
+            &self,
+            _destination: &Address,
+        ) -> Result<crate::adapter::TestResults> {
             Ok(crate::adapter::TestResults {
                 success: true,
                 rtt_ms: Some(10.0),

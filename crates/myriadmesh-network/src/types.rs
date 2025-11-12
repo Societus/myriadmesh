@@ -122,7 +122,9 @@ impl AdapterCapabilities {
         match priority {
             224..=255 => {
                 // EMERGENCY: prioritize reliability and availability
-                self.reliability * 0.6 + (1.0 - self.latency_score()) * 0.3 + self.availability_score() * 0.1
+                self.reliability * 0.6
+                    + (1.0 - self.latency_score()) * 0.3
+                    + self.availability_score() * 0.1
             }
             192..=223 => {
                 // HIGH: balance latency, reliability, and bandwidth
@@ -215,6 +217,9 @@ mod tests {
     #[test]
     fn test_power_consumption_levels() {
         assert_eq!(PowerConsumption::None as u8, 0);
-        assert!(matches!(PowerConsumption::VeryLow, PowerConsumption::VeryLow));
+        assert!(matches!(
+            PowerConsumption::VeryLow,
+            PowerConsumption::VeryLow
+        ));
     }
 }

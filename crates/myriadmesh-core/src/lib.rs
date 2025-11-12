@@ -9,11 +9,11 @@
 //! - i2p (capability tokens, privacy layers, onion routing)
 
 pub use myriadmesh_crypto as crypto;
-pub use myriadmesh_protocol as protocol;
 pub use myriadmesh_dht as dht;
-pub use myriadmesh_routing as routing;
-pub use myriadmesh_network as network;
 pub use myriadmesh_i2p as i2p;
+pub use myriadmesh_network as network;
+pub use myriadmesh_protocol as protocol;
+pub use myriadmesh_routing as routing;
 
 pub use crypto::CryptoError;
 pub use protocol::ProtocolError;

@@ -74,7 +74,8 @@ impl AdapterMetrics {
         // Update bandwidth estimate
         let total_time = self.last_updated.elapsed().as_secs_f64();
         if total_time > 0.0 {
-            self.bandwidth_bps = ((self.bytes_sent + self.bytes_received) as f64 * 8.0 / total_time) as u64;
+            self.bandwidth_bps =
+                ((self.bytes_sent + self.bytes_received) as f64 * 8.0 / total_time) as u64;
         }
 
         // Update reliability
@@ -103,7 +104,8 @@ impl AdapterMetrics {
         // Update bandwidth estimate
         let total_time = self.last_updated.elapsed().as_secs_f64();
         if total_time > 0.0 {
-            self.bandwidth_bps = ((self.bytes_sent + self.bytes_received) as f64 * 8.0 / total_time) as u64;
+            self.bandwidth_bps =
+                ((self.bytes_sent + self.bytes_received) as f64 * 8.0 / total_time) as u64;
         }
 
         self.last_updated = Instant::now();

@@ -223,17 +223,11 @@ mod tests {
 
     #[test]
     fn test_priority_level_conversion() {
-        assert_eq!(
-            PriorityLevel::from_priority(255),
-            PriorityLevel::Emergency
-        );
+        assert_eq!(PriorityLevel::from_priority(255), PriorityLevel::Emergency);
         assert_eq!(PriorityLevel::from_priority(200), PriorityLevel::High);
         assert_eq!(PriorityLevel::from_priority(150), PriorityLevel::Normal);
         assert_eq!(PriorityLevel::from_priority(100), PriorityLevel::Low);
-        assert_eq!(
-            PriorityLevel::from_priority(50),
-            PriorityLevel::Background
-        );
+        assert_eq!(PriorityLevel::from_priority(50), PriorityLevel::Background);
     }
 
     #[test]
@@ -246,7 +240,7 @@ mod tests {
         assert_eq!(queue.len(), 1);
         assert!(!queue.is_empty());
 
-        let dequeued = queue.dequeue().unwrap();
+        let _dequeued = queue.dequeue().unwrap();
         assert_eq!(queue.len(), 0);
         assert!(queue.is_empty());
     }
@@ -282,8 +276,12 @@ mod tests {
         let mut queue = PriorityQueue::new(2);
 
         // Fill queue
-        queue.enqueue(create_test_message(Priority::Normal)).unwrap();
-        queue.enqueue(create_test_message(Priority::Normal)).unwrap();
+        queue
+            .enqueue(create_test_message(Priority::Normal))
+            .unwrap();
+        queue
+            .enqueue(create_test_message(Priority::Normal))
+            .unwrap();
 
         // Should fail (queue full)
         let result = queue.enqueue(create_test_message(Priority::Normal));
@@ -329,7 +327,9 @@ mod tests {
     fn test_clear() {
         let mut queue = PriorityQueue::new(100);
 
-        queue.enqueue(create_test_message(Priority::Normal)).unwrap();
+        queue
+            .enqueue(create_test_message(Priority::Normal))
+            .unwrap();
         queue.enqueue(create_test_message(Priority::High)).unwrap();
 
         assert_eq!(queue.len(), 2);

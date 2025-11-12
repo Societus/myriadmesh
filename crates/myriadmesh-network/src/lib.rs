@@ -15,12 +15,12 @@ pub mod manager;
 pub mod metrics;
 pub mod types;
 
-pub use adapter::{NetworkAdapter, AdapterStatus};
+pub use adapter::{AdapterStatus, NetworkAdapter};
 pub use adapters::{EthernetAdapter, EthernetConfig};
 pub use error::{NetworkError, Result};
 pub use manager::AdapterManager;
 pub use metrics::AdapterMetrics;
-pub use types::{Address, AdapterCapabilities, PowerConsumption};
+pub use types::{AdapterCapabilities, Address, PowerConsumption};
 
 #[cfg(test)]
 mod tests {

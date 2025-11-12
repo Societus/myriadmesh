@@ -42,11 +42,7 @@ impl StorageEntry {
     /// Get remaining TTL in seconds
     pub fn ttl_remaining(&self) -> u64 {
         let current = now();
-        if current >= self.expires_at {
-            0
-        } else {
-            self.expires_at - current
-        }
+        self.expires_at.saturating_sub(current)
     }
 }
 
@@ -129,9 +125,7 @@ impl DhtStorage {
             self.cleanup_expired();
 
             if !self.has_capacity(value.len()) {
-                return Err(DhtError::StorageFull {
-                    max: self.max_size,
-                });
+                return Err(DhtError::StorageFull { max: self.max_size });
             }
         }
 

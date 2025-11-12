@@ -90,6 +90,7 @@ impl Default for PrivacyConfig {
 }
 
 /// Privacy protection layer
+#[derive(Default)]
 pub struct PrivacyLayer {
     config: PrivacyConfig,
 }
@@ -98,13 +99,6 @@ impl PrivacyLayer {
     /// Create new privacy layer
     pub fn new(config: PrivacyConfig) -> Self {
         PrivacyLayer { config }
-    }
-
-    /// Create with default configuration
-    pub fn default() -> Self {
-        PrivacyLayer {
-            config: PrivacyConfig::default(),
-        }
     }
 
     /// Apply message padding to data
@@ -126,7 +120,8 @@ impl PrivacyLayer {
 
             PaddingStrategy::FixedBuckets => {
                 let buckets = [512, 1024, 2048, 4096, 8192, 16384];
-                let target_size = buckets.iter()
+                let target_size = buckets
+                    .iter()
                     .find(|&&size| size >= data.len() + 2)
                     .copied()
                     .unwrap_or(data.len() + 2);
@@ -154,7 +149,7 @@ impl PrivacyLayer {
         }
 
         // Read padding length from end
-        let data_len = padded.len();
+        let _data_len = padded.len();
 
         // Check if this message has padding indicator
         // Padding format: [data][padding_length: u16][padding_bytes]
@@ -188,9 +183,7 @@ impl PrivacyLayer {
         match self.config.timing_strategy {
             TimingStrategy::None => Duration::from_millis(0),
 
-            TimingStrategy::FixedDelay => {
-                Duration::from_millis(self.config.base_delay_ms)
-            }
+            TimingStrategy::FixedDelay => Duration::from_millis(self.config.base_delay_ms),
 
             TimingStrategy::RandomDelay => {
                 let mut rng = rand::thread_rng();
@@ -235,9 +228,7 @@ impl PrivacyLayer {
 
         // Generate random size based on padding strategy
         let size = match self.config.padding_strategy {
-            PaddingStrategy::None | PaddingStrategy::MinSize => {
-                self.config.min_message_size
-            }
+            PaddingStrategy::None | PaddingStrategy::MinSize => self.config.min_message_size,
             PaddingStrategy::FixedBuckets => {
                 let buckets = [512, 1024, 2048, 4096];
                 *buckets.choose(&mut rng).unwrap_or(&1024)

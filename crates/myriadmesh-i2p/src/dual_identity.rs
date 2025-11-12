@@ -96,7 +96,11 @@ impl DualIdentity {
     /// and i2p-specific NodeID.
     ///
     /// SECURITY: Token should be transmitted via encrypted channel!
-    pub fn grant_i2p_access(&self, contact_node_id: NodeId, validity_days: u64) -> Result<I2pCapabilityToken, String> {
+    pub fn grant_i2p_access(
+        &self,
+        contact_node_id: NodeId,
+        validity_days: u64,
+    ) -> Result<I2pCapabilityToken, String> {
         let clearnet_identity = self
             .clearnet_identity
             .as_ref()
@@ -163,7 +167,11 @@ impl DualIdentity {
     }
 
     /// Generate QR code data for capability token (for in-person exchange)
-    pub fn generate_qr_token(&self, contact_node_id: NodeId, validity_days: u64) -> Result<Vec<u8>, String> {
+    pub fn generate_qr_token(
+        &self,
+        contact_node_id: NodeId,
+        validity_days: u64,
+    ) -> Result<Vec<u8>, String> {
         let token = self.grant_i2p_access(contact_node_id, validity_days)?;
         token.to_bytes()
     }
@@ -229,7 +237,9 @@ mod tests {
         let mut bob = create_test_identity();
 
         // Alice grants Bob access
-        let token = alice.grant_i2p_access(bob.get_clearnet_node_id(), 30).unwrap();
+        let token = alice
+            .grant_i2p_access(bob.get_clearnet_node_id(), 30)
+            .unwrap();
 
         // Bob stores the token
         bob.store_capability_token(token.clone()).unwrap();
@@ -238,7 +248,10 @@ mod tests {
         // Bob retrieves token
         let retrieved = bob.get_capability_token(&alice.get_clearnet_node_id());
         assert!(retrieved.is_some());
-        assert_eq!(retrieved.unwrap().i2p_destination, *alice.get_i2p_destination());
+        assert_eq!(
+            retrieved.unwrap().i2p_destination,
+            *alice.get_i2p_destination()
+        );
     }
 
     #[test]
@@ -261,7 +274,9 @@ mod tests {
         let mut bob = create_test_identity();
 
         // Create expired token
-        let mut token = alice.grant_i2p_access(bob.get_clearnet_node_id(), 30).unwrap();
+        let mut token = alice
+            .grant_i2p_access(bob.get_clearnet_node_id(), 30)
+            .unwrap();
         token.expires_at = 0; // Set to past
 
         // Store expired token

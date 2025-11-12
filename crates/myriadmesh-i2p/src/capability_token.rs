@@ -127,7 +127,11 @@ impl I2pCapabilityToken {
             .map_err(|_| "Invalid signature format".to_string())?;
 
         // Verify signature
-        Ok(ed25519::verify_detached(&signature, &message, issuer_public_key))
+        Ok(ed25519::verify_detached(
+            &signature,
+            &message,
+            issuer_public_key,
+        ))
     }
 
     /// Check if token is expired
@@ -136,7 +140,11 @@ impl I2pCapabilityToken {
     }
 
     /// Check if token is valid
-    pub fn is_valid(&self, recipient_node_id: &NodeId, issuer_public_key: &ed25519::PublicKey) -> Result<bool, String> {
+    pub fn is_valid(
+        &self,
+        recipient_node_id: &NodeId,
+        issuer_public_key: &ed25519::PublicKey,
+    ) -> Result<bool, String> {
         // Check expiration
         if self.is_expired() {
             return Ok(false);
@@ -154,11 +162,7 @@ impl I2pCapabilityToken {
     /// Get remaining validity time in seconds
     pub fn ttl_remaining(&self) -> u64 {
         let current = now();
-        if current >= self.expires_at {
-            0
-        } else {
-            self.expires_at - current
-        }
+        self.expires_at.saturating_sub(current)
     }
 
     /// Get message to sign
@@ -205,7 +209,7 @@ impl TokenStorage {
     pub fn store_token(&mut self, token: I2pCapabilityToken) {
         self.tokens
             .entry(token.issuer_node_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(token);
     }
 
@@ -221,12 +225,7 @@ impl TokenStorage {
     pub fn get_all_tokens(&self, issuer_node_id: &NodeId) -> Vec<&I2pCapabilityToken> {
         self.tokens
             .get(issuer_node_id)
-            .map(|tokens| {
-                tokens
-                    .iter()
-                    .filter(|t| !t.is_expired())
-                    .collect()
-            })
+            .map(|tokens| tokens.iter().filter(|t| !t.is_expired()).collect())
             .unwrap_or_default()
     }
 
@@ -299,13 +298,7 @@ mod tests {
         let issuer_node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
         let dest = I2pDestination::new("test.b32.i2p".to_string());
 
-        let mut token = I2pCapabilityToken::new(
-            for_node,
-            dest,
-            i2p_node_id,
-            issuer_node_id,
-            30,
-        );
+        let mut token = I2pCapabilityToken::new(for_node, dest, i2p_node_id, issuer_node_id, 30);
 
         // Sign token
         token.sign(&identity).unwrap();
@@ -327,13 +320,7 @@ mod tests {
         let issuer_node_id = NodeId::from_bytes([3u8; 32]);
         let dest = I2pDestination::new("test.b32.i2p".to_string());
 
-        let mut token = I2pCapabilityToken::new(
-            for_node,
-            dest,
-            i2p_node_id,
-            issuer_node_id,
-            30,
-        );
+        let mut token = I2pCapabilityToken::new(for_node, dest, i2p_node_id, issuer_node_id, 30);
 
         // Token should not be expired initially
         assert!(!token.is_expired());
@@ -351,13 +338,7 @@ mod tests {
         let issuer_node_id = NodeId::from_bytes([3u8; 32]);
         let dest = I2pDestination::new("test.b32.i2p".to_string());
 
-        let token = I2pCapabilityToken::new(
-            for_node,
-            dest,
-            i2p_node_id,
-            issuer_node_id,
-            30,
-        );
+        let token = I2pCapabilityToken::new(for_node, dest, i2p_node_id, issuer_node_id, 30);
 
         // Serialize and deserialize
         let bytes = token.to_bytes().unwrap();
@@ -377,13 +358,7 @@ mod tests {
         let i2p_node_id = NodeId::from_bytes([3u8; 32]);
         let dest = I2pDestination::new("test.b32.i2p".to_string());
 
-        let token = I2pCapabilityToken::new(
-            for_node,
-            dest,
-            i2p_node_id,
-            issuer_node_id,
-            30,
-        );
+        let token = I2pCapabilityToken::new(for_node, dest, i2p_node_id, issuer_node_id, 30);
 
         // Store token
         storage.store_token(token.clone());
@@ -409,13 +384,7 @@ mod tests {
         let dest = I2pDestination::new("test.b32.i2p".to_string());
 
         // Create expired token
-        let mut token = I2pCapabilityToken::new(
-            for_node,
-            dest,
-            i2p_node_id,
-            issuer_node_id,
-            30,
-        );
+        let mut token = I2pCapabilityToken::new(for_node, dest, i2p_node_id, issuer_node_id, 30);
         token.expires_at = now() - 3600; // Expired
 
         storage.store_token(token);

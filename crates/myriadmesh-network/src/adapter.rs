@@ -1,7 +1,7 @@
 //! Network adapter trait
 
 use crate::error::Result;
-use crate::types::{Address, AdapterCapabilities};
+use crate::types::{AdapterCapabilities, Address};
 use myriadmesh_protocol::{Frame, NodeId};
 use serde::{Deserialize, Serialize};
 use std::fmt;

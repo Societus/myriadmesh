@@ -41,11 +41,6 @@ impl RoutingFlags {
         RoutingFlags(flags)
     }
 
-    /// Get default flags (E2E_STRICT)
-    pub fn default() -> Self {
-        RoutingFlags(Self::E2E_STRICT)
-    }
-
     /// Check if flag is set
     pub fn contains(&self, flag: u8) -> bool {
         (self.0 & flag) != 0
@@ -69,7 +64,7 @@ impl RoutingFlags {
 
 impl Default for RoutingFlags {
     fn default() -> Self {
-        Self::default()
+        RoutingFlags(Self::E2E_STRICT)
     }
 }
 
@@ -164,7 +159,7 @@ impl Default for RelayPolicy {
             allowed_tags: Vec::new(),
             always_relay_sensitive: true,
             max_message_size: 1024 * 1024, // 1MB
-            max_relay_rate: 1000,           // 1000 msg/min
+            max_relay_rate: 1000,          // 1000 msg/min
         }
     }
 }
@@ -260,9 +255,11 @@ mod tests {
 
     #[test]
     fn test_relay_policy_blocked_tags() {
-        let mut policy = RelayPolicy::default();
-        policy.enable_filtering = true;
-        policy.blocked_tags = vec!["nsfw".to_string()];
+        let policy = RelayPolicy {
+            enable_filtering: true,
+            blocked_tags: vec!["nsfw".to_string()],
+            ..Default::default()
+        };
 
         let flags = RoutingFlags::new(RoutingFlags::RELAY_FILTERABLE);
         let tags = vec![ContentTag::new("nsfw").unwrap()];
@@ -277,9 +274,11 @@ mod tests {
 
     #[test]
     fn test_relay_policy_allowed_tags() {
-        let mut policy = RelayPolicy::default();
-        policy.enable_filtering = true;
-        policy.allowed_tags = vec!["educational".to_string()];
+        let policy = RelayPolicy {
+            enable_filtering: true,
+            allowed_tags: vec!["educational".to_string()],
+            ..Default::default()
+        };
 
         let flags = RoutingFlags::new(RoutingFlags::RELAY_FILTERABLE);
 
@@ -294,9 +293,11 @@ mod tests {
 
     #[test]
     fn test_e2e_strict_not_filterable() {
-        let mut policy = RelayPolicy::default();
-        policy.enable_filtering = true;
-        policy.blocked_tags = vec!["nsfw".to_string()];
+        let policy = RelayPolicy {
+            enable_filtering: true,
+            blocked_tags: vec!["nsfw".to_string()],
+            ..Default::default()
+        };
 
         let flags = RoutingFlags::new(RoutingFlags::E2E_STRICT);
         let tags = vec![ContentTag::new("nsfw").unwrap()];

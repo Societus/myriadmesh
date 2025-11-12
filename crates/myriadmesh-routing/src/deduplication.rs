@@ -55,8 +55,8 @@ impl DeduplicationCache {
         let current_time = now();
 
         // If already exists, update timestamp and move to back of LRU
-        if self.entries.contains_key(&message_id) {
-            self.entries.insert(message_id, current_time);
+        if let std::collections::hash_map::Entry::Occupied(mut e) = self.entries.entry(message_id) {
+            e.insert(current_time);
 
             // Remove from current position in LRU
             if let Some(pos) = self.lru_queue.iter().position(|id| id == &message_id) {

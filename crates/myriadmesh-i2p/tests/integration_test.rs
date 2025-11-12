@@ -14,7 +14,11 @@ use myriadmesh_i2p::{
 use myriadmesh_protocol::NodeId;
 
 /// Helper to create test route nodes
-fn create_test_route_node(id: u8, reliability: f64, latency: f64) -> myriadmesh_i2p::onion::RouteNode {
+fn create_test_route_node(
+    id: u8,
+    reliability: f64,
+    latency: f64,
+) -> myriadmesh_i2p::onion::RouteNode {
     let mut bytes = [0u8; 32];
     bytes[0] = id;
     myriadmesh_i2p::onion::RouteNode {

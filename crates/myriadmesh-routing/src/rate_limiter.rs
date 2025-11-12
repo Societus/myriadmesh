@@ -40,10 +40,7 @@ impl RateLimiter {
         let now = Instant::now();
 
         // Check per-node limit
-        let entry = self
-            .node_counters
-            .entry(*node_id)
-            .or_insert((0, now));
+        let entry = self.node_counters.entry(*node_id).or_insert((0, now));
 
         // Reset counter if window expired
         if now.duration_since(entry.1) >= self.window {
@@ -154,7 +151,6 @@ impl std::error::Error for RateLimitError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread::sleep;
 
     fn create_test_node_id(byte: u8) -> NodeId {
         NodeId::from_bytes([byte; 32])
