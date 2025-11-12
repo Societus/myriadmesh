@@ -6,11 +6,13 @@
 pub mod error;
 pub mod frame;
 pub mod message;
+pub mod routing;
 pub mod types;
 
 pub use error::{ProtocolError, Result};
 pub use frame::{Frame, FrameHeader};
 pub use message::{Message, MessageId, MessageType};
+pub use routing::{ContentTag, RelayPolicy, RoutingFlags};
 pub use types::NodeId;
 
 #[cfg(test)]

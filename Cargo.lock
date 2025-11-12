@@ -422,6 +422,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "myriadmesh-dht"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "blake2",
+ "myriadmesh-crypto",
+ "myriadmesh-protocol",
+ "rand",
+ "serde",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "myriadmesh-protocol"
 version = "0.1.0"
 dependencies = [
