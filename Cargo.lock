@@ -456,6 +456,7 @@ dependencies = [
  "blake2",
  "myriadmesh-crypto",
  "myriadmesh-protocol",
+ "rand",
  "serde",
  "sodiumoxide",
  "thiserror",

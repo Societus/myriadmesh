@@ -19,6 +19,9 @@ bincode.workspace = true
 blake2.workspace = true
 sodiumoxide.workspace = true
 
+# Utilities
+rand.workspace = true
+
 # Error handling
 thiserror.workspace = true
 anyhow.workspace = true
