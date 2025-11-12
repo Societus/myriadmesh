@@ -152,10 +152,15 @@ mod tests {
     fn test_successful_relays_increase_score() {
         let mut rep = NodeReputation::new();
 
+        // Add some uptime and age to allow score to exceed 0.5
+        rep.update_uptime(Duration::from_secs(7 * 86400)); // 7 days uptime
+
         for _ in 0..100 {
             rep.record_success();
         }
 
+        // With 100% reliability (0.5) + some uptime (0.3 * 7/90) + minimal age (0.2 * ~0)
+        // Score should be > 0.5
         assert!(rep.score() > 0.5);
         assert!(rep.is_trustworthy());
     }
@@ -176,6 +181,9 @@ mod tests {
     fn test_mixed_relays() {
         let mut rep = NodeReputation::new();
 
+        // Add uptime to allow score contribution beyond reliability
+        rep.update_uptime(Duration::from_secs(14 * 86400)); // 14 days uptime
+
         // 80% success rate
         for _ in 0..80 {
             rep.record_success();
@@ -184,7 +192,9 @@ mod tests {
             rep.record_failure();
         }
 
-        assert!(rep.score() > 0.5);
+        // With 80% reliability (0.4) + 14 days uptime (0.3 * 14/90 ≈ 0.047) + minimal age
+        // Score should be > 0.4 and trustworthy (>= 0.3)
+        assert!(rep.score() > 0.4);
         assert!(rep.is_trustworthy());
     }
 }

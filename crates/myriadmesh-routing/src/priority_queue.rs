@@ -37,6 +37,18 @@ impl PriorityLevel {
     }
 }
 
+impl From<myriadmesh_protocol::types::Priority> for PriorityLevel {
+    fn from(priority: myriadmesh_protocol::types::Priority) -> Self {
+        use myriadmesh_protocol::types::Priority;
+        match priority {
+            Priority::Low => PriorityLevel::Low,
+            Priority::Normal => PriorityLevel::Normal,
+            Priority::High => PriorityLevel::High,
+            Priority::Urgent => PriorityLevel::Emergency,
+        }
+    }
+}
+
 /// Message with routing metadata
 #[derive(Debug, Clone)]
 pub struct QueuedMessage {
@@ -102,7 +114,7 @@ impl PriorityQueue {
 
     /// Enqueue a message with automatic priority detection
     pub fn enqueue(&mut self, message: Message) -> Result<(), String> {
-        let priority = PriorityLevel::from_priority(message.priority.to_u8());
+        let priority = PriorityLevel::from(message.priority);
         self.enqueue_with_priority(message, priority)
     }
 

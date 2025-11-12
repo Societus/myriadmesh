@@ -54,21 +54,24 @@ impl RoutingTable {
 
     /// Calculate bucket index for a node ID
     ///
-    /// Bucket index is the position of the most significant differing bit
+    /// Bucket index is based on the position of the first differing bit:
+    /// - Bucket 0: MSB of first byte differs (most distant)
+    /// - Bucket 255: LSB of last byte differs (closest)
     fn bucket_index(&self, node_id: &NodeId) -> usize {
         let distance = self.local_node_id.distance(node_id);
 
         // Find the first non-zero byte
         for (byte_idx, &byte) in distance.iter().enumerate() {
             if byte != 0 {
-                // Find the position of the most significant bit
-                let bit_pos = 7 - byte.leading_zeros() as usize;
-                return byte_idx * 8 + bit_pos;
+                // Find the position of the most significant bit within the byte
+                let msb_pos = byte.leading_zeros() as usize;
+                // Calculate bucket index
+                return byte_idx * 8 + msb_pos;
             }
         }
 
         // All bits are the same (shouldn't happen for different nodes)
-        0
+        255
     }
 
     /// Add or update a node in the routing table
