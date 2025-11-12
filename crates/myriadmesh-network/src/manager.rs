@@ -3,7 +3,7 @@
 use crate::adapter::{NetworkAdapter, AdapterStatus};
 use crate::error::{NetworkError, Result};
 use crate::metrics::AdapterMetrics;
-use crate::types::AdapterCapabilities;
+use crate::types::{Address, AdapterCapabilities};
 use myriadmesh_protocol::types::AdapterType;
 use myriadmesh_protocol::Frame;
 use std::collections::HashMap;

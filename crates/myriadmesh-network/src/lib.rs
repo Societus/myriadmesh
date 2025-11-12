@@ -9,12 +9,14 @@
 //! - Overlay networks (i2p)
 
 pub mod adapter;
+pub mod adapters;
 pub mod error;
 pub mod manager;
 pub mod metrics;
 pub mod types;
 
 pub use adapter::{NetworkAdapter, AdapterStatus};
+pub use adapters::{EthernetAdapter, EthernetConfig};
 pub use error::{NetworkError, Result};
 pub use manager::AdapterManager;
 pub use metrics::AdapterMetrics;
