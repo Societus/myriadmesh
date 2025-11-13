@@ -301,7 +301,9 @@ mod tests {
 
         assert!(queue.peek().is_none());
 
-        queue.enqueue(create_test_message(Priority::high())).unwrap();
+        queue
+            .enqueue(create_test_message(Priority::high()))
+            .unwrap();
 
         let peeked = queue.peek().unwrap();
         assert_eq!(peeked.message.priority, Priority::high());
@@ -337,7 +339,9 @@ mod tests {
         queue
             .enqueue(create_test_message(Priority::normal()))
             .unwrap();
-        queue.enqueue(create_test_message(Priority::high())).unwrap();
+        queue
+            .enqueue(create_test_message(Priority::high()))
+            .unwrap();
 
         assert_eq!(queue.len(), 2);
 

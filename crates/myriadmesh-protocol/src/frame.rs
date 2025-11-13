@@ -519,10 +519,7 @@ mod tests {
     fn test_magic_bytes() {
         // Verify magic bytes spell "MYMS"
         assert_eq!(MAGIC_BYTES, [0x4D, 0x59, 0x4D, 0x53]);
-        assert_eq!(
-            std::str::from_utf8(&MAGIC_BYTES).unwrap(),
-            "MYMS"
-        );
+        assert_eq!(std::str::from_utf8(&MAGIC_BYTES).unwrap(), "MYMS");
     }
 
     #[test]
