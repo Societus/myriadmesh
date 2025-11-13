@@ -18,8 +18,10 @@
 //! - Payload (variable): Encrypted message payload
 //! - Signature (64 bytes): Ed25519 signature of header+payload
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::{ProtocolError, Result};
-use crate::message::{MessageId, MessageType};
+use crate::message::{Message, MessageId, MessageType};
 use crate::types::{NodeId, Priority};
 
 /// Protocol version
@@ -42,7 +44,7 @@ pub const MAX_FRAME_SIZE: usize = 1024 * 1024 + HEADER_SIZE + SIGNATURE_SIZE;
 pub const MAX_PAYLOAD_SIZE: usize = 65535;
 
 /// Frame flags bitfield (per specification.md:77-87)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrameFlags(u8);
 
 impl FrameFlags {
@@ -104,7 +106,7 @@ impl Default for FrameFlags {
 }
 
 /// Frame header (99 bytes fixed size)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrameHeader {
     /// Magic bytes for protocol identification
     pub magic: [u8; 4],
@@ -322,7 +324,7 @@ impl FrameHeader {
 }
 
 /// A complete frame with header, payload, and signature
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Frame {
     /// Frame header (99 bytes)
     pub header: FrameHeader,
@@ -364,6 +366,33 @@ impl Frame {
             header,
             payload,
             signature: Vec::new(), // Signature added separately
+        })
+    }
+
+    /// Create a frame from a Message (compatibility helper)
+    pub fn from_message(message: &Message) -> Result<Self> {
+        Self::new(
+            message.message_type,
+            message.source,
+            message.destination,
+            message.payload.clone(),
+            message.id,
+            message.timestamp,
+        )
+    }
+
+    /// Convert frame to Message (compatibility helper)
+    pub fn to_message(&self) -> Result<Message> {
+        Ok(Message {
+            id: self.header.message_id,
+            source: self.header.source,
+            destination: self.header.destination,
+            message_type: self.header.message_type,
+            priority: self.header.priority,
+            ttl: self.header.ttl,
+            timestamp: self.header.timestamp,
+            sequence: 0, // Not stored in frame
+            payload: self.payload.clone(),
         })
     }
 

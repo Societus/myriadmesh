@@ -39,13 +39,8 @@ impl PriorityLevel {
 
 impl From<myriadmesh_protocol::types::Priority> for PriorityLevel {
     fn from(priority: myriadmesh_protocol::types::Priority) -> Self {
-        use myriadmesh_protocol::types::Priority;
-        match priority {
-            Priority::Low => PriorityLevel::Low,
-            Priority::Normal => PriorityLevel::Normal,
-            Priority::High => PriorityLevel::High,
-            Priority::Urgent => PriorityLevel::Emergency,
-        }
+        // Priority is now u8 (0-255), convert using value ranges
+        PriorityLevel::from_priority(priority.as_u8())
     }
 }
 
@@ -246,7 +241,7 @@ mod tests {
     fn test_enqueue_dequeue() {
         let mut queue = PriorityQueue::new(100);
 
-        let msg = create_test_message(Priority::Normal);
+        let msg = create_test_message(Priority::normal());
         queue.enqueue(msg).unwrap();
 
         assert_eq!(queue.len(), 1);
@@ -262,25 +257,25 @@ mod tests {
         let mut queue = PriorityQueue::new(100);
 
         // Enqueue in random order
-        queue.enqueue(create_test_message(Priority::Low)).unwrap();
+        queue.enqueue(create_test_message(Priority::low())).unwrap();
         queue
-            .enqueue(create_test_message(Priority::Urgent))
+            .enqueue(create_test_message(Priority::emergency()))
             .unwrap();
         queue
-            .enqueue(create_test_message(Priority::Normal))
+            .enqueue(create_test_message(Priority::normal()))
             .unwrap();
 
         assert_eq!(queue.len(), 3);
 
-        // Should dequeue in priority order (Urgent first)
+        // Should dequeue in priority order (Emergency first)
         let first = queue.dequeue().unwrap();
-        assert_eq!(first.message.priority, Priority::Urgent);
+        assert_eq!(first.message.priority, Priority::emergency());
 
         let second = queue.dequeue().unwrap();
-        assert_eq!(second.message.priority, Priority::Normal);
+        assert_eq!(second.message.priority, Priority::normal());
 
         let third = queue.dequeue().unwrap();
-        assert_eq!(third.message.priority, Priority::Low);
+        assert_eq!(third.message.priority, Priority::low());
     }
 
     #[test]
@@ -289,14 +284,14 @@ mod tests {
 
         // Fill queue
         queue
-            .enqueue(create_test_message(Priority::Normal))
+            .enqueue(create_test_message(Priority::normal()))
             .unwrap();
         queue
-            .enqueue(create_test_message(Priority::Normal))
+            .enqueue(create_test_message(Priority::normal()))
             .unwrap();
 
         // Should fail (queue full)
-        let result = queue.enqueue(create_test_message(Priority::Normal));
+        let result = queue.enqueue(create_test_message(Priority::normal()));
         assert!(result.is_err());
     }
 
@@ -306,10 +301,10 @@ mod tests {
 
         assert!(queue.peek().is_none());
 
-        queue.enqueue(create_test_message(Priority::High)).unwrap();
+        queue.enqueue(create_test_message(Priority::high())).unwrap();
 
         let peeked = queue.peek().unwrap();
-        assert_eq!(peeked.message.priority, Priority::High);
+        assert_eq!(peeked.message.priority, Priority::high());
 
         // Queue should still have the message
         assert_eq!(queue.len(), 1);
@@ -320,17 +315,17 @@ mod tests {
         let mut queue = PriorityQueue::new(100);
 
         queue
-            .enqueue(create_test_message(Priority::Urgent))
+            .enqueue(create_test_message(Priority::emergency()))
             .unwrap();
         queue
-            .enqueue(create_test_message(Priority::Urgent))
+            .enqueue(create_test_message(Priority::emergency()))
             .unwrap();
         queue
-            .enqueue(create_test_message(Priority::Normal))
+            .enqueue(create_test_message(Priority::normal()))
             .unwrap();
 
         let stats = queue.stats();
-        assert_eq!(stats.emergency, 2); // Urgent maps to Emergency (224-255)
+        assert_eq!(stats.emergency, 2); // emergency is 224-255
         assert_eq!(stats.normal, 1);
         assert_eq!(stats.total, 3);
     }
@@ -340,9 +335,9 @@ mod tests {
         let mut queue = PriorityQueue::new(100);
 
         queue
-            .enqueue(create_test_message(Priority::Normal))
+            .enqueue(create_test_message(Priority::normal()))
             .unwrap();
-        queue.enqueue(create_test_message(Priority::High)).unwrap();
+        queue.enqueue(create_test_message(Priority::high())).unwrap();
 
         assert_eq!(queue.len(), 2);
 
