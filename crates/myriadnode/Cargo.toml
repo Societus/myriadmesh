@@ -1,0 +1,61 @@
+[package]
+name = "myriadnode"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "myriadnode"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace crates
+myriadmesh-core = { path = "../myriadmesh-core" }
+myriadmesh-crypto = { path = "../myriadmesh-crypto" }
+myriadmesh-protocol = { path = "../myriadmesh-protocol" }
+myriadmesh-dht = { path = "../myriadmesh-dht" }
+myriadmesh-routing = { path = "../myriadmesh-routing" }
+myriadmesh-network = { path = "../myriadmesh-network" }
+myriadmesh-i2p = { path = "../myriadmesh-i2p" }
+
+# Async runtime
+tokio.workspace = true
+
+# Web framework
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "trace", "cors"] }
+
+# WebSocket support
+tokio-tungstenite = "0.21"
+
+# Serialization
+serde.workspace = true
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Configuration
+config = "0.14"
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# Database
+sqlx = { version = "0.8.1", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "macros"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+# Utilities
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
+hex.workspace = true
+
+[dev-dependencies]
+tempfile = "3.8"
