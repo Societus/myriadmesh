@@ -3,6 +3,7 @@
 use crate::error::{DhtError, Result};
 use crate::{MAX_DHT_KEYS, MAX_DHT_STORAGE_BYTES, MAX_VALUE_SIZE};
 use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -35,6 +36,7 @@ pub struct StorageEntry {
 
     /// Ed25519 signature over (key || value || expires_at)
     /// SECURITY H7: Signature from publisher to prevent DHT poisoning
+    #[serde(with = "BigArray")]
     pub signature: [u8; 64],
 }
 
@@ -61,21 +63,17 @@ impl StorageEntry {
         message.extend_from_slice(&self.value);
         message.extend_from_slice(&self.expires_at.to_le_bytes());
 
-        // Extract signature
-        let signature = match ed25519::Signature::from_slice(&self.signature) {
-            Some(sig) => sig,
-            None => return Err(DhtError::InvalidSignature),
-        };
+        // Extract signature (ed25519::Signature uses from_bytes which returns a Result)
+        let signature = ed25519::Signature::from_bytes(&self.signature)
+            .map_err(|_| DhtError::InvalidSignature)?;
 
         // Derive public key from publisher node ID
         // In MyriadMesh, NodeID = BLAKE2b(public_key)
         // For verification, we need to store the actual public key or have it provided
         // For now, we'll assume publisher is the public key itself (32 bytes)
         // NOTE: This may need adjustment based on actual NodeID derivation
-        let public_key = match ed25519::PublicKey::from_slice(&self.publisher) {
-            Some(pk) => pk,
-            None => return Err(DhtError::InvalidPublicKey),
-        };
+        let public_key = ed25519::PublicKey::from_slice(&self.publisher)
+            .ok_or(DhtError::InvalidPublicKey)?;
 
         // Verify signature
         if ed25519::verify_detached(&signature, &message, &public_key) {
@@ -266,6 +264,32 @@ impl Default for DhtStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sodiumoxide::crypto::sign::ed25519;
+
+    /// Helper to sign a DHT value for testing
+    /// Returns signature bytes
+    fn sign_value(key: &[u8; 32], value: &[u8], expires_at: u64, sk: &ed25519::SecretKey) -> [u8; 64] {
+        // Build message to sign: key || value || expires_at
+        let mut message = Vec::new();
+        message.extend_from_slice(key);
+        message.extend_from_slice(value);
+        message.extend_from_slice(&expires_at.to_le_bytes());
+
+        // Sign
+        let signature = ed25519::sign_detached(&message, sk);
+        signature.to_bytes()
+    }
+
+    /// Helper to create a keypair and sign a value
+    fn create_signed_value(key: [u8; 32], value: Vec<u8>, ttl_secs: u64) -> ([u8; 32], [u8; 64]) {
+        sodiumoxide::init().unwrap();
+        let (pk, sk) = ed25519::gen_keypair();
+        let expires_at = now() + ttl_secs;
+        let signature = sign_value(&key, &value, expires_at, &sk);
+        let mut pk_bytes = [0u8; 32];
+        pk_bytes.copy_from_slice(&pk[..]);
+        (pk_bytes, signature)
+    }
 
     #[test]
     fn test_new_storage() {
@@ -279,8 +303,9 @@ mod tests {
         let mut storage = DhtStorage::new();
         let key = [1u8; 32];
         let value = b"test value".to_vec();
+        let (publisher, signature) = create_signed_value(key, value.clone(), 3600);
 
-        storage.store(key, value.clone(), 3600, None).unwrap();
+        storage.store(key, value.clone(), 3600, publisher, signature).unwrap();
 
         assert_eq!(storage.key_count(), 1);
         assert!(storage.size() > 0);
@@ -294,8 +319,9 @@ mod tests {
         let mut storage = DhtStorage::new();
         let key = [1u8; 32];
         let value = vec![0u8; MAX_VALUE_SIZE + 1];
+        let (publisher, signature) = create_signed_value(key, value.clone(), 3600);
 
-        let result = storage.store(key, value, 3600, None);
+        let result = storage.store(key, value, 3600, publisher, signature);
         assert!(result.is_err());
     }
 
@@ -304,8 +330,9 @@ mod tests {
         let mut storage = DhtStorage::with_limits(100, 5);
         let key = [1u8; 32];
         let value = vec![0u8; 101]; // Too large for capacity
+        let (publisher, signature) = create_signed_value(key, value.clone(), 3600);
 
-        let result = storage.store(key, value, 3600, None);
+        let result = storage.store(key, value, 3600, publisher, signature);
         assert!(result.is_err());
     }
 
@@ -316,10 +343,12 @@ mod tests {
         let value1 = b"first value".to_vec();
         let value2 = b"second value".to_vec();
 
-        storage.store(key, value1, 3600, None).unwrap();
+        let (publisher1, signature1) = create_signed_value(key, value1.clone(), 3600);
+        storage.store(key, value1, 3600, publisher1, signature1).unwrap();
         assert_eq!(storage.key_count(), 1);
 
-        storage.store(key, value2.clone(), 3600, None).unwrap();
+        let (publisher2, signature2) = create_signed_value(key, value2.clone(), 3600);
+        storage.store(key, value2.clone(), 3600, publisher2, signature2).unwrap();
         assert_eq!(storage.key_count(), 1); // Still only 1 entry
 
         let retrieved = storage.get(&key).unwrap();
@@ -331,8 +360,9 @@ mod tests {
         let mut storage = DhtStorage::new();
         let key = [1u8; 32];
         let value = b"test".to_vec();
+        let (publisher, signature) = create_signed_value(key, value.clone(), 3600);
 
-        storage.store(key, value, 3600, None).unwrap();
+        storage.store(key, value, 3600, publisher, signature).unwrap();
         assert_eq!(storage.key_count(), 1);
 
         let removed = storage.remove(&key);
@@ -346,9 +376,10 @@ mod tests {
         let mut storage = DhtStorage::new();
         let key = [1u8; 32];
         let value = b"test".to_vec();
+        let (publisher, signature) = create_signed_value(key, value.clone(), 0);
 
         // Store with 0 TTL (immediately expired)
-        storage.store(key, value, 0, None).unwrap();
+        storage.store(key, value, 0, publisher, signature).unwrap();
 
         // Should not be retrievable
         assert!(storage.get(&key).is_none());
@@ -360,11 +391,15 @@ mod tests {
 
         // Add expired entry
         let key1 = [1u8; 32];
-        storage.store(key1, b"expired".to_vec(), 0, None).unwrap();
+        let value1 = b"expired".to_vec();
+        let (publisher1, signature1) = create_signed_value(key1, value1.clone(), 0);
+        storage.store(key1, value1, 0, publisher1, signature1).unwrap();
 
         // Add valid entry
         let key2 = [2u8; 32];
-        storage.store(key2, b"valid".to_vec(), 3600, None).unwrap();
+        let value2 = b"valid".to_vec();
+        let (publisher2, signature2) = create_signed_value(key2, value2.clone(), 3600);
+        storage.store(key2, value2, 3600, publisher2, signature2).unwrap();
 
         assert_eq!(storage.key_count(), 2);
 
@@ -378,8 +413,9 @@ mod tests {
         let mut storage = DhtStorage::new();
         let key = [1u8; 32];
         let value = b"test".to_vec();
+        let (publisher, signature) = create_signed_value(key, value.clone(), 3600);
 
-        storage.store(key, value, 3600, None).unwrap();
+        storage.store(key, value, 3600, publisher, signature).unwrap();
         assert_eq!(storage.key_count(), 1);
 
         storage.clear();
@@ -389,15 +425,86 @@ mod tests {
 
     #[test]
     fn test_ttl_remaining() {
+        sodiumoxide::init().unwrap();
+        let (pk, _sk) = ed25519::gen_keypair();
+        let mut pk_bytes = [0u8; 32];
+        pk_bytes.copy_from_slice(&pk[..]);
+
         let entry = StorageEntry {
             key: [0u8; 32],
             value: vec![],
             stored_at: now(),
             expires_at: now() + 3600,
-            publisher: None,
+            publisher: pk_bytes,
+            signature: [0u8; 64],
         };
 
         let ttl = entry.ttl_remaining();
         assert!(ttl > 0 && ttl <= 3600);
+    }
+
+    #[test]
+    fn test_invalid_signature_rejected() {
+        // SECURITY TEST H7: Verify invalid signatures are rejected
+        let mut storage = DhtStorage::new();
+        let key = [1u8; 32];
+        let value = b"test value".to_vec();
+
+        sodiumoxide::init().unwrap();
+        let (pk, _sk) = ed25519::gen_keypair();
+        let mut pk_bytes = [0u8; 32];
+        pk_bytes.copy_from_slice(&pk[..]);
+        let invalid_signature = [0u8; 64]; // Invalid signature
+
+        let result = storage.store(key, value, 3600, pk_bytes, invalid_signature);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), DhtError::InvalidSignature));
+    }
+
+    #[test]
+    fn test_tampered_value_rejected() {
+        // SECURITY TEST H7: Verify tampered values are rejected
+        let mut storage = DhtStorage::new();
+        let key = [1u8; 32];
+        let original_value = b"original value".to_vec();
+        let tampered_value = b"tampered value".to_vec();
+
+        // Sign the original value
+        let (publisher, signature) = create_signed_value(key, original_value.clone(), 3600);
+
+        // Try to store tampered value with original signature
+        let result = storage.store(key, tampered_value, 3600, publisher, signature);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), DhtError::InvalidSignature));
+    }
+
+    #[test]
+    fn test_valid_signature_accepted() {
+        // SECURITY TEST H7: Verify valid signatures are accepted
+        let mut storage = DhtStorage::new();
+        let key = [1u8; 32];
+        let value = b"test value".to_vec();
+        let (publisher, signature) = create_signed_value(key, value.clone(), 3600);
+
+        let result = storage.store(key, value, 3600, publisher, signature);
+        assert!(result.is_ok());
+        assert_eq!(storage.key_count(), 1);
+    }
+
+    #[test]
+    fn test_wrong_key_signature_rejected() {
+        // SECURITY TEST H7: Verify signature for different key is rejected
+        let mut storage = DhtStorage::new();
+        let key1 = [1u8; 32];
+        let key2 = [2u8; 32];
+        let value = b"test value".to_vec();
+
+        // Sign with key1
+        let (publisher, signature) = create_signed_value(key1, value.clone(), 3600);
+
+        // Try to store with key2 but signature for key1
+        let result = storage.store(key2, value, 3600, publisher, signature);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), DhtError::InvalidSignature));
     }
 }

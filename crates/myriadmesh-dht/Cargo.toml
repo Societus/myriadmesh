@@ -14,6 +14,10 @@ myriadmesh-crypto = { path = "../myriadmesh-crypto" }
 # Serialization
 serde.workspace = true
 bincode.workspace = true
+serde-big-array = "0.5"  # SECURITY H7: For serializing 64-byte signatures
+
+# Crypto
+sodiumoxide.workspace = true
 
 # Async runtime
 tokio.workspace = true
