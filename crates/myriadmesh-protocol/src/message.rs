@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::error::{ProtocolError, Result};
 use crate::types::{NodeId, Priority};
 
-/// Size of a message ID in bytes
-pub const MESSAGE_ID_SIZE: usize = 32;
+/// Size of a message ID in bytes (per specification.md:128-131)
+pub const MESSAGE_ID_SIZE: usize = 16;
 
 /// Maximum message payload size (1 MB)
 pub const MAX_PAYLOAD_SIZE: usize = 1024 * 1024;
@@ -19,6 +19,7 @@ pub struct MessageId([u8; MESSAGE_ID_SIZE]);
 
 impl MessageId {
     /// Generate a new message ID from message contents
+    /// Uses BLAKE2b(timestamp + source_id + random_nonce)[0:16]
     pub fn generate(
         source: &NodeId,
         destination: &NodeId,
@@ -28,15 +29,15 @@ impl MessageId {
     ) -> Self {
         let mut hasher = Blake2b512::new();
 
+        hasher.update(timestamp.to_le_bytes());
         hasher.update(source.as_bytes());
         hasher.update(destination.as_bytes());
         hasher.update(payload);
-        hasher.update(timestamp.to_le_bytes());
         hasher.update(sequence.to_le_bytes());
 
         let hash = hasher.finalize();
 
-        // Take first 32 bytes
+        // Take first 16 bytes (per specification)
         let mut id = [0u8; MESSAGE_ID_SIZE];
         id.copy_from_slice(&hash[..MESSAGE_ID_SIZE]);
 
@@ -75,13 +76,13 @@ impl MessageId {
 
 impl std::fmt::Debug for MessageId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MessageId({}...)", &self.to_hex()[..16])
+        write!(f, "MessageId({}...)", &self.to_hex()[..12])
     }
 }
 
 impl std::fmt::Display for MessageId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", &self.to_hex()[..16])
+        write!(f, "{}", &self.to_hex()[..12])
     }
 }
 
@@ -89,29 +90,57 @@ impl std::fmt::Display for MessageId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum MessageType {
-    /// User data message
+    /// Reserved (0x00)
+    Reserved = 0x00,
+    /// User data message (0x01)
     Data = 0x01,
-    /// DHT FIND_NODE request
+    /// Protocol control message (0x02)
+    Control = 0x02,
+    /// DHT lookup request (0x03)
+    DhtQuery = 0x03,
+    /// DHT lookup response (0x04)
+    DhtResponse = 0x04,
+    /// Store value in DHT (0x05)
+    DhtStore = 0x05,
+    /// Node discovery announcement (0x06)
+    Discovery = 0x06,
+    /// Keep-alive message (0x07)
+    Heartbeat = 0x07,
+    /// Cryptographic key exchange (0x08)
+    KeyExchange = 0x08,
+    /// Blockchain block (0x09)
+    LedgerBlock = 0x09,
+    /// Query ledger (0x0A)
+    LedgerQuery = 0x0A,
+    /// Performance test request (0x0B)
+    TestRequest = 0x0B,
+    /// Performance test response (0x0C)
+    TestResponse = 0x0C,
+    /// Request route information (0x0D)
+    RouteRequest = 0x0D,
+    /// Provide route information (0x0E)
+    RouteResponse = 0x0E,
+
+    // Legacy compatibility (will be remapped)
+    /// DHT FIND_NODE request (mapped to DhtQuery)
     FindNode = 0x10,
-    /// DHT FIND_NODE response
+    /// DHT FIND_NODE response (mapped to DhtResponse)
     FindNodeResponse = 0x11,
-    /// DHT STORE request
+    /// DHT STORE request (mapped to DhtStore)
     Store = 0x12,
-    /// DHT STORE acknowledgment
+    /// DHT STORE acknowledgment (mapped to DhtResponse)
     StoreAck = 0x13,
-    /// DHT FIND_VALUE request
+    /// DHT FIND_VALUE request (mapped to DhtQuery)
     FindValue = 0x14,
-    /// DHT FIND_VALUE response
+    /// DHT FIND_VALUE response (mapped to DhtResponse)
     FindValueResponse = 0x15,
-    /// Ping message (health check)
+    /// Ping message (mapped to Heartbeat)
     Ping = 0x20,
-    /// Pong response
+    /// Pong response (mapped to Heartbeat)
     Pong = 0x21,
-    /// Key exchange initiation
-    KeyExchange = 0x30,
-    /// Key exchange response
+    /// Key exchange response (mapped to KeyExchange)
     KeyExchangeResponse = 0x31,
-    /// Message acknowledgment
+    /// Message acknowledgment (mapped to Control)
     Ack = 0x40,
     /// Error message
     Error = 0xFF,
@@ -121,7 +150,22 @@ impl MessageType {
     /// Create from u8
     pub fn from_u8(value: u8) -> Result<Self> {
         match value {
+            0x00 => Ok(MessageType::Reserved),
             0x01 => Ok(MessageType::Data),
+            0x02 => Ok(MessageType::Control),
+            0x03 => Ok(MessageType::DhtQuery),
+            0x04 => Ok(MessageType::DhtResponse),
+            0x05 => Ok(MessageType::DhtStore),
+            0x06 => Ok(MessageType::Discovery),
+            0x07 => Ok(MessageType::Heartbeat),
+            0x08 => Ok(MessageType::KeyExchange),
+            0x09 => Ok(MessageType::LedgerBlock),
+            0x0A => Ok(MessageType::LedgerQuery),
+            0x0B => Ok(MessageType::TestRequest),
+            0x0C => Ok(MessageType::TestResponse),
+            0x0D => Ok(MessageType::RouteRequest),
+            0x0E => Ok(MessageType::RouteResponse),
+            // Legacy compatibility
             0x10 => Ok(MessageType::FindNode),
             0x11 => Ok(MessageType::FindNodeResponse),
             0x12 => Ok(MessageType::Store),
@@ -130,7 +174,6 @@ impl MessageType {
             0x15 => Ok(MessageType::FindValueResponse),
             0x20 => Ok(MessageType::Ping),
             0x21 => Ok(MessageType::Pong),
-            0x30 => Ok(MessageType::KeyExchange),
             0x31 => Ok(MessageType::KeyExchangeResponse),
             0x40 => Ok(MessageType::Ack),
             0xFF => Ok(MessageType::Error),
@@ -165,7 +208,7 @@ pub struct Message {
     /// Time-to-live (number of hops remaining)
     pub ttl: u8,
 
-    /// Timestamp (Unix time in seconds)
+    /// Timestamp (Unix time in milliseconds)
     pub timestamp: u64,
 
     /// Sequence number (for ordering)
@@ -190,10 +233,11 @@ impl Message {
             });
         }
 
+        // Timestamp in milliseconds (per specification.md:143-146)
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs();
+            .as_millis() as u64;
 
         let sequence = 0; // Should be managed by higher layers
         let id = MessageId::generate(&source, &destination, &payload, timestamp, sequence);
@@ -204,7 +248,7 @@ impl Message {
             destination,
             message_type,
             priority: Priority::default(),
-            ttl: 32, // Default TTL
+            ttl: 32, // Default TTL (per specification.md:122)
             timestamp,
             sequence,
             payload,
@@ -267,6 +311,18 @@ impl Message {
             + 4  // sequence
             + self.payload.len()
     }
+
+    /// Check if timestamp is fresh (within acceptable time window)
+    /// Per specification.md:486-488: timestamp must be within ±5 minutes
+    pub fn is_timestamp_fresh(&self) -> bool {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let age_ms = (now as i64 - self.timestamp as i64).abs();
+        age_ms <= 300_000 // 5 minutes in milliseconds
+    }
 }
 
 #[cfg(test)]
@@ -274,11 +330,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_message_id_size() {
+        assert_eq!(MESSAGE_ID_SIZE, 16);
+    }
+
+    #[test]
     fn test_message_id_generation() {
         let source = NodeId::from_bytes([1u8; 32]);
         let dest = NodeId::from_bytes([2u8; 32]);
         let payload = b"test payload";
-        let timestamp = 1234567890;
+        let timestamp = 1704067200000u64; // milliseconds
         let sequence = 42;
 
         let id1 = MessageId::generate(&source, &dest, payload, timestamp, sequence);
@@ -303,8 +364,11 @@ mod tests {
         assert_eq!(msg.source, source);
         assert_eq!(msg.destination, dest);
         assert_eq!(msg.message_type, MessageType::Data);
-        assert_eq!(msg.priority, Priority::Normal);
+        assert_eq!(msg.priority, Priority::normal());
         assert_eq!(msg.ttl, 32);
+
+        // Timestamp should be in milliseconds (13 digits for year 2024+)
+        assert!(msg.timestamp > 1_000_000_000_000); // > 2001 in milliseconds
     }
 
     #[test]
@@ -358,7 +422,46 @@ mod tests {
         let id = MessageId::generate(&source, &dest, b"test", 123, 0);
 
         let hex = id.to_hex();
+        assert_eq!(hex.len(), 32); // 16 bytes = 32 hex chars
         let parsed = MessageId::from_hex(&hex).unwrap();
         assert_eq!(id, parsed);
+    }
+
+    #[test]
+    fn test_timestamp_freshness() {
+        let source = NodeId::from_bytes([1u8; 32]);
+        let dest = NodeId::from_bytes([2u8; 32]);
+        let payload = b"test".to_vec();
+
+        // Fresh message
+        let msg = Message::new(source, dest, MessageType::Data, payload.clone()).unwrap();
+        assert!(msg.is_timestamp_fresh());
+
+        // Old message (6 minutes ago)
+        let old_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            - 360_000; // 6 minutes in ms
+
+        let mut old_msg = Message::new(source, dest, MessageType::Data, payload).unwrap();
+        old_msg.timestamp = old_timestamp;
+        assert!(!old_msg.is_timestamp_fresh());
+    }
+
+    #[test]
+    fn test_message_type_conversion() {
+        assert_eq!(MessageType::from_u8(0x01).unwrap(), MessageType::Data);
+        assert_eq!(MessageType::from_u8(0x07).unwrap(), MessageType::Heartbeat);
+        assert_eq!(
+            MessageType::from_u8(0x0B).unwrap(),
+            MessageType::TestRequest
+        );
+
+        assert_eq!(MessageType::Data.to_u8(), 0x01);
+        assert_eq!(MessageType::Heartbeat.to_u8(), 0x07);
+
+        // Invalid type
+        assert!(MessageType::from_u8(0x99).is_err());
     }
 }

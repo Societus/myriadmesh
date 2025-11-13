@@ -136,7 +136,7 @@ mod tests {
     use super::*;
 
     fn create_test_message_id(byte: u8) -> MessageId {
-        MessageId::from_bytes([byte; 32])
+        MessageId::from_bytes([byte; 16])
     }
 
     #[test]
