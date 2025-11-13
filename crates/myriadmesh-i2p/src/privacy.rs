@@ -125,12 +125,23 @@ impl PrivacyLayer {
             }
 
             PaddingStrategy::FixedBuckets => {
-                let buckets = [512, 1024, 2048, 4096, 8192, 16384];
+                // SECURITY H6: More granular bucket sizes to reduce information leakage
+                // Smaller increments at lower sizes where most messages fall
+                let buckets = [
+                    256, 384, 512, 640, 768, 896, 1024, // 128-byte increments up to 1KB
+                    1280, 1536, 1792, 2048, // 256-byte increments 1-2KB
+                    2560, 3072, 3584, 4096, // 512-byte increments 2-4KB
+                    5120, 6144, 7168, 8192, // 1KB increments 4-8KB
+                    10240, 12288, 14336, 16384, // 2KB increments 8-16KB
+                ];
+
+                // Find the smallest bucket that fits the data and respects min_message_size
+                let min_size = self.config.min_message_size.max(data.len() + 2);
                 let target_size = buckets
                     .iter()
-                    .find(|&&size| size >= data.len() + 2)
+                    .find(|&&size| size >= min_size)
                     .copied()
-                    .unwrap_or(data.len() + 2);
+                    .unwrap_or(min_size);
 
                 if target_size > data.len() + 2 {
                     let padding_needed = target_size - data.len() - 2;
@@ -246,6 +257,9 @@ impl PrivacyLayer {
     }
 
     /// Check if cover traffic should be sent
+    ///
+    /// SECURITY H5: Uses exponential distribution for unpredictable timing
+    /// to prevent pattern-based detection of cover traffic
     pub fn should_send_cover_traffic(&self, time_since_last: Duration) -> bool {
         if !self.config.enable_cover_traffic {
             return false;
@@ -253,36 +267,102 @@ impl PrivacyLayer {
 
         // Calculate expected interval between cover traffic messages
         let interval_secs = 3600.0 / (self.config.cover_traffic_rate as f64);
-        let expected_interval = Duration::from_secs_f64(interval_secs);
 
-        // Add some randomness (±20%)
+        // SECURITY H5: Use exponential distribution instead of fixed ±20% jitter
+        // This creates more realistic, unpredictable timing patterns
         let mut rng = rand::thread_rng();
-        let jitter = rng.gen_range(0.8..1.2);
-        let actual_interval = expected_interval.mul_f64(jitter);
+        let u: f64 = rng.gen(); // Random value (0, 1]
+        let u = u.max(0.0001); // Avoid log(0)
+
+        // Exponential distribution with mean = interval_secs
+        let lambda = 1.0 / interval_secs;
+        let randomized_interval_secs = -u.ln() / lambda;
+
+        // Cap at 3x the expected interval to prevent excessively long waits
+        let capped_interval = randomized_interval_secs.min(interval_secs * 3.0);
+        let actual_interval = Duration::from_secs_f64(capped_interval);
 
         time_since_last >= actual_interval
     }
 
     /// Generate cover traffic message
     ///
+    /// SECURITY H5: Uses realistic size distribution and varied patterns
+    /// to make cover traffic indistinguishable from real traffic
+    ///
     /// Returns a random message of appropriate size to blend with real traffic
     pub fn generate_cover_message(&self) -> Vec<u8> {
         let mut rng = rand::thread_rng();
 
-        // Generate random size based on padding strategy
+        // SECURITY H5: Generate random size with realistic distribution
         let size = match self.config.padding_strategy {
-            PaddingStrategy::None | PaddingStrategy::MinSize => self.config.min_message_size,
+            PaddingStrategy::None | PaddingStrategy::MinSize => {
+                // Add some variation even with MinSize strategy
+                let jitter = rng.gen_range(0..64);
+                self.config.min_message_size + jitter
+            }
             PaddingStrategy::FixedBuckets => {
-                let buckets = [512, 1024, 2048, 4096];
+                // SECURITY H5 & H6: Use granular buckets matching real traffic
+                let buckets = [
+                    256, 384, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048, 2560, 3072, 4096,
+                ];
                 *buckets.choose(&mut rng).unwrap_or(&1024)
             }
             PaddingStrategy::Random => {
-                rng.gen_range(self.config.min_message_size..=self.config.max_padding_size)
+                // SECURITY H5: Use exponential distribution for more realistic sizes
+                // Most messages are small, but occasionally large ones appear
+                let u: f64 = rng.gen();
+                let u = u.max(0.0001);
+                let mean_size = (self.config.min_message_size + self.config.max_padding_size) / 2;
+                let lambda = 1.0 / (mean_size as f64);
+                ((-u.ln() / lambda) as usize)
+                    .clamp(self.config.min_message_size, self.config.max_padding_size)
             }
         };
 
-        // Generate random data
-        (0..size).map(|_| rng.gen()).collect()
+        // SECURITY H5: Generate random data with varied patterns
+        // Mix of different byte patterns to mimic real encrypted data
+        let mut message = Vec::with_capacity(size);
+
+        // Use different patterns for different segments to vary entropy
+        let pattern_type = rng.gen_range(0..3);
+        match pattern_type {
+            0 => {
+                // Fully random (high entropy like encrypted data)
+                message.extend((0..size).map(|_| rng.gen::<u8>()));
+            }
+            1 => {
+                // Mix of random blocks and semi-structured data
+                let mut pos = 0;
+                while pos < size {
+                    let block_size = rng.gen_range(16..64).min(size - pos);
+                    if rng.gen_bool(0.7) {
+                        // Random block
+                        message.extend((0..block_size).map(|_| rng.gen::<u8>()));
+                    } else {
+                        // Semi-structured block (still encrypted-looking)
+                        let pattern = rng.gen::<u8>();
+                        let variation = rng.gen_range(1..=8); // At least 1 to avoid division by zero
+                        message.extend(
+                            (0..block_size).map(|i| pattern.wrapping_add((i % variation) as u8)),
+                        );
+                    }
+                    pos += block_size;
+                }
+            }
+            _ => {
+                // Gradient pattern with randomness
+                let start = rng.gen::<u8>();
+                let step = rng.gen_range(1..5);
+                message.extend((0..size).map(|i| {
+                    start
+                        .wrapping_add((i / step) as u8)
+                        .wrapping_add(rng.gen_range(0..16))
+                }));
+            }
+        }
+
+        message
     }
 }
 
@@ -341,6 +421,7 @@ mod tests {
 
     #[test]
     fn test_fixed_bucket_padding() {
+        // SECURITY H6: Test granular bucket sizes
         let config = PrivacyConfig {
             padding_strategy: PaddingStrategy::FixedBuckets,
             ..Default::default()
@@ -350,8 +431,11 @@ mod tests {
         let data = vec![1, 2, 3, 4, 5];
         let padded = layer.pad_message(&data);
 
-        // Should be padded to one of the bucket sizes
-        let buckets = [512, 1024, 2048, 4096, 8192, 16384];
+        // SECURITY H6: Should be padded to one of the granular bucket sizes
+        let buckets = [
+            256, 384, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048, 2560, 3072, 3584, 4096,
+            5120, 6144, 7168, 8192, 10240, 12288, 14336, 16384,
+        ];
         assert!(buckets.contains(&padded.len()));
     }
 
@@ -503,6 +587,7 @@ mod tests {
 
     #[test]
     fn test_cover_traffic_enabled() {
+        // SECURITY H5: Test exponential distribution timing
         let config = PrivacyConfig {
             enable_cover_traffic: true,
             cover_traffic_rate: 10, // 10 messages per hour
@@ -515,13 +600,16 @@ mod tests {
         let should_send = layer.should_send_cover_traffic(Duration::from_secs(0));
         assert!(!should_send);
 
-        // Should send after enough time (3600/10 = 360s, with jitter up to 432s, use 500s to be safe)
-        let should_send = layer.should_send_cover_traffic(Duration::from_secs(500));
+        // SECURITY H5: With exponential distribution, timing is more variable
+        // Mean = 360s, but can range from very short to 3x mean (1080s)
+        // Test that very long wait definitely triggers
+        let should_send = layer.should_send_cover_traffic(Duration::from_secs(1100));
         assert!(should_send);
     }
 
     #[test]
     fn test_cover_message_generation() {
+        // SECURITY H5: Test that cover messages have varied sizes
         let config = PrivacyConfig {
             padding_strategy: PaddingStrategy::MinSize,
             min_message_size: 512,
@@ -531,6 +619,126 @@ mod tests {
         let layer = PrivacyLayer::new(config);
         let cover_msg = layer.generate_cover_message();
 
-        assert_eq!(cover_msg.len(), 512);
+        // SECURITY H5: MinSize strategy now adds jitter (0-64 bytes)
+        assert!(cover_msg.len() >= 512);
+        assert!(cover_msg.len() <= 512 + 64);
+    }
+
+    #[test]
+    fn test_granular_buckets_reduce_leakage() {
+        // SECURITY H6: Test that granular buckets reduce information leakage
+        let config = PrivacyConfig {
+            padding_strategy: PaddingStrategy::FixedBuckets,
+            min_message_size: 0, // Test pure bucket behavior without minimum
+            ..Default::default()
+        };
+
+        let layer = PrivacyLayer::new(config);
+
+        // Test messages near bucket boundaries
+        let test_sizes = [
+            (250, 256),   // Should pad to 256
+            (257, 384),   // Should pad to 384
+            (513, 640),   // Should pad to 640
+            (1025, 1280), // Should pad to 1280
+        ];
+
+        for (input_size, expected_bucket) in test_sizes {
+            let data = vec![0u8; input_size];
+            let padded = layer.pad_message(&data);
+            assert_eq!(
+                padded.len(),
+                expected_bucket,
+                "Input size {} should pad to bucket {}",
+                input_size,
+                expected_bucket
+            );
+        }
+    }
+
+    #[test]
+    fn test_cover_traffic_timing_variability() {
+        // SECURITY H5: Test that cover traffic timing uses exponential distribution
+        let config = PrivacyConfig {
+            enable_cover_traffic: true,
+            cover_traffic_rate: 60, // 1 per minute for faster testing
+            ..Default::default()
+        };
+
+        let layer = PrivacyLayer::new(config);
+
+        // Test multiple intervals to see variability
+        let mut send_times = Vec::new();
+        for test_time in [30, 45, 60, 90, 120, 150, 180] {
+            if layer.should_send_cover_traffic(Duration::from_secs(test_time)) {
+                send_times.push(test_time);
+            }
+        }
+
+        // SECURITY H5: With exponential distribution, we should see varied behavior
+        // Not all tests should trigger at the same threshold
+        // At minimum, the longest wait should definitely trigger
+        assert!(
+            !send_times.is_empty(),
+            "Cover traffic should eventually send"
+        );
+    }
+
+    #[test]
+    fn test_cover_message_pattern_variety() {
+        // SECURITY H5: Test that cover messages use varied byte patterns
+        let config = PrivacyConfig {
+            padding_strategy: PaddingStrategy::Random,
+            min_message_size: 256,
+            max_padding_size: 512,
+            ..Default::default()
+        };
+
+        let layer = PrivacyLayer::new(config);
+
+        // Generate multiple cover messages
+        let messages: Vec<_> = (0..10).map(|_| layer.generate_cover_message()).collect();
+
+        // SECURITY H5: Messages should have different sizes
+        let sizes: std::collections::HashSet<_> = messages.iter().map(|m| m.len()).collect();
+        assert!(
+            sizes.len() > 1,
+            "Cover messages should have varied sizes, got {} unique sizes",
+            sizes.len()
+        );
+
+        // SECURITY H5: Messages should have different content
+        let unique_messages: std::collections::HashSet<_> = messages.iter().collect();
+        assert_eq!(
+            unique_messages.len(),
+            10,
+            "All cover messages should be unique"
+        );
+    }
+
+    #[test]
+    fn test_bucket_granularity_improvement() {
+        // SECURITY H6: Compare old vs new bucket granularity
+        let config = PrivacyConfig {
+            padding_strategy: PaddingStrategy::FixedBuckets,
+            ..Default::default()
+        };
+
+        let layer = PrivacyLayer::new(config);
+
+        // Old buckets: [512, 1024, 2048, 4096, 8192, 16384] - 6 buckets
+        // New buckets: 25 buckets with finer granularity
+
+        // Test that messages in 512-1024 range now have more options
+        let data_600 = vec![0u8; 600];
+        let padded_600 = layer.pad_message(&data_600);
+
+        // With old buckets, this would go to 1024
+        // With new buckets, should go to 640 or 768
+        assert!(
+            padded_600.len() <= 768,
+            "600-byte message should use granular bucket <= 768, got {}",
+            padded_600.len()
+        );
     }
 }

@@ -42,6 +42,10 @@ pub const MAX_FORWARD_JITTER_MS: u64 = 200;
 /// Normalizes timing regardless of hop count to prevent hop count leakage
 pub const TARGET_BUILD_TIME_MS: u64 = 100;
 
+/// SECURITY H10: Maximum route uses before requiring rotation
+/// Prevents excessive route reuse that could compromise anonymity
+pub const MAX_ROUTE_USES: u64 = 1000;
+
 /// Onion routing configuration
 #[derive(Debug, Clone)]
 pub struct OnionConfig {
@@ -387,6 +391,9 @@ impl OnionRouter {
     /// hop count leakage through timing analysis. This is the RECOMMENDED method
     /// for production use.
     ///
+    /// SECURITY H10: Enforces route expiration - will fail if route is expired or
+    /// has exceeded maximum use count.
+    ///
     /// Creates encrypted layers for each hop in the route.
     /// Each layer is encrypted with the hop's public key using X25519 key exchange.
     pub async fn build_onion_layers_with_timing_protection(
@@ -395,6 +402,19 @@ impl OnionRouter {
         payload: &[u8],
     ) -> Result<Vec<OnionLayer>, String> {
         use std::time::Instant;
+
+        // SECURITY H10: Verify route has not expired
+        if route.is_expired() {
+            return Err("Route has expired".to_string());
+        }
+
+        // SECURITY H10: Verify route has not exceeded maximum uses
+        if route.should_retire(MAX_ROUTE_USES) {
+            return Err(format!(
+                "Route should be retired (uses: {}, max: {})",
+                route.use_count, MAX_ROUTE_USES
+            ));
+        }
 
         let start = Instant::now();
 
@@ -431,6 +451,19 @@ impl OnionRouter {
         route: &OnionRoute,
         payload: &[u8],
     ) -> Result<Vec<OnionLayer>, String> {
+        // SECURITY H10: Verify route has not expired
+        if route.is_expired() {
+            return Err("Route has expired".to_string());
+        }
+
+        // SECURITY H10: Verify route has not exceeded maximum uses
+        if route.should_retire(MAX_ROUTE_USES) {
+            return Err(format!(
+                "Route should be retired (uses: {}, max: {})",
+                route.use_count, MAX_ROUTE_USES
+            ));
+        }
+
         let path = route.full_path();
 
         // Start with the final payload
@@ -1009,5 +1042,196 @@ mod tests {
             "Timing protection should produce varied delays, got {} unique values",
             unique_delays.len()
         );
+    }
+
+    #[test]
+    fn test_expired_route_rejected() {
+        // SECURITY TEST H10: Verify expired routes cannot be used
+        myriadmesh_crypto::init().unwrap();
+
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let next = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+
+        let local_kp = KeyExchangeKeypair::generate();
+        let next_kp = KeyExchangeKeypair::generate();
+        let dest_kp = KeyExchangeKeypair::generate();
+
+        // Create route with 0 second lifetime (already expired)
+        let mut route = OnionRoute::new(local, dest, vec![next], 0);
+        route.set_hop_public_key(local, X25519PublicKey::from(&local_kp.public_key));
+        route.set_hop_public_key(next, X25519PublicKey::from(&next_kp.public_key));
+        route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
+
+        // Route should be expired
+        assert!(route.is_expired());
+
+        let router = OnionRouter::new_default(local, local_kp);
+        let payload = b"test message";
+
+        // Attempting to build layers should fail due to expiration
+        let result = router.build_onion_layers_sync(&route, payload);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expired"));
+    }
+
+    #[tokio::test]
+    async fn test_expired_route_rejected_async() {
+        // SECURITY TEST H10: Verify expired routes cannot be used (async version)
+        myriadmesh_crypto::init().unwrap();
+
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let next = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+
+        let local_kp = KeyExchangeKeypair::generate();
+        let next_kp = KeyExchangeKeypair::generate();
+        let dest_kp = KeyExchangeKeypair::generate();
+
+        // Create route with 0 second lifetime (already expired)
+        let mut route = OnionRoute::new(local, dest, vec![next], 0);
+        route.set_hop_public_key(local, X25519PublicKey::from(&local_kp.public_key));
+        route.set_hop_public_key(next, X25519PublicKey::from(&next_kp.public_key));
+        route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
+
+        // Route should be expired
+        assert!(route.is_expired());
+
+        let router = OnionRouter::new_default(local, local_kp);
+        let payload = b"test message";
+
+        // Attempting to build layers should fail due to expiration
+        let result = router
+            .build_onion_layers_with_timing_protection(&route, payload)
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expired"));
+    }
+
+    #[test]
+    fn test_overused_route_rejected() {
+        // SECURITY TEST H10: Verify routes exceeding max uses cannot be used
+        myriadmesh_crypto::init().unwrap();
+
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let next = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+
+        let local_kp = KeyExchangeKeypair::generate();
+        let next_kp = KeyExchangeKeypair::generate();
+        let dest_kp = KeyExchangeKeypair::generate();
+
+        // Create route with long lifetime
+        let mut route = OnionRoute::new(local, dest, vec![next], 3600);
+        route.set_hop_public_key(local, X25519PublicKey::from(&local_kp.public_key));
+        route.set_hop_public_key(next, X25519PublicKey::from(&next_kp.public_key));
+        route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
+
+        // Route should not be expired
+        assert!(!route.is_expired());
+
+        // Set use_count to exceed MAX_ROUTE_USES
+        route.use_count = MAX_ROUTE_USES + 1;
+
+        // Route should be marked for retirement
+        assert!(route.should_retire(MAX_ROUTE_USES));
+
+        let router = OnionRouter::new_default(local, local_kp);
+        let payload = b"test message";
+
+        // Attempting to build layers should fail due to excessive use
+        let result = router.build_onion_layers_sync(&route, payload);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("retired"));
+    }
+
+    #[tokio::test]
+    async fn test_overused_route_rejected_async() {
+        // SECURITY TEST H10: Verify routes exceeding max uses cannot be used (async)
+        myriadmesh_crypto::init().unwrap();
+
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let next = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+
+        let local_kp = KeyExchangeKeypair::generate();
+        let next_kp = KeyExchangeKeypair::generate();
+        let dest_kp = KeyExchangeKeypair::generate();
+
+        // Create route with long lifetime
+        let mut route = OnionRoute::new(local, dest, vec![next], 3600);
+        route.set_hop_public_key(local, X25519PublicKey::from(&local_kp.public_key));
+        route.set_hop_public_key(next, X25519PublicKey::from(&next_kp.public_key));
+        route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
+
+        // Set use_count to exceed MAX_ROUTE_USES
+        route.use_count = MAX_ROUTE_USES + 1;
+
+        // Route should be marked for retirement
+        assert!(route.should_retire(MAX_ROUTE_USES));
+
+        let router = OnionRouter::new_default(local, local_kp);
+        let payload = b"test message";
+
+        // Attempting to build layers should fail due to excessive use
+        let result = router
+            .build_onion_layers_with_timing_protection(&route, payload)
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("retired"));
+    }
+
+    #[test]
+    fn test_route_use_count_limits() {
+        // SECURITY TEST H10: Verify use count limits are enforced correctly
+        myriadmesh_crypto::init().unwrap();
+
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+
+        let mut route = OnionRoute::new(local, dest, vec![], 3600);
+
+        // Fresh route should not need retirement
+        assert!(!route.should_retire(MAX_ROUTE_USES));
+
+        // Route at exactly MAX_ROUTE_USES should be retired
+        route.use_count = MAX_ROUTE_USES;
+        assert!(route.should_retire(MAX_ROUTE_USES));
+
+        // Route just under limit should be ok
+        route.use_count = MAX_ROUTE_USES - 1;
+        assert!(!route.should_retire(MAX_ROUTE_USES));
+    }
+
+    #[test]
+    fn test_valid_route_accepted() {
+        // SECURITY TEST H10: Verify valid routes are still accepted
+        myriadmesh_crypto::init().unwrap();
+
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let next = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+
+        let local_kp = KeyExchangeKeypair::generate();
+        let next_kp = KeyExchangeKeypair::generate();
+        let dest_kp = KeyExchangeKeypair::generate();
+
+        // Create route with reasonable lifetime and low use count
+        let mut route = OnionRoute::new(local, dest, vec![next], 3600);
+        route.set_hop_public_key(local, X25519PublicKey::from(&local_kp.public_key));
+        route.set_hop_public_key(next, X25519PublicKey::from(&next_kp.public_key));
+        route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
+        route.use_count = 10; // Well below MAX_ROUTE_USES
+
+        // Route should be valid
+        assert!(!route.is_expired());
+        assert!(!route.should_retire(MAX_ROUTE_USES));
+
+        let router = OnionRouter::new_default(local, local_kp);
+        let payload = b"test message";
+
+        // Should successfully build layers
+        let result = router.build_onion_layers_sync(&route, payload);
+        assert!(result.is_ok());
     }
 }

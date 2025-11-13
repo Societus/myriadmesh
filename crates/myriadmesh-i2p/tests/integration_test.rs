@@ -118,9 +118,12 @@ fn test_privacy_layer_message_protection() {
     let original_message = b"Hello, this is a secret message";
     let padded = layer.pad_message(original_message);
 
-    // Should be padded to bucket size
+    // SECURITY H6: Should be padded to granular bucket size >= min_message_size
     assert!(padded.len() >= 512);
-    let buckets = [512, 1024, 2048, 4096];
+    let buckets = [
+        512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168,
+        8192, 10240, 12288, 14336, 16384,
+    ];
     assert!(buckets.contains(&padded.len()));
 
     // Original data should be at start
@@ -133,8 +136,11 @@ fn test_privacy_layer_message_protection() {
 
     // Test cover traffic generation
     let cover_msg = layer.generate_cover_message();
-    // With FixedBuckets strategy, should be one of the bucket sizes
-    let valid_sizes = [512, 1024, 2048, 4096];
+    // SECURITY H6: With FixedBuckets strategy and granular buckets,
+    // should be one of the valid bucket sizes used for cover traffic
+    let valid_sizes = [
+        256, 384, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048, 2560, 3072, 4096,
+    ];
     assert!(valid_sizes.contains(&cover_msg.len()));
 }
 
