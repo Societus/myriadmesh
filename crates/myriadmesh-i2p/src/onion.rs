@@ -13,12 +13,12 @@
 
 use myriadmesh_crypto::encryption::{decrypt, encrypt, EncryptedMessage};
 use myriadmesh_crypto::keyexchange::{client_session_keys, KeyExchangeKeypair, X25519PublicKey};
-use myriadmesh_protocol::{NodeId, types::NODE_ID_SIZE};
+use myriadmesh_protocol::{types::NODE_ID_SIZE, NodeId};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
 
 /// Minimum number of hops for onion routing
@@ -611,7 +611,10 @@ mod tests {
     fn test_onion_route_creation() {
         let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
         let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
-        let hops = vec![NodeId::from_bytes([3u8; NODE_ID_SIZE]), NodeId::from_bytes([4u8; NODE_ID_SIZE])];
+        let hops = vec![
+            NodeId::from_bytes([3u8; NODE_ID_SIZE]),
+            NodeId::from_bytes([4u8; NODE_ID_SIZE]),
+        ];
 
         let route = OnionRoute::new(source, dest, hops.clone(), 3600);
 
@@ -698,7 +701,10 @@ mod tests {
         myriadmesh_crypto::init().unwrap();
         let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
         let dest = NodeId::from_bytes([255u8; NODE_ID_SIZE]);
-        let hops = vec![NodeId::from_bytes([1u8; NODE_ID_SIZE]), NodeId::from_bytes([2u8; NODE_ID_SIZE])];
+        let hops = vec![
+            NodeId::from_bytes([1u8; NODE_ID_SIZE]),
+            NodeId::from_bytes([2u8; NODE_ID_SIZE]),
+        ];
 
         let mut route = OnionRoute::new(local, dest, hops, 3600);
 

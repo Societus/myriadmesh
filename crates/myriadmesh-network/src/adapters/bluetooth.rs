@@ -6,7 +6,10 @@
 use crate::adapter::{AdapterStatus, NetworkAdapter, PeerInfo, TestResults};
 use crate::error::{NetworkError, Result};
 use crate::types::{AdapterCapabilities, Address, PowerConsumption};
-use myriadmesh_protocol::{types::{AdapterType, NODE_ID_SIZE}, Frame, NodeId};
+use myriadmesh_protocol::{
+    types::{AdapterType, NODE_ID_SIZE},
+    Frame, NodeId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

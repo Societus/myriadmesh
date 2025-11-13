@@ -402,7 +402,10 @@ mod tests {
         let valid_with_legitimate_key = forged_token
             .is_valid(&recipient_node_id, &legitimate_issuer.public_key)
             .unwrap();
-        assert!(!valid_with_legitimate_key, "Forged token should be rejected!");
+        assert!(
+            !valid_with_legitimate_key,
+            "Forged token should be rejected!"
+        );
 
         // Now create a LEGITIMATE token
         let mut legitimate_token = I2pCapabilityToken::new(

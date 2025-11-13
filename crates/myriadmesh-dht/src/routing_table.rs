@@ -89,8 +89,7 @@ impl RoutingTable {
                 "Node {} has invalid PoW nonce {}",
                 hex::encode(node.node_id.as_bytes()),
                 node.pow_nonce
-            ))
-            .into());
+            )));
         }
 
         let bucket_idx = self.bucket_index(&node.node_id);
@@ -415,7 +414,11 @@ mod tests {
             invalid_node.pow_nonce = i as u64 * 1000; // Invalid nonces
 
             let result = table.add_or_update(invalid_node);
-            assert!(result.is_err(), "Node {} with invalid PoW should be rejected", i);
+            assert!(
+                result.is_err(),
+                "Node {} with invalid PoW should be rejected",
+                i
+            );
         }
 
         // No nodes should have been added

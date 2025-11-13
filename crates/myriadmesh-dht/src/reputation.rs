@@ -103,7 +103,9 @@ impl NodeReputation {
             }
 
             // Suspicious if sudden spike in activity rate
-            if self.recent_activity_rate > 0.0 && activity_per_hour > self.recent_activity_rate * 10.0 {
+            if self.recent_activity_rate > 0.0
+                && activity_per_hour > self.recent_activity_rate * 10.0
+            {
                 self.penalty_count += 1;
             }
 
@@ -326,172 +328,181 @@ mod tests {
     }
 }
 
-    #[test]
-    fn test_reputation_growth_with_activity() {
-        // SECURITY C7: Reputation grows with successful relays
-        let mut rep = NodeReputation::new();
+#[test]
+fn test_reputation_growth_with_activity() {
+    // SECURITY C7: Reputation grows with successful relays
+    let mut rep = NodeReputation::new();
 
-        // Simulate 100 successful relays
-        for _ in 0..100 {
-            rep.record_success();
-        }
-
-        // Should have good reputation after 100 successes
-        assert!(rep.score() > 0.5, "Score should improve with activity");
-        assert!(rep.is_trustworthy());
+    // Simulate 100 successful relays
+    for _ in 0..100 {
+        rep.record_success();
     }
 
-    #[test]
-    fn test_fake_uptime_penalty() {
-        // SECURITY C7: Fake uptime claims are penalized
-        let mut rep = NodeReputation::new();
+    // Should have good reputation after 100 successes
+    assert!(rep.score() > 0.5, "Score should improve with activity");
+    assert!(rep.is_trustworthy());
+}
 
-        // Wait 1 second
-        std::thread::sleep(Duration::from_secs(1));
+#[test]
+fn test_fake_uptime_penalty() {
+    // SECURITY C7: Fake uptime claims are penalized
+    let mut rep = NodeReputation::new();
 
-        // Claim 1 year of uptime (clearly fake)
-        rep.update_uptime(Duration::from_secs(365 * 86400));
+    // Wait 1 second
+    std::thread::sleep(Duration::from_secs(1));
 
-        // Should have penalty
-        assert!(rep.get_penalty_count() > 0, "Fake uptime should be penalized");
+    // Claim 1 year of uptime (clearly fake)
+    rep.update_uptime(Duration::from_secs(365 * 86400));
 
-        // Uptime should be capped to observed age
+    // Should have penalty
+    assert!(
+        rep.get_penalty_count() > 0,
+        "Fake uptime should be penalized"
+    );
+
+    // Uptime should be capped to observed age
+    assert!(
+        rep.uptime_seconds < 10,
+        "Uptime should be capped to observed age"
+    );
+}
+
+#[test]
+fn test_rapid_activity_penalty() {
+    // SECURITY C7: Suspiciously rapid activity is penalized
+    let mut rep = NodeReputation::new();
+
+    // Wait 1 second to allow time measurement
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Simulate 2000 relays in ~1 second (suspicious: 7,200,000/hour)
+    for _ in 0..2000 {
+        rep.record_success();
+    }
+
+    // Should have penalties for suspicious activity rate
+    assert!(
+        rep.get_penalty_count() > 0,
+        "Rapid activity should trigger penalty"
+    );
+}
+
+#[test]
+fn test_minimum_activity_threshold() {
+    // SECURITY C7: Need minimum activity before high reputation
+    let mut rep = NodeReputation::new();
+
+    // Only 10 successful relays (below threshold of 100)
+    for _ in 0..10 {
+        rep.record_success();
+    }
+
+    // Perfect success rate, but low activity
+    // Score should be capped
+    assert!(rep.score() < 0.3, "Low activity should cap reputation");
+}
+
+#[test]
+fn test_reputation_decay() {
+    // SECURITY C7: Reputation decays with inactivity
+    let mut rep = NodeReputation::new();
+
+    // Build up reputation
+    for _ in 0..200 {
+        rep.record_success();
+    }
+
+    let initial_score = rep.score();
+    assert!(initial_score > 0.5);
+
+    // Simulate 3 days of inactivity
+    rep.last_activity = now() - (3 * 86400);
+    rep.recalculate();
+
+    let decayed_score = rep.score();
+
+    // Score should have decayed
+    assert!(
+        decayed_score < initial_score,
+        "Score should decay with inactivity: {} >= {}",
+        decayed_score,
+        initial_score
+    );
+}
+
+#[test]
+fn test_manual_penalty_application() {
+    // SECURITY C7: Can manually apply penalties for Byzantine behavior
+    let mut rep = NodeReputation::new();
+
+    // Build reputation
+    for _ in 0..100 {
+        rep.record_success();
+    }
+
+    let score_before = rep.score();
+
+    // Apply penalty for contradictory report
+    rep.apply_penalty("Contradictory routing information");
+
+    let score_after = rep.score();
+
+    // Reputation should decrease
+    assert!(
+        score_after < score_before,
+        "Penalty should decrease reputation"
+    );
+    assert_eq!(rep.get_penalty_count(), 1);
+}
+
+#[test]
+fn test_multiple_penalties_compound() {
+    // SECURITY C7: Multiple penalties compound
+    let mut rep = NodeReputation::new();
+
+    // Build reputation
+    for _ in 0..100 {
+        rep.record_success();
+    }
+
+    let initial_score = rep.score();
+
+    // Apply multiple penalties
+    for i in 1..=5 {
+        rep.apply_penalty("Suspicious behavior");
+        let current_score = rep.score();
+
+        // Each penalty should further decrease score
         assert!(
-            rep.uptime_seconds < 10,
-            "Uptime should be capped to observed age"
+            current_score < initial_score,
+            "Penalty {} should decrease score",
+            i
         );
     }
 
-    #[test]
-    fn test_rapid_activity_penalty() {
-        // SECURITY C7: Suspiciously rapid activity is penalized
-        let mut rep = NodeReputation::new();
+    // With 5 penalties, score should be significantly reduced
+    assert!(
+        rep.score() < initial_score * 0.6,
+        "Multiple penalties should compound"
+    );
+}
 
-        // Wait 1 second to allow time measurement
-        std::thread::sleep(Duration::from_secs(1));
+#[test]
+fn test_failure_impact() {
+    // Test that failures significantly impact reputation
+    let mut rep = NodeReputation::new();
 
-        // Simulate 2000 relays in ~1 second (suspicious: 7,200,000/hour)
-        for _ in 0..2000 {
-            rep.record_success();
-        }
-
-        // Should have penalties for suspicious activity rate
-        assert!(rep.get_penalty_count() > 0, "Rapid activity should trigger penalty");
+    // 50 successes, 50 failures (50% reliability)
+    for _ in 0..50 {
+        rep.record_success();
+    }
+    for _ in 0..50 {
+        rep.record_failure();
     }
 
-    #[test]
-    fn test_minimum_activity_threshold() {
-        // SECURITY C7: Need minimum activity before high reputation
-        let mut rep = NodeReputation::new();
-
-        // Only 10 successful relays (below threshold of 100)
-        for _ in 0..10 {
-            rep.record_success();
-        }
-
-        // Perfect success rate, but low activity
-        // Score should be capped
-        assert!(
-            rep.score() < 0.3,
-            "Low activity should cap reputation"
-        );
-    }
-
-    #[test]
-    fn test_reputation_decay() {
-        // SECURITY C7: Reputation decays with inactivity
-        let mut rep = NodeReputation::new();
-
-        // Build up reputation
-        for _ in 0..200 {
-            rep.record_success();
-        }
-
-        let initial_score = rep.score();
-        assert!(initial_score > 0.5);
-
-        // Simulate 3 days of inactivity
-        rep.last_activity = now() - (3 * 86400);
-        rep.recalculate();
-
-        let decayed_score = rep.score();
-
-        // Score should have decayed
-        assert!(
-            decayed_score < initial_score,
-            "Score should decay with inactivity: {} >= {}",
-            decayed_score,
-            initial_score
-        );
-    }
-
-    #[test]
-    fn test_manual_penalty_application() {
-        // SECURITY C7: Can manually apply penalties for Byzantine behavior
-        let mut rep = NodeReputation::new();
-
-        // Build reputation
-        for _ in 0..100 {
-            rep.record_success();
-        }
-
-        let score_before = rep.score();
-
-        // Apply penalty for contradictory report
-        rep.apply_penalty("Contradictory routing information");
-
-        let score_after = rep.score();
-
-        // Reputation should decrease
-        assert!(
-            score_after < score_before,
-            "Penalty should decrease reputation"
-        );
-        assert_eq!(rep.get_penalty_count(), 1);
-    }
-
-    #[test]
-    fn test_multiple_penalties_compound() {
-        // SECURITY C7: Multiple penalties compound
-        let mut rep = NodeReputation::new();
-
-        // Build reputation
-        for _ in 0..100 {
-            rep.record_success();
-        }
-
-        let initial_score = rep.score();
-
-        // Apply multiple penalties
-        for i in 1..=5 {
-            rep.apply_penalty("Suspicious behavior");
-            let current_score = rep.score();
-
-            // Each penalty should further decrease score
-            assert!(
-                current_score < initial_score,
-                "Penalty {} should decrease score",
-                i
-            );
-        }
-
-        // With 5 penalties, score should be significantly reduced
-        assert!(rep.score() < initial_score * 0.6, "Multiple penalties should compound");
-    }
-
-    #[test]
-    fn test_failure_impact() {
-        // Test that failures significantly impact reputation
-        let mut rep = NodeReputation::new();
-
-        // 50 successes, 50 failures (50% reliability)
-        for _ in 0..50 {
-            rep.record_success();
-        }
-        for _ in 0..50 {
-            rep.record_failure();
-        }
-
-        // With 50% reliability, should not be a good relay
-        assert!(!rep.is_good_relay(), "50% reliability should not be good relay");
-    }
+    // With 50% reliability, should not be a good relay
+    assert!(
+        !rep.is_good_relay(),
+        "50% reliability should not be good relay"
+    );
+}

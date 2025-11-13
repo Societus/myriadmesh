@@ -115,6 +115,7 @@ impl<'de> Deserialize<'de> for NodeId {
                 A: serde::de::SeqAccess<'de>,
             {
                 let mut bytes = [0u8; NODE_ID_SIZE];
+                #[allow(clippy::needless_range_loop)]
                 for i in 0..NODE_ID_SIZE {
                     bytes[i] = seq
                         .next_element()?

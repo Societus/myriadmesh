@@ -586,7 +586,10 @@ mod tests {
             AdapterType::Ethernet
         );
         // SECURITY C3: Max size reduced by authentication overhead
-        assert_eq!(adapter.get_capabilities().max_message_size, MAX_UDP_SIZE - AUTH_OVERHEAD);
+        assert_eq!(
+            adapter.get_capabilities().max_message_size,
+            MAX_UDP_SIZE - AUTH_OVERHEAD
+        );
     }
 
     #[test]
@@ -626,10 +629,14 @@ mod tests {
         let packet = adapter.create_authenticated_packet(frame_data).unwrap();
 
         // Verify it has the correct size
-        assert_eq!(packet.len(), PUBLIC_KEY_SIZE + frame_data.len() + SIGNATURE_SIZE);
+        assert_eq!(
+            packet.len(),
+            PUBLIC_KEY_SIZE + frame_data.len() + SIGNATURE_SIZE
+        );
 
         // Verify the packet
-        let (recovered_public_key, recovered_data) = adapter.verify_authenticated_packet(&packet).unwrap();
+        let (recovered_public_key, recovered_data) =
+            adapter.verify_authenticated_packet(&packet).unwrap();
 
         // Check that data matches
         assert_eq!(recovered_data, frame_data);

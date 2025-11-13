@@ -42,7 +42,6 @@ use serde_big_array::BigArray;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-
 /// Key exchange request message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyExchangeRequest {
@@ -514,119 +513,119 @@ mod tests {
     }
 }
 
-    #[test]
-    fn test_nonce_uniqueness_sequential() {
-        // SECURITY TEST C4: Verify nonces are never reused
-        crate::init().unwrap();
+#[test]
+fn test_nonce_uniqueness_sequential() {
+    // SECURITY TEST C4: Verify nonces are never reused
+    crate::init().unwrap();
 
-        let alice_node_id = [1u8; NODE_ID_SIZE];
-        let alice_kp = KeyExchangeKeypair::generate();
-        let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
+    let alice_node_id = [1u8; NODE_ID_SIZE];
+    let alice_kp = KeyExchangeKeypair::generate();
+    let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
 
-        let bob_node_id = [2u8; NODE_ID_SIZE];
-        let bob_kp = KeyExchangeKeypair::generate();
-        let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
+    let bob_node_id = [2u8; NODE_ID_SIZE];
+    let bob_kp = KeyExchangeKeypair::generate();
+    let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
 
-        // Establish channel
-        let kx_request = alice_channel
-            .create_key_exchange_request(bob_node_id)
-            .unwrap();
-        let kx_response = bob_channel
-            .process_key_exchange_request(&kx_request)
-            .unwrap();
-        alice_channel
-            .process_key_exchange_response(&kx_response)
-            .unwrap();
+    // Establish channel
+    let kx_request = alice_channel
+        .create_key_exchange_request(bob_node_id)
+        .unwrap();
+    let kx_response = bob_channel
+        .process_key_exchange_request(&kx_request)
+        .unwrap();
+    alice_channel
+        .process_key_exchange_response(&kx_response)
+        .unwrap();
 
-        // Encrypt multiple messages and collect nonces
-        use std::collections::HashSet;
-        let mut nonces = HashSet::new();
+    // Encrypt multiple messages and collect nonces
+    use std::collections::HashSet;
+    let mut nonces = HashSet::new();
 
-        for i in 0..1000 {
-            let plaintext = format!("Message {}", i);
-            let encrypted = alice_channel.encrypt_message(plaintext.as_bytes()).unwrap();
+    for i in 0..1000 {
+        let plaintext = format!("Message {}", i);
+        let encrypted = alice_channel.encrypt_message(plaintext.as_bytes()).unwrap();
 
-            // Extract nonce (first 24 bytes)
-            let nonce_bytes = &encrypted[0..24];
-            let nonce_array: [u8; 24] = nonce_bytes.try_into().unwrap();
+        // Extract nonce (first 24 bytes)
+        let nonce_bytes = &encrypted[0..24];
+        let nonce_array: [u8; 24] = nonce_bytes.try_into().unwrap();
 
-            // Verify this nonce hasn't been seen before
+        // Verify this nonce hasn't been seen before
+        assert!(
+            nonces.insert(nonce_array),
+            "Nonce reuse detected at message {}!",
+            i
+        );
+    }
+
+    // Verify we got 1000 unique nonces
+    assert_eq!(nonces.len(), 1000);
+}
+
+#[test]
+fn test_nonce_uniqueness_multithreaded() {
+    // SECURITY TEST C4: Verify nonces are unique even with concurrent access
+    use std::sync::Arc;
+    use std::thread;
+
+    crate::init().unwrap();
+
+    let alice_node_id = [1u8; NODE_ID_SIZE];
+    let alice_kp = KeyExchangeKeypair::generate();
+    let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
+
+    let bob_node_id = [2u8; NODE_ID_SIZE];
+    let bob_kp = KeyExchangeKeypair::generate();
+    let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
+
+    // Establish channel
+    let kx_request = alice_channel
+        .create_key_exchange_request(bob_node_id)
+        .unwrap();
+    let kx_response = bob_channel
+        .process_key_exchange_request(&kx_request)
+        .unwrap();
+    alice_channel
+        .process_key_exchange_response(&kx_response)
+        .unwrap();
+
+    // Share channel across threads
+    let alice_arc = Arc::new(alice_channel);
+
+    // Spawn multiple threads encrypting simultaneously
+    let mut handles = vec![];
+    for thread_id in 0..10 {
+        let alice_clone = Arc::clone(&alice_arc);
+        let handle = thread::spawn(move || {
+            let mut thread_nonces = Vec::new();
+            for i in 0..100 {
+                let plaintext = format!("Thread {} Message {}", thread_id, i);
+                let encrypted = alice_clone.encrypt_message(plaintext.as_bytes()).unwrap();
+
+                // Extract nonce
+                let nonce_bytes = &encrypted[0..24];
+                let nonce_array: [u8; 24] = nonce_bytes.try_into().unwrap();
+                thread_nonces.push(nonce_array);
+            }
+            thread_nonces
+        });
+        handles.push(handle);
+    }
+
+    // Collect all nonces from all threads
+    use std::collections::HashSet;
+    let mut all_nonces = HashSet::new();
+
+    for handle in handles {
+        let thread_nonces = handle.join().unwrap();
+        for nonce in thread_nonces {
+            // Verify no duplicates
             assert!(
-                nonces.insert(nonce_array),
-                "Nonce reuse detected at message {}!",
-                i
+                all_nonces.insert(nonce),
+                "Nonce reuse detected in multi-threaded scenario!"
             );
         }
-
-        // Verify we got 1000 unique nonces
-        assert_eq!(nonces.len(), 1000);
     }
 
-    #[test]
-    fn test_nonce_uniqueness_multithreaded() {
-        // SECURITY TEST C4: Verify nonces are unique even with concurrent access
-        use std::sync::Arc;
-        use std::thread;
-
-        crate::init().unwrap();
-
-        let alice_node_id = [1u8; NODE_ID_SIZE];
-        let alice_kp = KeyExchangeKeypair::generate();
-        let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
-
-        let bob_node_id = [2u8; NODE_ID_SIZE];
-        let bob_kp = KeyExchangeKeypair::generate();
-        let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
-
-        // Establish channel
-        let kx_request = alice_channel
-            .create_key_exchange_request(bob_node_id)
-            .unwrap();
-        let kx_response = bob_channel
-            .process_key_exchange_request(&kx_request)
-            .unwrap();
-        alice_channel
-            .process_key_exchange_response(&kx_response)
-            .unwrap();
-
-        // Share channel across threads
-        let alice_arc = Arc::new(alice_channel);
-
-        // Spawn multiple threads encrypting simultaneously
-        let mut handles = vec![];
-        for thread_id in 0..10 {
-            let alice_clone = Arc::clone(&alice_arc);
-            let handle = thread::spawn(move || {
-                let mut thread_nonces = Vec::new();
-                for i in 0..100 {
-                    let plaintext = format!("Thread {} Message {}", thread_id, i);
-                    let encrypted = alice_clone.encrypt_message(plaintext.as_bytes()).unwrap();
-
-                    // Extract nonce
-                    let nonce_bytes = &encrypted[0..24];
-                    let nonce_array: [u8; 24] = nonce_bytes.try_into().unwrap();
-                    thread_nonces.push(nonce_array);
-                }
-                thread_nonces
-            });
-            handles.push(handle);
-        }
-
-        // Collect all nonces from all threads
-        use std::collections::HashSet;
-        let mut all_nonces = HashSet::new();
-
-        for handle in handles {
-            let thread_nonces = handle.join().unwrap();
-            for nonce in thread_nonces {
-                // Verify no duplicates
-                assert!(
-                    all_nonces.insert(nonce),
-                    "Nonce reuse detected in multi-threaded scenario!"
-                );
-            }
-        }
-
-        // Verify we got 1000 unique nonces (10 threads × 100 messages)
-        assert_eq!(all_nonces.len(), 1000);
-    }
+    // Verify we got 1000 unique nonces (10 threads × 100 messages)
+    assert_eq!(all_nonces.len(), 1000);
+}

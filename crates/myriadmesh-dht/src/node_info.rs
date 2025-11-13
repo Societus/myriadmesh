@@ -178,7 +178,7 @@ impl NodeInfo {
         // Compute hash(node_id || nonce)
         let mut hasher = Blake2b512::new();
         hasher.update(node_id.as_bytes());
-        hasher.update(&nonce.to_le_bytes());
+        hasher.update(nonce.to_le_bytes());
         let hash = hasher.finalize();
 
         // Count leading zero bits
