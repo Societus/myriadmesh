@@ -5,9 +5,11 @@ use tokio::sync::RwLock;
 use tokio::time::{interval, Duration, Instant};
 use tracing::{debug, info, warn, error};
 
-use crate::config::FailoverConfig;
 use crate::scoring::{AdapterMetrics, AdapterScorer, ScoringWeights};
 use myriadmesh_network::AdapterManager;
+
+// Re-export for ergonomic imports in tests and other modules
+pub use crate::config::FailoverConfig;
 
 /// Failover event types
 #[derive(Debug, Clone)]

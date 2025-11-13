@@ -1,7 +1,9 @@
 //! Network type definitions
 
-use myriadmesh_protocol::types::AdapterType;
 use serde::{Deserialize, Serialize};
+
+// Re-export commonly used types from protocol
+pub use myriadmesh_protocol::types::AdapterType;
 
 /// Network address (transport-specific)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

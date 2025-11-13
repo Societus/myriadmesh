@@ -4,18 +4,8 @@ use std::path::PathBuf;
 use tracing::{info, error};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-mod config;
-mod api;
-mod node;
-mod storage;
-mod monitor;
-mod scoring;
-mod failover;
-mod backhaul;
-mod heartbeat;
-
-use config::Config;
-use node::Node;
+// Use library modules
+use myriadnode::{Config, Node};
 
 /// MyriadNode - Multi-Network Communication Node
 #[derive(Parser, Debug)]
