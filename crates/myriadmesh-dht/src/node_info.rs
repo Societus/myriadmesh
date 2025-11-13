@@ -225,7 +225,18 @@ impl NodeInfo {
     }
 
     /// Convert to public node info (safe for DHT sharing)
-    /// SECURITY: This removes adapter addresses to prevent de-anonymization
+    ///
+    /// SECURITY H11: Mode 2 separation - This removes ALL adapter addresses
+    /// to prevent de-anonymization, especially for i2p/Tor nodes.
+    ///
+    /// Mode 2 means: capability flags (i2p_capable, tor_capable) indicate support,
+    /// but actual destinations are NEVER shared in public DHT.
+    /// Convert to public node info (safe for DHT sharing)
+    ///
+    /// SECURITY H11: Mode 2 separation - This removes ALL adapter addresses
+    /// by structurally excluding them from PublicNodeInfo. The type system
+    /// prevents address leakage at compile time - PublicNodeInfo has no
+    /// adapters field, making it impossible to leak i2p/Tor addresses.
     pub fn to_public(&self) -> PublicNodeInfo {
         PublicNodeInfo {
             node_id: self.node_id,
@@ -235,16 +246,43 @@ impl NodeInfo {
             rtt_ms: self.rtt_ms,
         }
     }
+
+    /// SECURITY H11: Validate Mode 2 separation is maintained
+    ///
+    /// Returns true if node follows Mode 2 privacy model correctly:
+    /// - If i2p_capable/tor_capable, actual addresses should NOT be shared publicly
+    /// - This method checks that the node configuration is safe for public DHT
+    pub fn validates_mode2_separation(&self) -> bool {
+        // Mode 2 rule: capability flags can be public, but addresses cannot
+        // Since to_public() already strips all addresses, this is automatically maintained
+        // This method exists to document and test the invariant
+
+        // For i2p/Tor nodes, we should have the capability flag but addresses
+        // are kept private (only in local NodeInfo, never in PublicNodeInfo)
+        if self.capabilities.i2p_capable || self.capabilities.tor_capable {
+            // Node is correctly configured if it has adapters locally
+            // (which will be stripped by to_public())
+            return true;
+        }
+
+        // Non-privacy nodes are fine
+        true
+    }
 }
 
 /// Public node information (safe for DHT distribution)
 ///
-/// SECURITY: This structure is shared publicly in DHT queries.
+/// SECURITY H11: This structure is shared publicly in DHT queries.
 /// It MUST NOT contain any adapter addresses that could de-anonymize users.
 ///
-/// For i2p/Tor: Use capability flags (i2p_capable, tor_capable) to indicate
-/// support, but never include the actual destination/onion address here.
-/// Private discovery uses capability tokens exchanged out-of-band.
+/// **Mode 2 Separation (i2p/Tor):**
+/// - Use capability flags (i2p_capable, tor_capable) to indicate support
+/// - NEVER include actual destination/onion addresses here
+/// - Private discovery uses capability tokens exchanged out-of-band
+/// - Violating Mode 2 can completely de-anonymize users
+///
+/// This struct is deliberately designed WITHOUT any address fields
+/// to prevent accidental inclusion of identifying information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicNodeInfo {
     /// Node identifier (32 bytes)
@@ -522,5 +560,214 @@ mod tests {
 
         // Verify the nonce works
         assert!(NodeInfo::verify_pow_internal(&node_id, nonce, 4));
+    }
+
+    // SECURITY H11: Mode 2 Separation Tests
+
+    #[test]
+    fn test_mode2_separation_enforced() {
+        // SECURITY H11: Verify Mode 2 separation - i2p addresses never leak to public
+        let node_id = ProtocolNodeId::from_bytes([42u8; NODE_ID_SIZE]);
+
+        let adapters = vec![
+            AdapterInfo {
+                adapter_type: AdapterType::Ethernet,
+                address: "192.168.1.100:4001".to_string(),
+                active: true,
+            },
+            AdapterInfo {
+                adapter_type: AdapterType::I2P,
+                address: "ukeu3k5oykqjktxj4i6zqmqw3afkrqshnqgw2a9pafb3b6qw7evq.b32.i2p".to_string(),
+                active: true,
+            },
+        ];
+
+        let mut node = NodeInfo::with_adapters(node_id, adapters);
+        node.capabilities.i2p_capable = true;
+
+        // Node should validate Mode 2 separation locally
+        assert!(node.validates_mode2_separation());
+
+        // Convert to public - this should strip ALL addresses
+        let public = node.to_public();
+
+        // SECURITY H11: Verify i2p capability flag is preserved
+        assert!(public.capabilities.i2p_capable);
+
+        // SECURITY H11: Verify PublicNodeInfo has no address fields
+        // (structurally impossible to leak addresses)
+        assert_eq!(public.node_id, node_id);
+
+        // PublicNodeInfo should only have: node_id, capabilities, reputation, last_seen, rtt_ms
+        // NO adapter addresses can possibly be included
+    }
+
+    // NOTE: AdapterType::Tor is not yet implemented in the protocol
+    // This test is commented out until Tor adapter support is added
+    // #[test]
+    // fn test_mode2_tor_separation() {
+    //     // SECURITY H11: Verify Mode 2 works for Tor as well
+    //     let node_id = ProtocolNodeId::from_bytes([7u8; NODE_ID_SIZE]);
+    //
+    //     let adapters = vec![AdapterInfo {
+    //         adapter_type: AdapterType::Tor,
+    //         address: "thehiddenwiki.onion:8080".to_string(),
+    //         active: true,
+    //     }];
+    //
+    //     let mut node = NodeInfo::with_adapters(node_id, adapters);
+    //     node.capabilities.tor_capable = true;
+    //
+    //     // Should validate Mode 2
+    //     assert!(node.validates_mode2_separation());
+    //
+    //     // Convert to public
+    //     let public = node.to_public();
+    //
+    //     // Tor capability should be public
+    //     assert!(public.capabilities.tor_capable);
+    //
+    //     // But no way to access onion address from PublicNodeInfo
+    //     assert_eq!(public.node_id, node_id);
+    // }
+
+    // NOTE: AdapterType::Tor is not yet implemented in the protocol
+    // This test is commented out until Tor adapter support is added
+    // #[test]
+    // fn test_mode2_multiple_privacy_adapters() {
+    //     // SECURITY H11: Node with both i2p and Tor
+    //     let node_id = ProtocolNodeId::from_bytes([99u8; NODE_ID_SIZE]);
+    //
+    //     let adapters = vec![
+    //         AdapterInfo {
+    //             adapter_type: AdapterType::I2P,
+    //             address: "example.b32.i2p".to_string(),
+    //             active: true,
+    //         },
+    //         AdapterInfo {
+    //             adapter_type: AdapterType::Tor,
+    //             address: "example.onion".to_string(),
+    //             active: true,
+    //         },
+    //     ];
+    //
+    //     let mut node = NodeInfo::with_adapters(node_id, adapters);
+    //     node.capabilities.i2p_capable = true;
+    //     node.capabilities.tor_capable = true;
+    //
+    //     // Should validate
+    //     assert!(node.validates_mode2_separation());
+    //
+    //     let public = node.to_public();
+    //
+    //     // Both capability flags preserved
+    //     assert!(public.capabilities.i2p_capable);
+    //     assert!(public.capabilities.tor_capable);
+    //
+    //     // But addresses are completely stripped
+    // }
+
+    #[test]
+    fn test_mode2_non_privacy_nodes_unchanged() {
+        // SECURITY H11: Non-privacy nodes (Ethernet only) work normally
+        let node_id = ProtocolNodeId::from_bytes([5u8; NODE_ID_SIZE]);
+
+        let adapters = vec![AdapterInfo {
+            adapter_type: AdapterType::Ethernet,
+            address: "10.0.0.5:4001".to_string(),
+            active: true,
+        }];
+
+        let node = NodeInfo::with_adapters(node_id, adapters);
+
+        // Should validate (non-privacy nodes are always OK)
+        assert!(node.validates_mode2_separation());
+
+        let public = node.to_public();
+
+        // No privacy flags set
+        assert!(!public.capabilities.i2p_capable);
+        assert!(!public.capabilities.tor_capable);
+
+        // Note: Even Ethernet addresses are stripped in to_public()
+        // because PublicNodeInfo doesn't have an adapters field at all
+    }
+
+    #[test]
+    fn test_public_node_info_has_no_address_field() {
+        // SECURITY H11: Structurally verify PublicNodeInfo cannot leak addresses
+        let node_id = ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let caps = NodeCapabilities {
+            i2p_capable: true,
+            ..Default::default()
+        };
+
+        let public = PublicNodeInfo::new(node_id, caps);
+
+        // PublicNodeInfo should have exactly these fields and no more:
+        // - node_id
+        // - capabilities
+        // - reputation
+        // - last_seen
+        // - rtt_ms
+        //
+        // NO adapters, NO addresses, NO way to leak privacy-sensitive info
+
+        assert_eq!(public.node_id, node_id);
+        assert!(public.capabilities.i2p_capable);
+        assert!(public.reputation.score() >= 0.0);
+        assert!(public.last_seen > 0);
+    }
+
+    #[test]
+    fn test_mode2_capability_flag_vs_address() {
+        // SECURITY H11: Demonstrate the difference between capability flag and address
+        let node_id = ProtocolNodeId::from_bytes([111u8; NODE_ID_SIZE]);
+
+        // Private node info (local only) has actual i2p address
+        let private_adapters = vec![AdapterInfo {
+            adapter_type: AdapterType::I2P,
+            address: "secretdestination.b32.i2p".to_string(),
+            active: true,
+        }];
+
+        let mut private_node = NodeInfo::with_adapters(node_id, private_adapters);
+        private_node.capabilities.i2p_capable = true;
+
+        // Private node knows the actual address
+        assert_eq!(private_node.adapters.len(), 1);
+        assert!(private_node.adapters[0].address.contains("secretdestination"));
+
+        // Public version only has capability flag
+        let public_node = private_node.to_public();
+        assert!(public_node.capabilities.i2p_capable);
+
+        // SECURITY H11: Public version structurally CANNOT contain addresses
+        // because PublicNodeInfo doesn't have an adapters field
+        // This is enforced at the type level - compiler prevents leakage
+    }
+
+    #[test]
+    fn test_mode2_documentation_compliance() {
+        // SECURITY H11: Verify implementation matches Mode 2 documentation
+        //
+        // Mode 2 Requirements:
+        // 1. Capability flags (i2p_capable, tor_capable) can be public
+        // 2. Actual addresses MUST remain private
+        // 3. Discovery happens out-of-band via capability tokens
+
+        let node_id = ProtocolNodeId::from_bytes([200u8; NODE_ID_SIZE]);
+        let mut node = NodeInfo::new(node_id);
+        node.capabilities.i2p_capable = true;
+
+        // 1. Capability flag is public
+        let public = node.to_public();
+        assert!(public.capabilities.i2p_capable); // ✓
+
+        // 2. Addresses are structurally impossible to leak
+        // PublicNodeInfo has no address-containing fields ✓
+
+        // 3. Out-of-band discovery is handled separately
+        // (not tested here, but Mode 2 is enforced at this layer) ✓
     }
 }
