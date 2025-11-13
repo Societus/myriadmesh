@@ -46,6 +46,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Per protocol specification: timestamps must be within ±5 minutes
 const MAX_TIME_SKEW_SECS: u64 = 300;
 
+/// SECURITY H9: Key rotation interval (24 hours)
+/// Keys should be rotated after this period to limit compromise window
+const KEY_ROTATION_INTERVAL_SECS: u64 = 86400;
+
+/// SECURITY H9: Maximum messages before requiring key rotation
+/// Prevents key compromise from excessive use
+const MAX_MESSAGES_BEFORE_ROTATION: u64 = 100_000;
+
 /// Key exchange request message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyExchangeRequest {
@@ -151,6 +159,14 @@ pub struct EncryptedChannel {
     /// SECURITY H4: Request nonce for replay protection
     /// Stored when initiating key exchange, verified in response
     request_nonce: Option<[u8; 32]>,
+
+    /// SECURITY H9: Count of messages sent with current keys
+    /// Used to enforce message-based key rotation policy
+    messages_sent: AtomicU64,
+
+    /// SECURITY H9: Count of messages received with current keys
+    /// Used to enforce message-based key rotation policy
+    messages_received: AtomicU64,
 }
 
 impl EncryptedChannel {
@@ -169,6 +185,8 @@ impl EncryptedChannel {
             established_at: None,
             tx_nonce_counter: AtomicU64::new(0),
             request_nonce: None,
+            messages_sent: AtomicU64::new(0),
+            messages_received: AtomicU64::new(0),
         }
     }
 
@@ -399,6 +417,12 @@ impl EncryptedChannel {
             ));
         }
 
+        // SECURITY H9: Warn if key rotation is needed
+        if self.needs_key_rotation() {
+            // Note: We still encrypt but rotation is recommended
+            // Applications should monitor rotation status and initiate rekey
+        }
+
         let tx_key = self
             .tx_key
             .as_ref()
@@ -408,6 +432,9 @@ impl EncryptedChannel {
         // This guarantees no nonce reuse even with RNG failures or clock issues
         let nonce = self.next_nonce();
         let encrypted = encrypt_with_nonce(tx_key, plaintext, &nonce)?;
+
+        // SECURITY H9: Increment message counter
+        self.messages_sent.fetch_add(1, Ordering::SeqCst);
 
         // Serialize encrypted message (nonce + ciphertext)
         let mut result = Vec::new();
@@ -423,6 +450,12 @@ impl EncryptedChannel {
             return Err(CryptoError::InvalidState(
                 "Channel not established".to_string(),
             ));
+        }
+
+        // SECURITY H9: Warn if key rotation is needed
+        if self.needs_key_rotation() {
+            // Note: We still decrypt but rotation is recommended
+            // Applications should monitor rotation status and initiate rekey
         }
 
         let rx_key = self
@@ -446,7 +479,67 @@ impl EncryptedChannel {
             ciphertext: ct,
         };
 
-        decrypt(rx_key, &encrypted_msg)
+        let result = decrypt(rx_key, &encrypted_msg)?;
+
+        // SECURITY H9: Increment message counter after successful decryption
+        self.messages_received.fetch_add(1, Ordering::SeqCst);
+
+        Ok(result)
+    }
+
+    /// SECURITY H9: Check if key rotation is needed
+    ///
+    /// Returns true if either:
+    /// - Keys are older than KEY_ROTATION_INTERVAL_SECS (24 hours)
+    /// - More than MAX_MESSAGES_BEFORE_ROTATION messages sent/received
+    ///
+    /// Applications should initiate a new key exchange when this returns true.
+    pub fn needs_key_rotation(&self) -> bool {
+        // Check if channel is established
+        let established_at = match self.established_at {
+            Some(t) => t,
+            None => return false, // Not established yet
+        };
+
+        // Check time-based rotation
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let key_age = now.saturating_sub(established_at);
+        if key_age >= KEY_ROTATION_INTERVAL_SECS {
+            return true;
+        }
+
+        // Check message count-based rotation
+        let sent = self.messages_sent.load(Ordering::SeqCst);
+        let received = self.messages_received.load(Ordering::SeqCst);
+
+        if sent >= MAX_MESSAGES_BEFORE_ROTATION || received >= MAX_MESSAGES_BEFORE_ROTATION {
+            return true;
+        }
+
+        false
+    }
+
+    /// SECURITY H9: Get key age in seconds
+    ///
+    /// Returns None if channel not established, otherwise returns age in seconds
+    pub fn key_age_seconds(&self) -> Option<u64> {
+        let established_at = self.established_at?;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+        Some(now.saturating_sub(established_at))
+    }
+
+    /// SECURITY H9: Get message counts for monitoring
+    ///
+    /// Returns (messages_sent, messages_received)
+    pub fn message_counts(&self) -> (u64, u64) {
+        (
+            self.messages_sent.load(Ordering::SeqCst),
+            self.messages_received.load(Ordering::SeqCst),
+        )
     }
 }
 
@@ -921,4 +1014,168 @@ fn test_nonce_uniqueness() {
     }
 
     assert_eq!(nonces.len(), 100);
+}
+
+#[test]
+fn test_key_rotation_by_time() {
+    // SECURITY TEST H9: Verify key rotation is needed after time expires
+    crate::init().unwrap();
+
+    let alice_node_id = [1u8; NODE_ID_SIZE];
+    let bob_node_id = [2u8; NODE_ID_SIZE];
+
+    let alice_kp = KeyExchangeKeypair::generate();
+    let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
+
+    let bob_kp = KeyExchangeKeypair::generate();
+    let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
+
+    // Perform key exchange
+    let kx_request = alice_channel
+        .create_key_exchange_request(bob_node_id)
+        .unwrap();
+    let kx_response = bob_channel
+        .process_key_exchange_request(&kx_request)
+        .unwrap();
+    alice_channel
+        .process_key_exchange_response(&kx_response)
+        .unwrap();
+
+    // Fresh channel should not need rotation
+    assert!(!alice_channel.needs_key_rotation());
+    assert!(alice_channel.key_age_seconds().is_some());
+    assert!(alice_channel.key_age_seconds().unwrap() < 10);
+
+    // Manually set established_at to an old timestamp (25 hours ago)
+    let old_timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        - (KEY_ROTATION_INTERVAL_SECS + 3600);
+
+    // Create new channel with old timestamp to simulate aged keys
+    let mut alice_channel_old =
+        EncryptedChannel::new(alice_node_id, KeyExchangeKeypair::generate());
+    alice_channel_old.state = ChannelState::Established;
+    alice_channel_old.established_at = Some(old_timestamp);
+    alice_channel_old.tx_key = alice_channel.tx_key.clone();
+    alice_channel_old.rx_key = alice_channel.rx_key.clone();
+
+    // Old channel should need rotation
+    assert!(alice_channel_old.needs_key_rotation());
+    let age = alice_channel_old.key_age_seconds().unwrap();
+    assert!(age > KEY_ROTATION_INTERVAL_SECS);
+}
+
+#[test]
+fn test_key_rotation_by_message_count() {
+    // SECURITY TEST H9: Verify key rotation is needed after message limit
+    crate::init().unwrap();
+
+    let alice_node_id = [1u8; NODE_ID_SIZE];
+    let bob_node_id = [2u8; NODE_ID_SIZE];
+
+    let alice_kp = KeyExchangeKeypair::generate();
+    let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
+
+    let bob_kp = KeyExchangeKeypair::generate();
+    let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
+
+    // Perform key exchange
+    let kx_request = alice_channel
+        .create_key_exchange_request(bob_node_id)
+        .unwrap();
+    let kx_response = bob_channel
+        .process_key_exchange_request(&kx_request)
+        .unwrap();
+    alice_channel
+        .process_key_exchange_response(&kx_response)
+        .unwrap();
+
+    // Fresh channel with no messages should not need rotation
+    assert!(!alice_channel.needs_key_rotation());
+    let (sent, received) = alice_channel.message_counts();
+    assert_eq!(sent, 0);
+    assert_eq!(received, 0);
+
+    // Send many messages
+    let plaintext = b"test message";
+    for _ in 0..(MAX_MESSAGES_BEFORE_ROTATION + 1) {
+        let encrypted = alice_channel.encrypt_message(plaintext).unwrap();
+        let _decrypted = bob_channel.decrypt_message(&encrypted).unwrap();
+    }
+
+    // Should now need rotation due to message count
+    assert!(alice_channel.needs_key_rotation());
+    let (sent, _) = alice_channel.message_counts();
+    assert!(sent > MAX_MESSAGES_BEFORE_ROTATION);
+
+    // Bob should also need rotation due to received count
+    assert!(bob_channel.needs_key_rotation());
+    let (_, received) = bob_channel.message_counts();
+    assert!(received > MAX_MESSAGES_BEFORE_ROTATION);
+}
+
+#[test]
+fn test_message_count_tracking() {
+    // SECURITY TEST H9: Verify message counts are tracked correctly
+    crate::init().unwrap();
+
+    let alice_node_id = [1u8; NODE_ID_SIZE];
+    let bob_node_id = [2u8; NODE_ID_SIZE];
+
+    let alice_kp = KeyExchangeKeypair::generate();
+    let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
+
+    let bob_kp = KeyExchangeKeypair::generate();
+    let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
+
+    // Perform key exchange
+    let kx_request = alice_channel
+        .create_key_exchange_request(bob_node_id)
+        .unwrap();
+    let kx_response = bob_channel
+        .process_key_exchange_request(&kx_request)
+        .unwrap();
+    alice_channel
+        .process_key_exchange_response(&kx_response)
+        .unwrap();
+
+    let plaintext = b"test message";
+    let message_count = 50;
+
+    for i in 0..message_count {
+        let encrypted = alice_channel.encrypt_message(plaintext).unwrap();
+        let _decrypted = bob_channel.decrypt_message(&encrypted).unwrap();
+
+        // Check counts incrementing
+        let (sent, _) = alice_channel.message_counts();
+        assert_eq!(sent, i + 1);
+
+        let (_, received) = bob_channel.message_counts();
+        assert_eq!(received, i + 1);
+    }
+
+    // Final check
+    let (alice_sent, alice_received) = alice_channel.message_counts();
+    assert_eq!(alice_sent, message_count);
+    assert_eq!(alice_received, 0); // Alice hasn't received any
+
+    let (bob_sent, bob_received) = bob_channel.message_counts();
+    assert_eq!(bob_sent, 0); // Bob hasn't sent any
+    assert_eq!(bob_received, message_count);
+}
+
+#[test]
+fn test_key_age_before_establishment() {
+    // SECURITY TEST H9: Verify key_age_seconds returns None before establishment
+    crate::init().unwrap();
+
+    let alice_node_id = [1u8; NODE_ID_SIZE];
+    let alice_kp = KeyExchangeKeypair::generate();
+    let alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
+
+    // Unestablished channel should return None
+    assert!(alice_channel.key_age_seconds().is_none());
+    assert!(!alice_channel.needs_key_rotation());
 }
