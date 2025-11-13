@@ -535,9 +535,7 @@ mod tests {
         assert!(node2.verify_pow());
 
         // Swapping nonces should fail verification
-        let temp = node1.pow_nonce;
-        node1.pow_nonce = node2.pow_nonce;
-        node2.pow_nonce = temp;
+        std::mem::swap(&mut node1.pow_nonce, &mut node2.pow_nonce);
 
         assert!(!node1.verify_pow());
         assert!(!node2.verify_pow());
