@@ -1373,6 +1373,7 @@ name = "myriadmesh-i2p"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bincode",
  "blake2",
  "myriadmesh-crypto",
@@ -1381,6 +1382,7 @@ dependencies = [
  "serde",
  "sodiumoxide",
  "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]

@@ -199,7 +199,7 @@ fn test_onion_routing_multi_hop() {
 
     // Build onion layers
     let test_payload = b"secret message";
-    let layers = router.build_onion_layers(&route, test_payload).unwrap();
+    let layers = router.build_onion_layers_sync(&route, test_payload).unwrap();
 
     // Should have layer for each hop
     assert_eq!(layers.len(), route.total_hops());
@@ -287,7 +287,7 @@ fn test_complete_i2p_communication_flow() {
 
     // Build onion layers
     let layers = onion_router
-        .build_onion_layers(&route, &protected_message)
+        .build_onion_layers_sync(&route, &protected_message)
         .unwrap();
 
     // Verify complete protection stack

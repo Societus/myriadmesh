@@ -9,6 +9,7 @@
 //! - Multiple layers of encryption (one per hop)
 //! - Route randomization prevents traffic correlation
 //! - Minimum 3 hops recommended for strong anonymity
+//! - SECURITY C5: Timing obfuscation prevents correlation attacks
 
 use myriadmesh_crypto::encryption::{decrypt, encrypt, EncryptedMessage};
 use myriadmesh_crypto::keyexchange::{client_session_keys, KeyExchangeKeypair, X25519PublicKey};
@@ -17,7 +18,8 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use tokio::time::sleep;
 
 /// Minimum number of hops for onion routing
 pub const MIN_HOPS: usize = 3;
@@ -27,6 +29,18 @@ pub const MAX_HOPS: usize = 7;
 
 /// Default number of hops
 pub const DEFAULT_HOPS: usize = 3;
+
+/// SECURITY C5: Minimum delay (ms) before forwarding at each hop
+/// Prevents timing correlation by ensuring non-zero forwarding delay
+pub const MIN_FORWARD_DELAY_MS: u64 = 10;
+
+/// SECURITY C5: Maximum random jitter (ms) added to forwarding delay
+/// Creates unpredictable timing patterns to prevent correlation attacks
+pub const MAX_FORWARD_JITTER_MS: u64 = 200;
+
+/// SECURITY C5: Target processing time (ms) for layer building
+/// Normalizes timing regardless of hop count to prevent hop count leakage
+pub const TARGET_BUILD_TIME_MS: u64 = 100;
 
 /// Onion routing configuration
 #[derive(Debug, Clone)]
@@ -367,11 +381,52 @@ impl OnionRouter {
             .count()
     }
 
-    /// Build onion layers for a route
+    /// Build onion layers with timing protection (async)
+    ///
+    /// SECURITY C5: Normalizes processing time regardless of hop count to prevent
+    /// hop count leakage through timing analysis. This is the RECOMMENDED method
+    /// for production use.
     ///
     /// Creates encrypted layers for each hop in the route.
     /// Each layer is encrypted with the hop's public key using X25519 key exchange.
-    pub fn build_onion_layers(
+    pub async fn build_onion_layers_with_timing_protection(
+        &self,
+        route: &OnionRoute,
+        payload: &[u8],
+    ) -> Result<Vec<OnionLayer>, String> {
+        use std::time::Instant;
+
+        let start = Instant::now();
+
+        // Build layers synchronously
+        let layers = self.build_onion_layers_sync(route, payload)?;
+
+        let elapsed = start.elapsed();
+
+        // SECURITY C5: Normalize processing time to TARGET_BUILD_TIME_MS
+        // This prevents timing analysis from revealing the number of hops
+        let target = Duration::from_millis(TARGET_BUILD_TIME_MS);
+        if elapsed < target {
+            let remaining = target - elapsed;
+            // Add some randomness to the padding delay (±20%)
+            let mut rng = rand::thread_rng();
+            let jitter_factor = rng.gen_range(0.8..=1.2);
+            let delay = remaining.mul_f64(jitter_factor);
+            sleep(delay).await;
+        }
+
+        Ok(layers)
+    }
+
+    /// Build onion layers (synchronous, no timing protection)
+    ///
+    /// WARNING: This method does NOT include timing protection and processing time
+    /// is proportional to hop count, potentially leaking route information.
+    /// For production use, prefer `build_onion_layers_with_timing_protection()`.
+    ///
+    /// Creates encrypted layers for each hop in the route.
+    /// Each layer is encrypted with the hop's public key using X25519 key exchange.
+    pub fn build_onion_layers_sync(
         &self,
         route: &OnionRoute,
         payload: &[u8],
@@ -439,11 +494,37 @@ impl OnionRouter {
         Ok(layers)
     }
 
-    /// Peel one layer from onion (at intermediate hop)
+    /// Peel one layer from onion with timing protection (async)
+    ///
+    /// SECURITY C5: Adds random delay before forwarding to prevent timing correlation.
+    /// This is the RECOMMENDED method for production use to prevent de-anonymization.
     ///
     /// Decrypts outer layer and returns next hop info and remaining onion payload.
     /// Returns (next_hop, decrypted_payload) where decrypted_payload is the inner layers.
-    pub fn peel_layer(&self, layer: &OnionLayer) -> Result<(Option<NodeId>, Vec<u8>), String> {
+    pub async fn peel_layer_with_timing_protection(
+        &self,
+        layer: &OnionLayer,
+    ) -> Result<(Option<NodeId>, Vec<u8>), String> {
+        // SECURITY C5: Add random delay BEFORE processing to prevent timing attacks
+        // This ensures that even if decryption timing varies, external observers
+        // cannot correlate timing patterns to determine hop position or route structure
+        let mut rng = rand::thread_rng();
+        let delay = rng.gen_range(MIN_FORWARD_DELAY_MS..=MAX_FORWARD_JITTER_MS);
+        sleep(Duration::from_millis(delay)).await;
+
+        // Perform the actual layer peeling
+        self.peel_layer_sync(layer)
+    }
+
+    /// Peel one layer from onion (synchronous, no timing protection)
+    ///
+    /// WARNING: This method does NOT include timing protection and should only be
+    /// used for testing or non-privacy-critical operations. For production use,
+    /// prefer `peel_layer_with_timing_protection()`.
+    ///
+    /// Decrypts outer layer and returns next hop info and remaining onion payload.
+    /// Returns (next_hop, decrypted_payload) where decrypted_payload is the inner layers.
+    pub fn peel_layer_sync(&self, layer: &OnionLayer) -> Result<(Option<NodeId>, Vec<u8>), String> {
         use myriadmesh_crypto::encryption::Nonce;
         use myriadmesh_crypto::keyexchange::server_session_keys;
 
@@ -640,7 +721,7 @@ mod tests {
         let router = OnionRouter::new_default(local, local_kp);
 
         let payload = b"test message";
-        let layers = router.build_onion_layers(&route, payload).unwrap();
+        let layers = router.build_onion_layers_sync(&route, payload).unwrap();
 
         assert_eq!(layers.len(), 4); // source + 2 hops + dest
         assert_eq!(layers[0].node_id, local);
@@ -669,11 +750,11 @@ mod tests {
         // Build onion layers
         let payload = b"test message";
         let router = OnionRouter::new_default(local, local_kp);
-        let layers = router.build_onion_layers(&route, payload).unwrap();
+        let layers = router.build_onion_layers_sync(&route, payload).unwrap();
 
         // First hop peels their layer
         let next_router = OnionRouter::new_default(next, next_kp);
-        let (next_hop, inner_payload) = next_router.peel_layer(&layers[1]).unwrap();
+        let (next_hop, inner_payload) = next_router.peel_layer_sync(&layers[1]).unwrap();
 
         assert_eq!(next_hop, Some(dest));
         assert!(!inner_payload.is_empty());
@@ -722,14 +803,14 @@ mod tests {
         let original_payload = b"Secret message for destination";
         let source_router = OnionRouter::new_default(source, source_kp);
         let layers = source_router
-            .build_onion_layers(&route, original_payload)
+            .build_onion_layers_sync(&route, original_payload)
             .unwrap();
 
         assert_eq!(layers.len(), 4); // source + hop1 + hop2 + dest
 
         // Hop1 peels their layer
         let hop1_router = OnionRouter::new_default(hop1, hop1_kp);
-        let (next1, payload1) = hop1_router.peel_layer(&layers[1]).unwrap();
+        let (next1, payload1) = hop1_router.peel_layer_sync(&layers[1]).unwrap();
         assert_eq!(next1, Some(hop2));
 
         // Parse payload1 as next layer
@@ -737,7 +818,7 @@ mod tests {
 
         // Hop2 peels their layer
         let hop2_router = OnionRouter::new_default(hop2, hop2_kp);
-        let (next2, payload2) = hop2_router.peel_layer(&layer2).unwrap();
+        let (next2, payload2) = hop2_router.peel_layer_sync(&layer2).unwrap();
         assert_eq!(next2, Some(dest));
 
         // Parse payload2 as final layer
@@ -745,8 +826,177 @@ mod tests {
 
         // Destination decrypts final layer
         let dest_router = OnionRouter::new_default(dest, dest_kp);
-        let (next_final, final_payload) = dest_router.peel_layer(&layer3).unwrap();
+        let (next_final, final_payload) = dest_router.peel_layer_sync(&layer3).unwrap();
         assert_eq!(next_final, None); // No next hop at destination
         assert_eq!(final_payload, original_payload);
+    }
+
+    #[tokio::test]
+    async fn test_peel_layer_with_timing_protection() {
+        // SECURITY C5: Test that timing protection adds delays
+        myriadmesh_crypto::init().unwrap();
+
+        let local = NodeId::from_bytes([0u8; 32]);
+        let next = NodeId::from_bytes([1u8; 32]);
+        let dest = NodeId::from_bytes([2u8; 32]);
+
+        let local_kp = KeyExchangeKeypair::generate();
+        let next_kp = KeyExchangeKeypair::generate();
+        let dest_kp = KeyExchangeKeypair::generate();
+
+        let mut route = OnionRoute::new(local, dest, vec![next], 3600);
+        route.set_hop_public_key(local, X25519PublicKey::from(&local_kp.public_key));
+        route.set_hop_public_key(next, X25519PublicKey::from(&next_kp.public_key));
+        route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
+
+        let payload = b"test message";
+        let router = OnionRouter::new_default(local, local_kp);
+        let layers = router.build_onion_layers_sync(&route, payload).unwrap();
+
+        // Measure time with timing protection
+        let next_router = OnionRouter::new_default(next, next_kp);
+        let start = std::time::Instant::now();
+        let (next_hop, inner_payload) = next_router
+            .peel_layer_with_timing_protection(&layers[1])
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        // Should have added at least MIN_FORWARD_DELAY_MS
+        assert!(
+            elapsed >= Duration::from_millis(MIN_FORWARD_DELAY_MS),
+            "Expected delay >= {}ms, got {:?}",
+            MIN_FORWARD_DELAY_MS,
+            elapsed
+        );
+
+        // Should not exceed MAX_FORWARD_JITTER_MS + processing time (generous allowance)
+        assert!(
+            elapsed <= Duration::from_millis(MAX_FORWARD_JITTER_MS + 100),
+            "Expected delay <= {}ms, got {:?}",
+            MAX_FORWARD_JITTER_MS + 100,
+            elapsed
+        );
+
+        // Verify correctness
+        assert_eq!(next_hop, Some(dest));
+        assert!(!inner_payload.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_build_layers_timing_normalization() {
+        // SECURITY C5: Test that build time is normalized regardless of hop count
+        myriadmesh_crypto::init().unwrap();
+
+        let local = NodeId::from_bytes([0u8; 32]);
+        let dest = NodeId::from_bytes([255u8; 32]);
+
+        let local_kp = KeyExchangeKeypair::generate();
+        let dest_kp = KeyExchangeKeypair::generate();
+
+        // Test with different hop counts
+        let hop_counts = [0, 1, 2, 3, 5];
+        let mut build_times = Vec::new();
+
+        for &hop_count in &hop_counts {
+            // Create route with specified hop count
+            let hops: Vec<NodeId> = (1..=hop_count)
+                .map(|i| NodeId::from_bytes([i as u8; 32]))
+                .collect();
+
+            let mut route = OnionRoute::new(local, dest, hops.clone(), 3600);
+            route.set_hop_public_key(local, X25519PublicKey::from(&local_kp.public_key));
+
+            // Add public keys for all hops
+            for &hop_id in hops.iter() {
+                let kp = KeyExchangeKeypair::generate();
+                route.set_hop_public_key(hop_id, X25519PublicKey::from(&kp.public_key));
+            }
+            route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
+
+            // Measure build time with timing protection
+            let router = OnionRouter::new_default(local, KeyExchangeKeypair::generate());
+            let start = std::time::Instant::now();
+            let _layers = router
+                .build_onion_layers_with_timing_protection(&route, b"test")
+                .await
+                .unwrap();
+            let elapsed = start.elapsed();
+
+            build_times.push(elapsed);
+        }
+
+        // SECURITY C5: All build times should be close to TARGET_BUILD_TIME_MS
+        // Allow for jitter (±20%) plus processing overhead
+        let min_expected = Duration::from_millis((TARGET_BUILD_TIME_MS as f64 * 0.7) as u64);
+        let max_expected = Duration::from_millis((TARGET_BUILD_TIME_MS as f64 * 1.3) as u64);
+
+        for (i, &time) in build_times.iter().enumerate() {
+            assert!(
+                time >= min_expected && time <= max_expected,
+                "Build time for {} hops ({:?}) outside normalized range ({:?} - {:?})",
+                hop_counts[i],
+                time,
+                min_expected,
+                max_expected
+            );
+        }
+
+        // Verify timing variance is small (normalized successfully)
+        let times_ms: Vec<u128> = build_times.iter().map(|d| d.as_millis()).collect();
+        let min_time = times_ms.iter().min().unwrap();
+        let max_time = times_ms.iter().max().unwrap();
+        let variance = max_time - min_time;
+
+        // Variance should be small due to normalization (allow up to 40% due to jitter)
+        assert!(
+            variance < (TARGET_BUILD_TIME_MS as u128 * 40 / 100),
+            "Timing variance too large: {} ms (should be < {} ms)",
+            variance,
+            TARGET_BUILD_TIME_MS * 40 / 100
+        );
+    }
+
+    #[tokio::test]
+    async fn test_timing_randomness() {
+        // SECURITY C5: Verify that delays are actually random and not predictable
+        myriadmesh_crypto::init().unwrap();
+
+        let local = NodeId::from_bytes([0u8; 32]);
+        let next = NodeId::from_bytes([1u8; 32]);
+        let dest = NodeId::from_bytes([2u8; 32]);
+
+        let local_kp = KeyExchangeKeypair::generate();
+        let next_kp = KeyExchangeKeypair::generate();
+        let dest_kp = KeyExchangeKeypair::generate();
+
+        let mut route = OnionRoute::new(local, dest, vec![next], 3600);
+        route.set_hop_public_key(local, X25519PublicKey::from(&local_kp.public_key));
+        route.set_hop_public_key(next, X25519PublicKey::from(&next_kp.public_key));
+        route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
+
+        let payload = b"test message";
+        let router = OnionRouter::new_default(local, local_kp.clone());
+        let layers = router.build_onion_layers_sync(&route, payload).unwrap();
+
+        // Measure multiple peel operations
+        let mut delays = Vec::new();
+        for _ in 0..10 {
+            let next_router = OnionRouter::new_default(next, next_kp.clone());
+            let start = std::time::Instant::now();
+            let _ = next_router
+                .peel_layer_with_timing_protection(&layers[1])
+                .await
+                .unwrap();
+            delays.push(start.elapsed().as_millis());
+        }
+
+        // Check that delays are not all identical (randomness is working)
+        let unique_delays: std::collections::HashSet<_> = delays.into_iter().collect();
+        assert!(
+            unique_delays.len() > 1,
+            "Timing protection should produce varied delays, got {} unique values",
+            unique_delays.len()
+        );
     }
 }

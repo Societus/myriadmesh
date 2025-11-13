@@ -4,9 +4,12 @@
 //! - Message padding (prevent traffic analysis)
 //! - Timing obfuscation (prevent timing correlation)
 //! - Cover traffic generation (prevent traffic pattern analysis)
+//!
+//! SECURITY C5: Comprehensive timing attack prevention through random delays
 
 use rand::Rng;
 use std::time::Duration;
+use tokio::time::sleep;
 
 /// Default minimum message size (bytes) to prevent size-based traffic analysis
 pub const MIN_MESSAGE_SIZE: usize = 512;
@@ -31,18 +34,21 @@ pub enum PaddingStrategy {
 }
 
 /// Timing obfuscation strategy
+///
+/// SECURITY C5: All strategies except None include jitter to prevent timing correlation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimingStrategy {
-    /// No timing obfuscation
-    None,
+    /// Minimal timing obfuscation (small random jitter only)
+    /// SECURITY C5: Even "minimal" includes jitter to prevent exact timing correlation
+    Minimal,
 
-    /// Fixed delay
+    /// Fixed delay with small random jitter
     FixedDelay,
 
-    /// Random delay within range
+    /// Random delay within range (recommended for privacy)
     RandomDelay,
 
-    /// Exponential distribution delay (more realistic)
+    /// Exponential distribution delay (most realistic, best for anonymity)
     ExponentialDelay,
 }
 
@@ -179,27 +185,64 @@ impl PrivacyLayer {
     }
 
     /// Calculate delay based on timing strategy
+    ///
+    /// SECURITY C5: All strategies include randomness to prevent timing correlation attacks
     pub fn calculate_delay(&self) -> Duration {
-        match self.config.timing_strategy {
-            TimingStrategy::None => Duration::from_millis(0),
+        let mut rng = rand::thread_rng();
 
-            TimingStrategy::FixedDelay => Duration::from_millis(self.config.base_delay_ms),
+        match self.config.timing_strategy {
+            TimingStrategy::Minimal => {
+                // SECURITY C5: Even minimal includes 0-10ms jitter to prevent exact correlation
+                let jitter = rng.gen_range(0..=10);
+                Duration::from_millis(jitter)
+            }
+
+            TimingStrategy::FixedDelay => {
+                // SECURITY C5: Add ±20% jitter to fixed delay to prevent pattern recognition
+                let jitter_factor = rng.gen_range(0.8..=1.2);
+                let delay = (self.config.base_delay_ms as f64 * jitter_factor) as u64;
+                Duration::from_millis(delay)
+            }
 
             TimingStrategy::RandomDelay => {
-                let mut rng = rand::thread_rng();
+                // SECURITY C5: Uniform random delay within configured range
                 let delay = rng.gen_range(self.config.base_delay_ms..=self.config.max_delay_ms);
                 Duration::from_millis(delay)
             }
 
             TimingStrategy::ExponentialDelay => {
-                // Exponential distribution with mean = base_delay_ms
-                let mut rng = rand::thread_rng();
-                let u: f64 = rng.gen(); // Random value [0, 1)
+                // SECURITY C5: Exponential distribution mimics natural network delays
+                // This is the most realistic and hardest to distinguish from normal traffic
+                let u: f64 = rng.gen(); // Random value (0, 1]
+                let u = u.max(0.0001); // Avoid log(0)
                 let lambda = 1.0 / (self.config.base_delay_ms as f64);
                 let delay = (-u.ln() / lambda).min(self.config.max_delay_ms as f64);
                 Duration::from_millis(delay as u64)
             }
         }
+    }
+
+    /// Apply timing delay (async)
+    ///
+    /// SECURITY C5: Actively applies the calculated delay to obfuscate timing patterns.
+    /// This MUST be called when forwarding messages to prevent timing correlation attacks.
+    pub async fn apply_delay(&self) {
+        let delay = self.calculate_delay();
+        sleep(delay).await;
+    }
+
+    /// Apply timing delay with additional random jitter
+    ///
+    /// SECURITY C5: Adds extra randomness for critical operations like onion routing
+    /// where timing correlation could completely de-anonymize users.
+    pub async fn apply_delay_with_jitter(&self, extra_jitter_ms: u64) {
+        let base_delay = self.calculate_delay();
+
+        let mut rng = rand::thread_rng();
+        let jitter = rng.gen_range(0..=extra_jitter_ms);
+
+        let total_delay = base_delay + Duration::from_millis(jitter);
+        sleep(total_delay).await;
     }
 
     /// Check if cover traffic should be sent
@@ -330,6 +373,7 @@ mod tests {
 
     #[test]
     fn test_timing_fixed_delay() {
+        // SECURITY C5: FixedDelay now includes ±20% jitter
         let config = PrivacyConfig {
             timing_strategy: TimingStrategy::FixedDelay,
             base_delay_ms: 100,
@@ -339,7 +383,9 @@ mod tests {
         let layer = PrivacyLayer::new(config);
         let delay = layer.calculate_delay();
 
-        assert_eq!(delay, Duration::from_millis(100));
+        // Should be 100ms ± 20% = 80-120ms
+        assert!(delay >= Duration::from_millis(80));
+        assert!(delay <= Duration::from_millis(120));
     }
 
     #[test]
@@ -362,16 +408,84 @@ mod tests {
     }
 
     #[test]
-    fn test_timing_no_delay() {
+    fn test_timing_minimal_delay() {
+        // SECURITY C5: Even minimal strategy includes jitter
         let config = PrivacyConfig {
-            timing_strategy: TimingStrategy::None,
+            timing_strategy: TimingStrategy::Minimal,
             ..Default::default()
         };
 
         let layer = PrivacyLayer::new(config);
-        let delay = layer.calculate_delay();
 
-        assert_eq!(delay, Duration::from_millis(0));
+        // Test multiple times to ensure randomness and bounds
+        for _ in 0..10 {
+            let delay = layer.calculate_delay();
+            // Minimal jitter is 0-10ms
+            assert!(delay >= Duration::from_millis(0));
+            assert!(delay <= Duration::from_millis(10));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_apply_delay() {
+        // SECURITY C5: Test that delay is actually applied
+        let config = PrivacyConfig {
+            timing_strategy: TimingStrategy::FixedDelay,
+            base_delay_ms: 50,
+            ..Default::default()
+        };
+
+        let layer = PrivacyLayer::new(config);
+
+        let start = std::time::Instant::now();
+        layer.apply_delay().await;
+        let elapsed = start.elapsed();
+
+        // Should have delayed at least base_delay * 0.8 (due to jitter factor)
+        assert!(elapsed >= Duration::from_millis(40));
+    }
+
+    #[tokio::test]
+    async fn test_apply_delay_with_jitter() {
+        // SECURITY C5: Test extra jitter application
+        let config = PrivacyConfig {
+            timing_strategy: TimingStrategy::Minimal,
+            ..Default::default()
+        };
+
+        let layer = PrivacyLayer::new(config);
+
+        let start = std::time::Instant::now();
+        layer.apply_delay_with_jitter(100).await;
+        let elapsed = start.elapsed();
+
+        // Should have some delay (minimal + up to 100ms jitter)
+        assert!(elapsed <= Duration::from_millis(110));
+    }
+
+    #[test]
+    fn test_timing_fixed_delay_has_jitter() {
+        // SECURITY C5: Even FixedDelay has jitter to prevent pattern recognition
+        let config = PrivacyConfig {
+            timing_strategy: TimingStrategy::FixedDelay,
+            base_delay_ms: 100,
+            ..Default::default()
+        };
+
+        let layer = PrivacyLayer::new(config);
+
+        let mut delays = Vec::new();
+        for _ in 0..20 {
+            let delay = layer.calculate_delay();
+            delays.push(delay.as_millis());
+        }
+
+        // Check that delays are not all identical (jitter is working)
+        let unique_delays: std::collections::HashSet<_> = delays.into_iter().collect();
+        assert!(
+            unique_delays.len() > 1,
+            "Fixed delay should have jitter variation"
+        );
     }
 
     #[test]
