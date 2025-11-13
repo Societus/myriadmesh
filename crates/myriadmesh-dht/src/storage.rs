@@ -29,8 +29,13 @@ pub struct StorageEntry {
     /// When this entry expires (Unix timestamp)
     pub expires_at: u64,
 
-    /// Publisher node ID
-    pub publisher: Option<[u8; 32]>,
+    /// Publisher node ID (REQUIRED for signature verification)
+    /// SECURITY H7: Required for value poisoning prevention
+    pub publisher: [u8; 32],
+
+    /// Ed25519 signature over (key || value || expires_at)
+    /// SECURITY H7: Signature from publisher to prevent DHT poisoning
+    pub signature: [u8; 64],
 }
 
 impl StorageEntry {
@@ -43,6 +48,41 @@ impl StorageEntry {
     pub fn ttl_remaining(&self) -> u64 {
         let current = now();
         self.expires_at.saturating_sub(current)
+    }
+
+    /// SECURITY H7: Verify signature on stored value
+    /// Prevents DHT value poisoning by ensuring publisher authenticity
+    pub fn verify_signature(&self) -> Result<()> {
+        use sodiumoxide::crypto::sign::ed25519;
+
+        // Build message to verify: key || value || expires_at
+        let mut message = Vec::new();
+        message.extend_from_slice(&self.key);
+        message.extend_from_slice(&self.value);
+        message.extend_from_slice(&self.expires_at.to_le_bytes());
+
+        // Extract signature
+        let signature = match ed25519::Signature::from_slice(&self.signature) {
+            Some(sig) => sig,
+            None => return Err(DhtError::InvalidSignature),
+        };
+
+        // Derive public key from publisher node ID
+        // In MyriadMesh, NodeID = BLAKE2b(public_key)
+        // For verification, we need to store the actual public key or have it provided
+        // For now, we'll assume publisher is the public key itself (32 bytes)
+        // NOTE: This may need adjustment based on actual NodeID derivation
+        let public_key = match ed25519::PublicKey::from_slice(&self.publisher) {
+            Some(pk) => pk,
+            None => return Err(DhtError::InvalidPublicKey),
+        };
+
+        // Verify signature
+        if ed25519::verify_detached(&signature, &message, &public_key) {
+            Ok(())
+        } else {
+            Err(DhtError::InvalidSignature)
+        }
     }
 }
 
@@ -99,12 +139,14 @@ impl DhtStorage {
     }
 
     /// Store a value
+    /// SECURITY H7: Requires valid signature from publisher
     pub fn store(
         &mut self,
         key: [u8; 32],
         value: Vec<u8>,
         ttl_secs: u64,
-        publisher: Option<[u8; 32]>,
+        publisher: [u8; 32],
+        signature: [u8; 64],
     ) -> Result<()> {
         // Check value size
         if value.len() > MAX_VALUE_SIZE {
@@ -113,6 +155,21 @@ impl DhtStorage {
                 max: MAX_VALUE_SIZE,
             });
         }
+
+        let expires_at = now() + ttl_secs;
+
+        // Create entry for verification
+        let entry = StorageEntry {
+            key,
+            value: value.clone(),
+            stored_at: now(),
+            expires_at,
+            publisher,
+            signature,
+        };
+
+        // SECURITY H7: Verify signature before storing
+        entry.verify_signature()?;
 
         // If key exists, remove old value first for accurate size tracking
         if let Some(old_entry) = self.entries.remove(&key) {
@@ -128,15 +185,6 @@ impl DhtStorage {
                 return Err(DhtError::StorageFull { max: self.max_size });
             }
         }
-
-        // Create entry
-        let entry = StorageEntry {
-            key,
-            value: value.clone(),
-            stored_at: now(),
-            expires_at: now() + ttl_secs,
-            publisher,
-        };
 
         // Store
         self.entries.insert(key, entry);

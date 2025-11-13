@@ -23,6 +23,9 @@ pub enum DhtError {
     #[error("Invalid signature")]
     InvalidSignature,
 
+    #[error("Invalid public key")]
+    InvalidPublicKey,
+
     #[error("Not responsible for key")]
     NotResponsible,
 
