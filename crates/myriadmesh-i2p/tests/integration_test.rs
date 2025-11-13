@@ -12,6 +12,7 @@ use myriadmesh_i2p::{
     DualIdentity, I2pDestination, OnionConfig, OnionRouter, PaddingStrategy, PrivacyConfig,
     PrivacyLayer, RouteSelectionStrategy, TimingStrategy,
 };
+use myriadmesh_protocol::types::NODE_ID_SIZE;
 use myriadmesh_protocol::NodeId;
 
 /// Helper to create test route nodes
@@ -20,7 +21,7 @@ fn create_test_route_node(
     reliability: f64,
     latency: f64,
 ) -> myriadmesh_i2p::onion::RouteNode {
-    let mut bytes = [0u8; 32];
+    let mut bytes = [0u8; NODE_ID_SIZE];
     bytes[0] = id;
     let keypair = KeyExchangeKeypair::generate();
     myriadmesh_i2p::onion::RouteNode {
@@ -146,7 +147,7 @@ fn test_onion_routing_multi_hop() {
     let local_node_id = NodeId::from_bytes(*local_identity.node_id.as_bytes());
 
     // Create destination
-    let mut dest_bytes = [0u8; 32];
+    let mut dest_bytes = [0u8; NODE_ID_SIZE];
     dest_bytes[0] = 255;
     let destination = NodeId::from_bytes(dest_bytes);
 
@@ -347,7 +348,7 @@ fn test_route_selection_strategies() {
     let local_identity = NodeIdentity::generate().unwrap();
     let local_node_id = NodeId::from_bytes(*local_identity.node_id.as_bytes());
 
-    let mut dest_bytes = [0u8; 32];
+    let mut dest_bytes = [0u8; NODE_ID_SIZE];
     dest_bytes[0] = 255;
     let destination = NodeId::from_bytes(dest_bytes);
 

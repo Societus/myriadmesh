@@ -13,7 +13,7 @@
 
 use myriadmesh_crypto::encryption::{decrypt, encrypt, EncryptedMessage};
 use myriadmesh_crypto::keyexchange::{client_session_keys, KeyExchangeKeypair, X25519PublicKey};
-use myriadmesh_protocol::NodeId;
+use myriadmesh_protocol::{NodeId, types::NODE_ID_SIZE};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -457,8 +457,8 @@ impl OnionRouter {
             // Add next hop info if not the last hop
             let layer_data = if i < path.len() - 1 {
                 let next_hop = path[i + 1];
-                // Serialize: next_hop (32 bytes) + payload
-                let mut data = Vec::with_capacity(32 + current_payload.len());
+                // SECURITY C6: Serialize: next_hop (64 bytes) + payload
+                let mut data = Vec::with_capacity(NODE_ID_SIZE + current_payload.len());
                 data.extend_from_slice(next_hop.as_bytes());
                 data.extend_from_slice(&current_payload);
                 data
@@ -567,14 +567,15 @@ impl OnionRouter {
 
         // Check if this layer contains next hop info (intermediate hop)
         // or if it's the final destination
-        if decrypted.len() >= 32 {
+        // SECURITY C6: NodeID is now 64 bytes for collision resistance
+        if decrypted.len() >= NODE_ID_SIZE {
             // This is an intermediate hop, extract next hop
-            let mut next_hop_bytes = [0u8; 32];
-            next_hop_bytes.copy_from_slice(&decrypted[0..32]);
+            let mut next_hop_bytes = [0u8; NODE_ID_SIZE];
+            next_hop_bytes.copy_from_slice(&decrypted[0..NODE_ID_SIZE]);
             let next_hop = NodeId::from_bytes(next_hop_bytes);
 
             // Remaining payload is the inner layers
-            let inner_payload = decrypted[32..].to_vec();
+            let inner_payload = decrypted[NODE_ID_SIZE..].to_vec();
 
             Ok((Some(next_hop), inner_payload))
         } else {
@@ -592,7 +593,7 @@ mod tests {
     fn create_test_nodes(count: usize) -> Vec<RouteNode> {
         (0..count)
             .map(|i| {
-                let mut bytes = [0u8; 32];
+                let mut bytes = [0u8; NODE_ID_SIZE];
                 bytes[0] = i as u8;
                 let keypair = KeyExchangeKeypair::generate();
                 RouteNode {
@@ -608,9 +609,9 @@ mod tests {
 
     #[test]
     fn test_onion_route_creation() {
-        let source = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
-        let hops = vec![NodeId::from_bytes([3u8; 32]), NodeId::from_bytes([4u8; 32])];
+        let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+        let hops = vec![NodeId::from_bytes([3u8; NODE_ID_SIZE]), NodeId::from_bytes([4u8; NODE_ID_SIZE])];
 
         let route = OnionRoute::new(source, dest, hops.clone(), 3600);
 
@@ -623,8 +624,8 @@ mod tests {
 
     #[test]
     fn test_onion_route_expiration() {
-        let source = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
+        let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
         let hops = vec![];
 
         let route = OnionRoute::new(source, dest, hops, 0); // Immediate expiration
@@ -636,8 +637,8 @@ mod tests {
     #[test]
     fn test_route_selection_random() {
         myriadmesh_crypto::init().unwrap();
-        let local = NodeId::from_bytes([0u8; 32]);
-        let dest = NodeId::from_bytes([255u8; 32]);
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([255u8; NODE_ID_SIZE]);
         let nodes = create_test_nodes(10);
 
         let keypair = KeyExchangeKeypair::generate();
@@ -654,8 +655,8 @@ mod tests {
     #[test]
     fn test_route_selection_insufficient_nodes() {
         myriadmesh_crypto::init().unwrap();
-        let local = NodeId::from_bytes([0u8; 32]);
-        let dest = NodeId::from_bytes([255u8; 32]);
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([255u8; NODE_ID_SIZE]);
         let nodes = create_test_nodes(2); // Not enough for 3 hops
 
         let keypair = KeyExchangeKeypair::generate();
@@ -668,8 +669,8 @@ mod tests {
     #[test]
     fn test_cleanup_expired_routes() {
         myriadmesh_crypto::init().unwrap();
-        let local = NodeId::from_bytes([0u8; 32]);
-        let dest = NodeId::from_bytes([255u8; 32]);
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([255u8; NODE_ID_SIZE]);
         let nodes = create_test_nodes(10);
 
         let keypair = KeyExchangeKeypair::generate();
@@ -695,9 +696,9 @@ mod tests {
     #[test]
     fn test_onion_layer_building() {
         myriadmesh_crypto::init().unwrap();
-        let local = NodeId::from_bytes([0u8; 32]);
-        let dest = NodeId::from_bytes([255u8; 32]);
-        let hops = vec![NodeId::from_bytes([1u8; 32]), NodeId::from_bytes([2u8; 32])];
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([255u8; NODE_ID_SIZE]);
+        let hops = vec![NodeId::from_bytes([1u8; NODE_ID_SIZE]), NodeId::from_bytes([2u8; NODE_ID_SIZE])];
 
         let mut route = OnionRoute::new(local, dest, hops, 3600);
 
@@ -709,11 +710,11 @@ mod tests {
 
         route.set_hop_public_key(local, X25519PublicKey::from(&local_kp.public_key));
         route.set_hop_public_key(
-            NodeId::from_bytes([1u8; 32]),
+            NodeId::from_bytes([1u8; NODE_ID_SIZE]),
             X25519PublicKey::from(&hop1_kp.public_key),
         );
         route.set_hop_public_key(
-            NodeId::from_bytes([2u8; 32]),
+            NodeId::from_bytes([2u8; NODE_ID_SIZE]),
             X25519PublicKey::from(&hop2_kp.public_key),
         );
         route.set_hop_public_key(dest, X25519PublicKey::from(&dest_kp.public_key));
@@ -733,9 +734,9 @@ mod tests {
         myriadmesh_crypto::init().unwrap();
 
         // Create nodes with keypairs
-        let local = NodeId::from_bytes([0u8; 32]);
-        let next = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let next = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
 
         let local_kp = KeyExchangeKeypair::generate();
         let next_kp = KeyExchangeKeypair::generate();
@@ -762,8 +763,8 @@ mod tests {
 
     #[test]
     fn test_route_use_count() {
-        let source = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
+        let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
         let hops = vec![];
 
         let mut route = OnionRoute::new(source, dest, hops, 3600);
@@ -782,10 +783,10 @@ mod tests {
         myriadmesh_crypto::init().unwrap();
 
         // Create a 3-hop route: source -> hop1 -> hop2 -> dest
-        let source = NodeId::from_bytes([0u8; 32]);
-        let hop1 = NodeId::from_bytes([1u8; 32]);
-        let hop2 = NodeId::from_bytes([2u8; 32]);
-        let dest = NodeId::from_bytes([3u8; 32]);
+        let source = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let hop1 = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let hop2 = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([3u8; NODE_ID_SIZE]);
 
         let source_kp = KeyExchangeKeypair::generate();
         let hop1_kp = KeyExchangeKeypair::generate();
@@ -836,9 +837,9 @@ mod tests {
         // SECURITY C5: Test that timing protection adds delays
         myriadmesh_crypto::init().unwrap();
 
-        let local = NodeId::from_bytes([0u8; 32]);
-        let next = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let next = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
 
         let local_kp = KeyExchangeKeypair::generate();
         let next_kp = KeyExchangeKeypair::generate();
@@ -888,8 +889,8 @@ mod tests {
         // SECURITY C5: Test that build time is normalized regardless of hop count
         myriadmesh_crypto::init().unwrap();
 
-        let local = NodeId::from_bytes([0u8; 32]);
-        let dest = NodeId::from_bytes([255u8; 32]);
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([255u8; NODE_ID_SIZE]);
 
         let local_kp = KeyExchangeKeypair::generate();
         let dest_kp = KeyExchangeKeypair::generate();
@@ -901,7 +902,11 @@ mod tests {
         for &hop_count in &hop_counts {
             // Create route with specified hop count
             let hops: Vec<NodeId> = (1..=hop_count)
-                .map(|i| NodeId::from_bytes([i as u8; 32]))
+                .map(|i| {
+                    let mut bytes = [0u8; NODE_ID_SIZE];
+                    bytes[0] = i as u8;
+                    NodeId::from_bytes(bytes)
+                })
                 .collect();
 
             let mut route = OnionRoute::new(local, dest, hops.clone(), 3600);
@@ -962,9 +967,9 @@ mod tests {
         // SECURITY C5: Verify that delays are actually random and not predictable
         myriadmesh_crypto::init().unwrap();
 
-        let local = NodeId::from_bytes([0u8; 32]);
-        let next = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
+        let local = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let next = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
 
         let local_kp = KeyExchangeKeypair::generate();
         let next_kp = KeyExchangeKeypair::generate();

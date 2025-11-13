@@ -245,9 +245,10 @@ impl RoutingTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use myriadmesh_protocol::types::NODE_ID_SIZE;
 
     fn create_test_node(id: u8) -> NodeInfo {
-        let mut node = NodeInfo::new(NodeId::from_bytes([id; 32]));
+        let mut node = NodeInfo::new(NodeId::from_bytes([id; NODE_ID_SIZE]));
         // SECURITY C2: Compute valid PoW for test nodes
         node.compute_pow();
         node
@@ -255,7 +256,7 @@ mod tests {
 
     #[test]
     fn test_new_routing_table() {
-        let local_id = NodeId::from_bytes([0; 32]);
+        let local_id = NodeId::from_bytes([0; NODE_ID_SIZE]);
         let table = RoutingTable::new(local_id);
 
         assert_eq!(table.node_count(), 0);
@@ -264,7 +265,7 @@ mod tests {
 
     #[test]
     fn test_add_node() {
-        let local_id = NodeId::from_bytes([0; 32]);
+        let local_id = NodeId::from_bytes([0; NODE_ID_SIZE]);
         let mut table = RoutingTable::new(local_id);
 
         let node = create_test_node(1);
@@ -276,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_dont_add_self() {
-        let local_id = NodeId::from_bytes([0; 32]);
+        let local_id = NodeId::from_bytes([0; NODE_ID_SIZE]);
         let mut table = RoutingTable::new(local_id);
 
         let self_node = NodeInfo::new(local_id);
@@ -287,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_remove_node() {
-        let local_id = NodeId::from_bytes([0; 32]);
+        let local_id = NodeId::from_bytes([0; NODE_ID_SIZE]);
         let mut table = RoutingTable::new(local_id);
 
         let node = create_test_node(1);
@@ -303,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_get_k_closest() {
-        let local_id = NodeId::from_bytes([0; 32]);
+        let local_id = NodeId::from_bytes([0; NODE_ID_SIZE]);
         let mut table = RoutingTable::new(local_id);
 
         // Add several nodes
@@ -312,7 +313,7 @@ mod tests {
             table.add_or_update(node).unwrap();
         }
 
-        let target = NodeId::from_bytes([5; 32]);
+        let target = NodeId::from_bytes([5; NODE_ID_SIZE]);
         let closest = table.get_k_closest(&target, 3);
 
         assert_eq!(closest.len(), 3);
@@ -320,7 +321,7 @@ mod tests {
 
     #[test]
     fn test_get_random_nodes() {
-        let local_id = NodeId::from_bytes([0; 32]);
+        let local_id = NodeId::from_bytes([0; NODE_ID_SIZE]);
         let mut table = RoutingTable::new(local_id);
 
         // Add several nodes
@@ -335,11 +336,11 @@ mod tests {
 
     #[test]
     fn test_bucket_index() {
-        let local_id = NodeId::from_bytes([0; 32]);
+        let local_id = NodeId::from_bytes([0; NODE_ID_SIZE]);
         let table = RoutingTable::new(local_id);
 
         // Node with first bit different
-        let mut node_id_bytes = [0u8; 32];
+        let mut node_id_bytes = [0u8; NODE_ID_SIZE];
         node_id_bytes[0] = 0b1000_0000;
         let node_id = NodeId::from_bytes(node_id_bytes);
 
@@ -349,7 +350,7 @@ mod tests {
 
     #[test]
     fn test_prune_stale() {
-        let local_id = NodeId::from_bytes([0; 32]);
+        let local_id = NodeId::from_bytes([0; NODE_ID_SIZE]);
         let mut table = RoutingTable::new(local_id);
 
         // Add old node
@@ -374,11 +375,11 @@ mod tests {
     #[test]
     fn test_reject_node_without_valid_pow() {
         // SECURITY C2: Verify routing table rejects nodes without valid PoW
-        let local_id = NodeId::from_bytes([0; 32]);
+        let local_id = NodeId::from_bytes([0; NODE_ID_SIZE]);
         let mut table = RoutingTable::new(local_id);
 
         // Create node with invalid PoW
-        let mut invalid_node = NodeInfo::new(NodeId::from_bytes([42; 32]));
+        let mut invalid_node = NodeInfo::new(NodeId::from_bytes([42; NODE_ID_SIZE]));
         invalid_node.pow_nonce = 12345; // Arbitrary invalid nonce
 
         // Should be rejected
@@ -390,7 +391,7 @@ mod tests {
     #[test]
     fn test_accept_node_with_valid_pow() {
         // SECURITY C2: Verify routing table accepts nodes with valid PoW
-        let local_id = NodeId::from_bytes([0; 32]);
+        let local_id = NodeId::from_bytes([0; NODE_ID_SIZE]);
         let mut table = RoutingTable::new(local_id);
 
         // Create node and compute valid PoW
@@ -405,12 +406,12 @@ mod tests {
     #[test]
     fn test_pow_prevents_sybil_flooding() {
         // SECURITY C2: PoW makes it expensive to flood DHT with many identities
-        let local_id = NodeId::from_bytes([0; 32]);
+        let local_id = NodeId::from_bytes([0; NODE_ID_SIZE]);
         let mut table = RoutingTable::new(local_id);
 
         // Try to add 10 nodes with invalid PoW (should all fail)
         for i in 1..=10 {
-            let mut invalid_node = NodeInfo::new(NodeId::from_bytes([i; 32]));
+            let mut invalid_node = NodeInfo::new(NodeId::from_bytes([i; NODE_ID_SIZE]));
             invalid_node.pow_nonce = i as u64 * 1000; // Invalid nonces
 
             let result = table.add_or_update(invalid_node);

@@ -501,8 +501,8 @@ mod tests {
 
     fn create_test_frame() -> Frame {
         let message_id = MessageId::from_bytes([1u8; 16]);
-        let source = NodeId::from_bytes([2u8; 32]);
-        let destination = NodeId::from_bytes([3u8; 32]);
+        let source = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+        let destination = NodeId::from_bytes([3u8; NODE_ID_SIZE]);
         let payload = b"Hello, MyriadMesh!".to_vec();
         let timestamp = 1704067200000u64; // 2024-01-01 00:00:00 UTC in milliseconds
 
@@ -526,7 +526,8 @@ mod tests {
 
     #[test]
     fn test_header_size() {
-        assert_eq!(HEADER_SIZE, 99);
+        // SECURITY C6: Header size increased due to 64-byte NodeIDs (163 = 64+64+35)
+        assert_eq!(HEADER_SIZE, 163);
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! SECURITY C2: Implements Proof-of-Work for Sybil resistance
 
 use blake2::{Blake2b512, Digest};
-use myriadmesh_protocol::types::AdapterType;
+use myriadmesh_protocol::types::{AdapterType, NODE_ID_SIZE};
 use myriadmesh_protocol::NodeId as ProtocolNodeId;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -218,7 +218,9 @@ impl NodeInfo {
     }
 
     /// Calculate XOR distance to another node
-    pub fn distance_to(&self, other: &ProtocolNodeId) -> [u8; 32] {
+    ///
+    /// SECURITY C6: Returns 64-byte XOR distance for enhanced collision resistance
+    pub fn distance_to(&self, other: &ProtocolNodeId) -> [u8; NODE_ID_SIZE] {
         self.node_id.distance(other)
     }
 
@@ -274,7 +276,9 @@ impl PublicNodeInfo {
     }
 
     /// Calculate XOR distance to another node
-    pub fn distance_to(&self, other: &ProtocolNodeId) -> [u8; 32] {
+    ///
+    /// SECURITY C6: Returns 64-byte XOR distance for enhanced collision resistance
+    pub fn distance_to(&self, other: &ProtocolNodeId) -> [u8; NODE_ID_SIZE] {
         self.node_id.distance(other)
     }
 
@@ -290,7 +294,7 @@ mod tests {
     use super::*;
 
     fn create_test_node() -> NodeInfo {
-        NodeInfo::new(ProtocolNodeId::from_bytes([1u8; 32]))
+        NodeInfo::new(ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]))
     }
 
     #[test]
@@ -346,7 +350,7 @@ mod tests {
 
     #[test]
     fn test_with_adapters() {
-        let node_id = ProtocolNodeId::from_bytes([1u8; 32]);
+        let node_id = ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]);
         let adapters = vec![AdapterInfo {
             adapter_type: AdapterType::Ethernet,
             address: "192.168.1.1:4001".to_string(),
@@ -360,7 +364,7 @@ mod tests {
 
     #[test]
     fn test_to_public_removes_adapter_addresses() {
-        let node_id = ProtocolNodeId::from_bytes([1u8; 32]);
+        let node_id = ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]);
         let adapters = vec![
             AdapterInfo {
                 adapter_type: AdapterType::Ethernet,
@@ -389,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_public_node_info_creation() {
-        let node_id = ProtocolNodeId::from_bytes([1u8; 32]);
+        let node_id = ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]);
         let caps = NodeCapabilities {
             i2p_capable: true,
             tor_capable: false,
@@ -406,7 +410,7 @@ mod tests {
 
     #[test]
     fn test_public_node_info_is_stale() {
-        let node_id = ProtocolNodeId::from_bytes([1u8; 32]);
+        let node_id = ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]);
         let mut public = PublicNodeInfo::new(node_id, NodeCapabilities::default());
 
         // Fresh node is not stale
@@ -447,7 +451,7 @@ mod tests {
     #[test]
     fn test_pow_compute_and_verify() {
         // SECURITY C2: PoW computation and verification
-        let mut node = NodeInfo::new(ProtocolNodeId::from_bytes([42u8; 32]));
+        let mut node = NodeInfo::new(ProtocolNodeId::from_bytes([42u8; NODE_ID_SIZE]));
 
         // Initially has no valid PoW
         assert!(!node.verify_pow());
@@ -463,7 +467,7 @@ mod tests {
     #[test]
     fn test_pow_reject_invalid_nonce() {
         // SECURITY C2: Verify that invalid nonces are rejected
-        let mut node = NodeInfo::new(ProtocolNodeId::from_bytes([123u8; 32]));
+        let mut node = NodeInfo::new(ProtocolNodeId::from_bytes([123u8; NODE_ID_SIZE]));
 
         // Set an arbitrary invalid nonce
         node.pow_nonce = 12345;
@@ -475,8 +479,8 @@ mod tests {
     #[test]
     fn test_pow_different_nodes_need_different_nonces() {
         // SECURITY C2: Different NodeIDs need different PoW solutions
-        let node_id_1 = ProtocolNodeId::from_bytes([1u8; 32]);
-        let node_id_2 = ProtocolNodeId::from_bytes([2u8; 32]);
+        let node_id_1 = ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let node_id_2 = ProtocolNodeId::from_bytes([2u8; NODE_ID_SIZE]);
 
         let mut node1 = NodeInfo::new(node_id_1);
         let mut node2 = NodeInfo::new(node_id_2);
@@ -504,7 +508,7 @@ mod tests {
     #[test]
     fn test_pow_low_difficulty() {
         // Test with very low difficulty for speed
-        let node_id = ProtocolNodeId::from_bytes([99u8; 32]);
+        let node_id = ProtocolNodeId::from_bytes([99u8; NODE_ID_SIZE]);
 
         // Test with difficulty 4 (should be fast: ~16 attempts)
         let mut nonce = 0u64;

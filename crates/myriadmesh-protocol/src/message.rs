@@ -7,6 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::error::{ProtocolError, Result};
 use crate::types::{NodeId, Priority};
 
+#[cfg(test)]
+use crate::types::NODE_ID_SIZE;
+
 /// Size of a message ID in bytes (per specification.md:128-131)
 pub const MESSAGE_ID_SIZE: usize = 16;
 
@@ -336,8 +339,8 @@ mod tests {
 
     #[test]
     fn test_message_id_generation() {
-        let source = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
+        let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
         let payload = b"test payload";
         let timestamp = 1704067200000u64; // milliseconds
         let sequence = 42;
@@ -355,8 +358,8 @@ mod tests {
 
     #[test]
     fn test_message_creation() {
-        let source = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
+        let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
         let payload = b"Hello, MyriadMesh!".to_vec();
 
         let msg = Message::new(source, dest, MessageType::Data, payload).unwrap();
@@ -373,8 +376,8 @@ mod tests {
 
     #[test]
     fn test_message_ttl() {
-        let source = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
+        let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
         let payload = b"test".to_vec();
 
         let mut msg = Message::new(source, dest, MessageType::Data, payload)
@@ -393,8 +396,8 @@ mod tests {
 
     #[test]
     fn test_message_validation() {
-        let source = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
+        let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
         let payload = b"test".to_vec();
 
         let msg = Message::new(source, dest, MessageType::Data, payload).unwrap();
@@ -407,8 +410,8 @@ mod tests {
 
     #[test]
     fn test_message_too_large() {
-        let source = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
+        let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
         let payload = vec![0u8; MAX_PAYLOAD_SIZE + 1];
 
         let result = Message::new(source, dest, MessageType::Data, payload);
@@ -417,8 +420,8 @@ mod tests {
 
     #[test]
     fn test_message_id_hex() {
-        let source = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
+        let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
         let id = MessageId::generate(&source, &dest, b"test", 123, 0);
 
         let hex = id.to_hex();
@@ -429,8 +432,8 @@ mod tests {
 
     #[test]
     fn test_timestamp_freshness() {
-        let source = NodeId::from_bytes([1u8; 32]);
-        let dest = NodeId::from_bytes([2u8; 32]);
+        let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
         let payload = b"test".to_vec();
 
         // Fresh message

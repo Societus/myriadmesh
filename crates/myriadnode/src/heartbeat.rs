@@ -706,6 +706,7 @@ mod tests {
     use crate::backhaul::{BackhaulConfig, BackhaulDetector};
     use myriadmesh_crypto::identity::NodeIdentity;
     use myriadmesh_network::AdapterManager;
+    use myriadmesh_protocol::types::NODE_ID_SIZE;
     use std::collections::HashMap;
 
     // Helper function to create a HeartbeatService for testing
@@ -738,7 +739,7 @@ mod tests {
 
     #[test]
     fn test_node_info_staleness() {
-        let node_id = NodeId::from_bytes([0u8; 32]);
+        let node_id = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
         let mut node_info = NodeInfo::new(node_id);
 
         // Fresh node should not be stale
@@ -788,7 +789,7 @@ mod tests {
     #[tokio::test]
     async fn test_heartbeat_service_creation() {
         let config = HeartbeatConfig::default();
-        let node_id = NodeId::from_bytes([1u8; 32]);
+        let node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
         let service = create_test_service(config, node_id);
 
         assert_eq!(service.local_node_id, node_id);
@@ -797,8 +798,8 @@ mod tests {
     #[tokio::test]
     async fn test_handle_heartbeat() {
         let config = HeartbeatConfig::default();
-        let local_node_id = NodeId::from_bytes([1u8; 32]);
-        let remote_node_id = NodeId::from_bytes([2u8; 32]);
+        let local_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let remote_node_id = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
 
         let service = create_test_service(config, local_node_id);
 
@@ -841,8 +842,8 @@ mod tests {
             ..Default::default()
         };
 
-        let local_node_id = NodeId::from_bytes([1u8; 32]);
-        let remote_node_id = NodeId::from_bytes([2u8; 32]);
+        let local_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let remote_node_id = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
 
         let service = create_test_service(config, local_node_id);
 

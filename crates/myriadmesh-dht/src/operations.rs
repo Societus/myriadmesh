@@ -135,6 +135,7 @@ pub enum FindValueResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use myriadmesh_protocol::types::NODE_ID_SIZE;
 
     #[test]
     fn test_generate_query_id() {
@@ -147,8 +148,8 @@ mod tests {
 
     #[test]
     fn test_find_node_request() {
-        let target = NodeId::from_bytes([1u8; 32]);
-        let requestor = NodeId::from_bytes([2u8; 32]);
+        let target = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let requestor = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
 
         let req = FindNodeRequest::new(target, requestor);
 
@@ -159,7 +160,7 @@ mod tests {
     #[test]
     fn test_find_value_request() {
         let key = [1u8; 32];
-        let requestor = NodeId::from_bytes([2u8; 32]);
+        let requestor = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
 
         let req = FindValueRequest::new(key, requestor);
 

@@ -13,6 +13,7 @@ thiserror = { workspace = true }
 hex = { workspace = true }
 blake2 = { workspace = true }
 rand = { workspace = true }
+serde-big-array = "0.5" # SECURITY C6: Support for 64-byte arrays in serde
 
 [dev-dependencies]
 criterion = { workspace = true }

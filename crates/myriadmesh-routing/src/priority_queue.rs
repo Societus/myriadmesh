@@ -214,13 +214,13 @@ pub struct PriorityQueueStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use myriadmesh_protocol::types::Priority;
+    use myriadmesh_protocol::types::{Priority, NODE_ID_SIZE};
     use myriadmesh_protocol::{MessageType, NodeId};
 
     fn create_test_message(priority: Priority) -> Message {
         Message::new(
-            NodeId::from_bytes([1u8; 32]),
-            NodeId::from_bytes([2u8; 32]),
+            NodeId::from_bytes([1u8; NODE_ID_SIZE]),
+            NodeId::from_bytes([2u8; NODE_ID_SIZE]),
             MessageType::Data,
             b"test".to_vec(),
         )

@@ -9,6 +9,7 @@
  * - End-to-end workflows
  */
 use myriadmesh_network::AdapterManager;
+use myriadmesh_protocol::types::NODE_ID_SIZE;
 use myriadmesh_protocol::NodeId;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -24,7 +25,7 @@ use std::collections::HashMap;
 
 // Helper function to create a test NodeId
 fn create_test_node_id(seed: u8) -> NodeId {
-    let bytes = [seed; 32];
+    let bytes = [seed; NODE_ID_SIZE];
     NodeId::from_bytes(bytes)
 }
 

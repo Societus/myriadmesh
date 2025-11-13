@@ -201,6 +201,7 @@ impl DualIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use myriadmesh_protocol::types::NODE_ID_SIZE;
 
     fn create_test_identity() -> DualIdentity {
         myriadmesh_crypto::init().unwrap();
@@ -220,7 +221,7 @@ mod tests {
     #[test]
     fn test_grant_i2p_access() {
         let identity = create_test_identity();
-        let contact_node_id = NodeId::from_bytes([5u8; 32]);
+        let contact_node_id = NodeId::from_bytes([5u8; NODE_ID_SIZE]);
 
         // Grant access
         let token = identity.grant_i2p_access(contact_node_id, 30).unwrap();
@@ -258,7 +259,7 @@ mod tests {
     fn test_token_rejection_wrong_recipient() {
         let alice = create_test_identity();
         let mut bob = create_test_identity();
-        let charlie_node_id = NodeId::from_bytes([6u8; 32]);
+        let charlie_node_id = NodeId::from_bytes([6u8; NODE_ID_SIZE]);
 
         // Alice grants access to Charlie
         let token = alice.grant_i2p_access(charlie_node_id, 30).unwrap();
@@ -292,7 +293,7 @@ mod tests {
     #[test]
     fn test_qr_code_generation() {
         let identity = create_test_identity();
-        let contact_node_id = NodeId::from_bytes([7u8; 32]);
+        let contact_node_id = NodeId::from_bytes([7u8; NODE_ID_SIZE]);
 
         // Generate QR code data
         let qr_data = identity.generate_qr_token(contact_node_id, 30).unwrap();

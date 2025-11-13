@@ -16,6 +16,7 @@ use crate::storage::Storage;
 use myriadmesh_crypto::identity::NodeIdentity;
 use myriadmesh_dht::routing_table::RoutingTable;
 use myriadmesh_network::{adapters::*, AdapterManager, NetworkAdapter};
+use myriadmesh_protocol::types::NODE_ID_SIZE;
 use myriadmesh_routing::PriorityQueue;
 use std::collections::HashMap;
 use std::fs;
@@ -55,12 +56,13 @@ impl Node {
         info!("✓ Message queue initialized");
 
         // Initialize DHT
-        let node_id_bytes: [u8; 32] = config
+        // SECURITY C6: NodeID is now 64 bytes for collision resistance
+        let node_id_bytes: [u8; NODE_ID_SIZE] = config
             .node
             .id
             .as_slice()
             .try_into()
-            .expect("Node ID must be 32 bytes");
+            .expect("Node ID must be 64 bytes");
         let node_id = myriadmesh_protocol::NodeId::from_bytes(node_id_bytes);
         let dht = RoutingTable::new(node_id);
         info!("✓ DHT routing table initialized");

@@ -11,7 +11,7 @@ use crate::error::{NetworkError, Result};
 use crate::types::{AdapterCapabilities, Address, PowerConsumption};
 use myriadmesh_crypto::identity::NodeIdentity;
 use myriadmesh_crypto::signing::{sign_message, verify_signature};
-use myriadmesh_protocol::types::AdapterType;
+use myriadmesh_protocol::types::{AdapterType, NODE_ID_SIZE};
 use myriadmesh_protocol::{Frame, Message, MessageType, NodeId};
 use sodiumoxide::crypto::sign::ed25519;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
@@ -296,8 +296,8 @@ impl EthernetAdapter {
                     if let Ok(message) = std::str::from_utf8(&buf[..size]) {
                         if let Some(node_id_hex) = message.strip_prefix("MYRIADMESH_DISCOVER:") {
                             if let Ok(node_id_bytes) = hex::decode(node_id_hex) {
-                                if node_id_bytes.len() == 32 {
-                                    let mut bytes = [0u8; 32];
+                                if node_id_bytes.len() == NODE_ID_SIZE {
+                                    let mut bytes = [0u8; NODE_ID_SIZE];
                                     bytes.copy_from_slice(&node_id_bytes);
                                     let node_id = NodeId::from_bytes(bytes);
 

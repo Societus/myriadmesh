@@ -33,21 +33,28 @@
 
 use crate::encryption::{decrypt, encrypt_with_nonce, EncryptedMessage, Nonce, SymmetricKey};
 use crate::error::{CryptoError, Result};
+use crate::identity::NODE_ID_SIZE;
 use crate::keyexchange::{
     client_session_keys, server_session_keys, KeyExchangeKeypair, X25519PublicKey,
 };
 use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
 
 /// Key exchange request message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyExchangeRequest {
     /// Initiator's node ID
-    pub from_node_id: [u8; 32],
+    /// SECURITY C6: 64-byte NodeID for collision resistance
+    #[serde(with = "BigArray")]
+    pub from_node_id: [u8; NODE_ID_SIZE],
 
     /// Responder's node ID
-    pub to_node_id: [u8; 32],
+    /// SECURITY C6: 64-byte NodeID for collision resistance
+    #[serde(with = "BigArray")]
+    pub to_node_id: [u8; NODE_ID_SIZE],
 
     /// Initiator's public key for key exchange
     pub public_key: X25519PublicKey,
@@ -60,10 +67,14 @@ pub struct KeyExchangeRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyExchangeResponse {
     /// Responder's node ID
-    pub from_node_id: [u8; 32],
+    /// SECURITY C6: 64-byte NodeID for collision resistance
+    #[serde(with = "BigArray")]
+    pub from_node_id: [u8; NODE_ID_SIZE],
 
     /// Initiator's node ID
-    pub to_node_id: [u8; 32],
+    /// SECURITY C6: 64-byte NodeID for collision resistance
+    #[serde(with = "BigArray")]
+    pub to_node_id: [u8; NODE_ID_SIZE],
 
     /// Responder's public key for key exchange
     pub public_key: X25519PublicKey,
@@ -91,10 +102,12 @@ pub enum ChannelState {
 /// An encrypted channel for end-to-end message encryption
 pub struct EncryptedChannel {
     /// Local node ID
-    local_node_id: [u8; 32],
+    /// SECURITY C6: 64-byte NodeID for collision resistance
+    local_node_id: [u8; NODE_ID_SIZE],
 
     /// Remote node ID
-    remote_node_id: Option<[u8; 32]>,
+    /// SECURITY C6: 64-byte NodeID for collision resistance
+    remote_node_id: Option<[u8; NODE_ID_SIZE]>,
 
     /// Local keypair for key exchange
     local_keypair: KeyExchangeKeypair,
@@ -121,7 +134,9 @@ pub struct EncryptedChannel {
 
 impl EncryptedChannel {
     /// Create a new encrypted channel
-    pub fn new(local_node_id: [u8; 32], local_keypair: KeyExchangeKeypair) -> Self {
+    ///
+    /// SECURITY C6: NodeID is now 64 bytes for collision resistance
+    pub fn new(local_node_id: [u8; NODE_ID_SIZE], local_keypair: KeyExchangeKeypair) -> Self {
         EncryptedChannel {
             local_node_id,
             remote_node_id: None,
@@ -172,14 +187,16 @@ impl EncryptedChannel {
     }
 
     /// Get remote node ID (if set)
-    pub fn remote_node_id(&self) -> Option<[u8; 32]> {
+    pub fn remote_node_id(&self) -> Option<[u8; NODE_ID_SIZE]> {
         self.remote_node_id
     }
 
     /// Create a key exchange request to initiate encrypted channel
+    ///
+    /// SECURITY C6: NodeID is now 64 bytes for collision resistance
     pub fn create_key_exchange_request(
         &mut self,
-        remote_node_id: [u8; 32],
+        remote_node_id: [u8; NODE_ID_SIZE],
     ) -> Result<KeyExchangeRequest> {
         if self.state != ChannelState::Uninitialized {
             return Err(CryptoError::InvalidState(
@@ -358,12 +375,12 @@ mod tests {
         crate::init().unwrap();
 
         // Alice initiates
-        let alice_node_id = [1u8; 32];
+        let alice_node_id = [1u8; NODE_ID_SIZE];
         let alice_kp = KeyExchangeKeypair::generate();
         let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
 
         // Bob responds
-        let bob_node_id = [2u8; 32];
+        let bob_node_id = [2u8; NODE_ID_SIZE];
         let bob_kp = KeyExchangeKeypair::generate();
         let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
 
@@ -396,11 +413,11 @@ mod tests {
         crate::init().unwrap();
 
         // Setup channel
-        let alice_node_id = [1u8; 32];
+        let alice_node_id = [1u8; NODE_ID_SIZE];
         let alice_kp = KeyExchangeKeypair::generate();
         let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
 
-        let bob_node_id = [2u8; 32];
+        let bob_node_id = [2u8; NODE_ID_SIZE];
         let bob_kp = KeyExchangeKeypair::generate();
         let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
 
@@ -433,7 +450,7 @@ mod tests {
     fn test_encryption_before_establishment_fails() {
         crate::init().unwrap();
 
-        let node_id = [1u8; 32];
+        let node_id = [1u8; NODE_ID_SIZE];
         let kp = KeyExchangeKeypair::generate();
         let channel = EncryptedChannel::new(node_id, kp);
 
@@ -445,11 +462,11 @@ mod tests {
     fn test_wrong_recipient_fails() {
         crate::init().unwrap();
 
-        let alice_node_id = [1u8; 32];
+        let alice_node_id = [1u8; NODE_ID_SIZE];
         let alice_kp = KeyExchangeKeypair::generate();
         let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
 
-        let bob_node_id = [2u8; 32];
+        let bob_node_id = [2u8; NODE_ID_SIZE];
 
         // Alice creates request for Bob
         let kx_request = alice_channel
@@ -457,7 +474,7 @@ mod tests {
             .unwrap();
 
         // Charlie tries to process it
-        let charlie_node_id = [3u8; 32];
+        let charlie_node_id = [3u8; NODE_ID_SIZE];
         let charlie_kp = KeyExchangeKeypair::generate();
         let mut charlie_channel = EncryptedChannel::new(charlie_node_id, charlie_kp);
 
@@ -470,11 +487,11 @@ mod tests {
         crate::init().unwrap();
 
         // Setup channel
-        let alice_node_id = [1u8; 32];
+        let alice_node_id = [1u8; NODE_ID_SIZE];
         let alice_kp = KeyExchangeKeypair::generate();
         let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
 
-        let bob_node_id = [2u8; 32];
+        let bob_node_id = [2u8; NODE_ID_SIZE];
         let bob_kp = KeyExchangeKeypair::generate();
         let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
 
@@ -502,11 +519,11 @@ mod tests {
         // SECURITY TEST C4: Verify nonces are never reused
         crate::init().unwrap();
 
-        let alice_node_id = [1u8; 32];
+        let alice_node_id = [1u8; NODE_ID_SIZE];
         let alice_kp = KeyExchangeKeypair::generate();
         let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
 
-        let bob_node_id = [2u8; 32];
+        let bob_node_id = [2u8; NODE_ID_SIZE];
         let bob_kp = KeyExchangeKeypair::generate();
         let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
 
@@ -553,11 +570,11 @@ mod tests {
 
         crate::init().unwrap();
 
-        let alice_node_id = [1u8; 32];
+        let alice_node_id = [1u8; NODE_ID_SIZE];
         let alice_kp = KeyExchangeKeypair::generate();
         let mut alice_channel = EncryptedChannel::new(alice_node_id, alice_kp);
 
-        let bob_node_id = [2u8; 32];
+        let bob_node_id = [2u8; NODE_ID_SIZE];
         let bob_kp = KeyExchangeKeypair::generate();
         let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
 

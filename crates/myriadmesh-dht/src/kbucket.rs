@@ -174,9 +174,10 @@ impl KBucket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use myriadmesh_protocol::types::NODE_ID_SIZE;
 
     fn create_test_node(id: u8) -> NodeInfo {
-        NodeInfo::new(NodeId::from_bytes([id; 32]))
+        NodeInfo::new(NodeId::from_bytes([id; NODE_ID_SIZE]))
     }
 
     #[test]
@@ -259,7 +260,7 @@ mod tests {
         let found = bucket.find_node(&node_id);
         assert!(found.is_some());
 
-        let not_found = bucket.find_node(&NodeId::from_bytes([99; 32]));
+        let not_found = bucket.find_node(&NodeId::from_bytes([99; NODE_ID_SIZE]));
         assert!(not_found.is_none());
     }
 

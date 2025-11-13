@@ -271,6 +271,7 @@ impl TokenStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use myriadmesh_protocol::types::NODE_ID_SIZE;
 
     #[test]
     fn test_i2p_destination() {
@@ -281,9 +282,9 @@ mod tests {
 
     #[test]
     fn test_capability_token_creation() {
-        let for_node = NodeId::from_bytes([1u8; 32]);
-        let i2p_node_id = NodeId::from_bytes([2u8; 32]);
-        let issuer_node_id = NodeId::from_bytes([3u8; 32]);
+        let for_node = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let i2p_node_id = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+        let issuer_node_id = NodeId::from_bytes([3u8; NODE_ID_SIZE]);
         let dest = I2pDestination::new("test.b32.i2p".to_string());
 
         let token = I2pCapabilityToken::new(
@@ -305,8 +306,8 @@ mod tests {
     fn test_token_signing_and_verification() {
         myriadmesh_crypto::init().unwrap();
         let identity = NodeIdentity::generate().unwrap();
-        let for_node = NodeId::from_bytes([1u8; 32]);
-        let i2p_node_id = NodeId::from_bytes([2u8; 32]);
+        let for_node = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let i2p_node_id = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
         let issuer_node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
         let dest = I2pDestination::new("test.b32.i2p".to_string());
 
@@ -327,9 +328,9 @@ mod tests {
 
     #[test]
     fn test_token_expiration() {
-        let for_node = NodeId::from_bytes([1u8; 32]);
-        let i2p_node_id = NodeId::from_bytes([2u8; 32]);
-        let issuer_node_id = NodeId::from_bytes([3u8; 32]);
+        let for_node = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let i2p_node_id = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+        let issuer_node_id = NodeId::from_bytes([3u8; NODE_ID_SIZE]);
         let dest = I2pDestination::new("test.b32.i2p".to_string());
 
         let mut token = I2pCapabilityToken::new(for_node, dest, i2p_node_id, issuer_node_id, 30);
@@ -345,9 +346,9 @@ mod tests {
 
     #[test]
     fn test_token_serialization() {
-        let for_node = NodeId::from_bytes([1u8; 32]);
-        let i2p_node_id = NodeId::from_bytes([2u8; 32]);
-        let issuer_node_id = NodeId::from_bytes([3u8; 32]);
+        let for_node = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let i2p_node_id = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+        let issuer_node_id = NodeId::from_bytes([3u8; NODE_ID_SIZE]);
         let dest = I2pDestination::new("test.b32.i2p".to_string());
 
         let token = I2pCapabilityToken::new(for_node, dest, i2p_node_id, issuer_node_id, 30);
@@ -373,8 +374,8 @@ mod tests {
         // Create attacker identity
         let attacker = NodeIdentity::generate().unwrap();
 
-        let recipient_node_id = NodeId::from_bytes([1u8; 32]);
-        let i2p_node_id = NodeId::from_bytes([2u8; 32]);
+        let recipient_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let i2p_node_id = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
         let dest = I2pDestination::new("victim.b32.i2p".to_string());
 
         // Attacker creates token claiming to be from legitimate_issuer
@@ -426,9 +427,9 @@ mod tests {
     fn test_token_storage() {
         let mut storage = TokenStorage::new();
 
-        let issuer_node_id = NodeId::from_bytes([1u8; 32]);
-        let for_node = NodeId::from_bytes([2u8; 32]);
-        let i2p_node_id = NodeId::from_bytes([3u8; 32]);
+        let issuer_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let for_node = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+        let i2p_node_id = NodeId::from_bytes([3u8; NODE_ID_SIZE]);
         let dest = I2pDestination::new("test.b32.i2p".to_string());
 
         let token = I2pCapabilityToken::new(for_node, dest, i2p_node_id, issuer_node_id, 30);
@@ -451,9 +452,9 @@ mod tests {
     fn test_token_storage_cleanup() {
         let mut storage = TokenStorage::new();
 
-        let issuer_node_id = NodeId::from_bytes([1u8; 32]);
-        let for_node = NodeId::from_bytes([2u8; 32]);
-        let i2p_node_id = NodeId::from_bytes([3u8; 32]);
+        let issuer_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let for_node = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+        let i2p_node_id = NodeId::from_bytes([3u8; NODE_ID_SIZE]);
         let dest = I2pDestination::new("test.b32.i2p".to_string());
 
         // Create expired token
