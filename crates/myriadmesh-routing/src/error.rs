@@ -1,5 +1,6 @@
 //! Routing error types
 
+use myriadmesh_protocol::message::MessageId;
 use thiserror::Error;
 
 /// Routing-specific errors
@@ -37,6 +38,22 @@ pub enum RoutingError {
 
     #[error("Insufficient relays for onion routing")]
     InsufficientRelays,
+
+    // SECURITY M1: DOS protection error types
+    #[error("Invalid message: {0}")]
+    InvalidMessage(String),
+
+    #[error("Duplicate message: {0:?}")]
+    DuplicateMessage(MessageId),
+
+    #[error("Rate limited: {0}")]
+    RateLimited(String),
+
+    #[error("Queue full: {0}")]
+    QueueFull(String),
+
+    #[error("Policy violation: {0}")]
+    PolicyViolation(String),
 
     #[error("Protocol error: {0}")]
     Protocol(#[from] myriadmesh_protocol::ProtocolError),
