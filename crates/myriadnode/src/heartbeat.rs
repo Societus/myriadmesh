@@ -1,5 +1,7 @@
 use anyhow::{bail, Result};
+use blake2::{Blake2b512, Digest};
 use serde::{Deserialize, Serialize};
+use sodiumoxide::crypto::sign::ed25519;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -8,7 +10,7 @@ use tokio::time::{interval, Duration};
 use tracing::{debug, info, warn};
 
 use myriadmesh_crypto::identity::NodeIdentity;
-use myriadmesh_crypto::signing::{sign_message, Signature};
+use myriadmesh_crypto::signing::{sign_message, verify_signature, Signature};
 use myriadmesh_network::AdapterManager;
 use myriadmesh_protocol::NodeId;
 
@@ -26,7 +28,11 @@ pub struct HeartbeatMessage {
     pub adapters: Vec<AdapterInfo>,
     /// Optional geolocation data (only if node permits)
     pub geolocation: Option<GeolocationData>,
-    /// Signature to verify authenticity
+    /// SECURITY H3: Ed25519 public key (32 bytes) for signature verification
+    /// Must derive to node_id via BLAKE2b to prevent impersonation
+    pub public_key: Vec<u8>,
+    /// SECURITY H3: Ed25519 signature (64 bytes) over (node_id || timestamp || adapters || geolocation || public_key)
+    /// Prevents route poisoning attacks where malicious nodes advertise fake routes
     pub signature: Vec<u8>,
 }
 
@@ -313,24 +319,30 @@ impl HeartbeatService {
     }
 
     /// Sign a heartbeat message
+    ///
+    /// SECURITY H3: Include public_key in signed message
     fn sign_heartbeat(&self, heartbeat: &HeartbeatMessage) -> Result<Vec<u8>> {
-        // Canonical serialization
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(heartbeat.node_id.as_bytes());
-        bytes.extend_from_slice(&heartbeat.timestamp.to_be_bytes());
+        // SECURITY H3: Build message to sign
+        // Message format: node_id || timestamp || adapters || geolocation || public_key
+        let mut message = Vec::new();
+        message.extend_from_slice(heartbeat.node_id.as_bytes());
+        message.extend_from_slice(&heartbeat.timestamp.to_be_bytes());
 
         // Serialize adapters (deterministic)
         let adapters_json = serde_json::to_vec(&heartbeat.adapters)?;
-        bytes.extend_from_slice(&adapters_json);
+        message.extend_from_slice(&adapters_json);
 
         // Include geolocation if present
         if let Some(geo) = &heartbeat.geolocation {
             let geo_json = serde_json::to_vec(geo)?;
-            bytes.extend_from_slice(&geo_json);
+            message.extend_from_slice(&geo_json);
         }
 
+        // SECURITY H3: Include public key in signed message
+        message.extend_from_slice(&heartbeat.public_key);
+
         // Sign with node's keypair
-        let signature = sign_message(&self.identity, &bytes)?;
+        let signature = sign_message(&self.identity, &message)?;
 
         Ok(signature.as_bytes().to_vec())
     }
@@ -386,12 +398,16 @@ impl HeartbeatService {
 
                         debug!("Broadcasting heartbeat with {} adapters", adapters.len());
 
+                        // SECURITY H3: Extract public key
+                        let public_key_bytes = identity.public_key.as_ref().to_vec();
+
                         // Generate heartbeat
                         let mut heartbeat = HeartbeatMessage {
                             node_id: local_node_id,
                             timestamp: current_timestamp(),
                             adapters,
                             geolocation: None, // TODO: Implement geolocation collection
+                            public_key: public_key_bytes,
                             signature: Vec::new(),
                         };
 
@@ -445,35 +461,70 @@ impl HeartbeatService {
     }
 
     /// Handle an incoming heartbeat from another node
+    ///
+    /// SECURITY H3: Verify cryptographic signature to prevent route poisoning
     pub async fn handle_heartbeat(&self, heartbeat: HeartbeatMessage) -> Result<()> {
         debug!("Received heartbeat from node {:?}", heartbeat.node_id);
 
-        // Verify signature
+        // SECURITY H3: Verify public key is provided
+        if heartbeat.public_key.is_empty() {
+            bail!("Heartbeat missing public key");
+        }
+        if heartbeat.public_key.len() != 32 {
+            bail!("Invalid public key length: {}", heartbeat.public_key.len());
+        }
+
+        // SECURITY H3: Verify signature is provided
         if heartbeat.signature.is_empty() {
             bail!("Heartbeat missing signature");
         }
-
-        // Reconstruct signed bytes
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(heartbeat.node_id.as_bytes());
-        bytes.extend_from_slice(&heartbeat.timestamp.to_be_bytes());
-        let adapters_json = serde_json::to_vec(&heartbeat.adapters)?;
-        bytes.extend_from_slice(&adapters_json);
-        if let Some(geo) = &heartbeat.geolocation {
-            let geo_json = serde_json::to_vec(geo)?;
-            bytes.extend_from_slice(&geo_json);
+        if heartbeat.signature.len() != 64 {
+            bail!("Invalid signature length: {}", heartbeat.signature.len());
         }
 
-        // Convert NodeId to public key (derive from node ID)
-        // Note: We need to get the actual public key from the node
-        // For now, we'll trust the signature if it's present and properly formatted
-        // TODO: Implement proper public key retrieval from NodeId
+        // SECURITY H3: Verify that public_key derives to claimed node_id
+        // This prevents impersonation attacks where attacker uses valid signature
+        // from one node but claims to be a different node
+        let mut hasher = Blake2b512::new();
+        hasher.update(&heartbeat.public_key);
+        let derived_id = hasher.finalize();
+        let derived_id_bytes: [u8; 64] = derived_id.into();
+        let derived_node_id = NodeId::from_bytes(derived_id_bytes);
+
+        if derived_node_id != heartbeat.node_id {
+            bail!(
+                "Public key derivation mismatch: public key does not derive to claimed node_id"
+            );
+        }
+
+        // SECURITY H3: Reconstruct signed message
+        // Message format: node_id || timestamp || adapters || geolocation || public_key
+        let mut message = Vec::new();
+        message.extend_from_slice(heartbeat.node_id.as_bytes());
+        message.extend_from_slice(&heartbeat.timestamp.to_be_bytes());
+        let adapters_json = serde_json::to_vec(&heartbeat.adapters)?;
+        message.extend_from_slice(&adapters_json);
+        if let Some(geo) = &heartbeat.geolocation {
+            let geo_json = serde_json::to_vec(geo)?;
+            message.extend_from_slice(&geo_json);
+        }
+        message.extend_from_slice(&heartbeat.public_key);
+
+        // SECURITY H3: Parse Ed25519 public key
+        let public_key = ed25519::PublicKey::from_slice(&heartbeat.public_key)
+            .ok_or_else(|| anyhow::anyhow!("Invalid Ed25519 public key"))?;
+
+        // SECURITY H3: Parse signature
         let signature_bytes: [u8; 64] = heartbeat
             .signature
             .as_slice()
             .try_into()
             .map_err(|_| anyhow::anyhow!("Invalid signature length"))?;
-        let _signature = Signature::from_bytes(signature_bytes);
+        let signature = Signature::from_bytes(signature_bytes);
+
+        // SECURITY H3: Verify signature
+        verify_signature(&public_key, &message, &signature)
+            .map_err(|e| anyhow::anyhow!("Signature verification failed: {}", e))?;
 
         // Check timestamp freshness (replay protection)
         let now = current_timestamp();
@@ -526,6 +577,8 @@ impl HeartbeatService {
     }
 
     /// Generate a heartbeat message from local node state
+    ///
+    /// SECURITY H3: Sign heartbeat to prevent route poisoning
     pub async fn generate_heartbeat(
         &self,
         adapters: Vec<AdapterInfo>,
@@ -540,12 +593,32 @@ impl HeartbeatService {
             None
         };
 
+        // SECURITY H3: Extract public key bytes
+        let public_key_bytes = self.identity.public_key.as_ref().to_vec();
+
+        // SECURITY H3: Build message to sign
+        // Message format: node_id || timestamp || adapters || geolocation || public_key
+        let mut message = Vec::new();
+        message.extend_from_slice(self.local_node_id.as_bytes());
+        message.extend_from_slice(&timestamp.to_be_bytes());
+        let adapters_json = serde_json::to_vec(&adapters)?;
+        message.extend_from_slice(&adapters_json);
+        if let Some(geo) = &geo {
+            let geo_json = serde_json::to_vec(geo)?;
+            message.extend_from_slice(&geo_json);
+        }
+        message.extend_from_slice(&public_key_bytes);
+
+        // SECURITY H3: Sign the message
+        let signature = sign_message(&self.identity, &message)?;
+
         let heartbeat = HeartbeatMessage {
             node_id: self.local_node_id,
             timestamp,
             adapters,
             geolocation: geo,
-            signature: Vec::new(), // TODO: Sign the heartbeat
+            public_key: public_key_bytes,
+            signature: signature.as_bytes().to_vec(),
         };
 
         Ok(heartbeat)
@@ -797,31 +870,47 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_heartbeat() {
+        myriadmesh_crypto::init().ok();
+        let identity = NodeIdentity::generate().unwrap();
+        let remote_node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
+
         let config = HeartbeatConfig::default();
         let local_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
-        let remote_node_id = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
 
         let service = create_test_service(config, local_node_id);
 
-        let mut heartbeat = HeartbeatMessage {
-            node_id: remote_node_id,
-            timestamp: current_timestamp(),
-            adapters: vec![AdapterInfo {
-                adapter_id: "ethernet".to_string(),
-                adapter_type: "ethernet".to_string(),
-                active: true,
-                is_backhaul: false,
-                bandwidth_bps: 100_000_000,
-                latency_ms: 10,
-                reliability: 0.99,
-                privacy_level: 0.15,
-            }],
-            geolocation: None,
-            signature: Vec::new(),
-        };
+        let adapters = vec![AdapterInfo {
+            adapter_id: "ethernet".to_string(),
+            adapter_type: "ethernet".to_string(),
+            active: true,
+            is_backhaul: false,
+            bandwidth_bps: 100_000_000,
+            latency_ms: 10,
+            reliability: 0.99,
+            privacy_level: 0.15,
+        }];
 
-        // Sign the heartbeat
-        heartbeat.signature = service.sign_heartbeat(&heartbeat).unwrap();
+        let timestamp = current_timestamp();
+        let public_key_bytes = identity.public_key.as_ref().to_vec();
+
+        // Build message to sign
+        let mut message = Vec::new();
+        message.extend_from_slice(remote_node_id.as_bytes());
+        message.extend_from_slice(&timestamp.to_be_bytes());
+        message.extend_from_slice(&serde_json::to_vec(&adapters).unwrap());
+        message.extend_from_slice(&public_key_bytes);
+
+        // Sign message
+        let signature = sign_message(&identity, &message).unwrap();
+
+        let heartbeat = HeartbeatMessage {
+            node_id: remote_node_id,
+            timestamp,
+            adapters,
+            geolocation: None,
+            public_key: public_key_bytes,
+            signature: signature.as_bytes().to_vec(),
+        };
 
         service.handle_heartbeat(heartbeat).await.unwrap();
 
@@ -837,32 +926,49 @@ mod tests {
     #[tokio::test]
     async fn test_privacy_location_filtering() {
         // Config that doesn't store remote geolocation
+        myriadmesh_crypto::init().ok();
+        let identity = NodeIdentity::generate().unwrap();
+        let remote_node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
+
         let config = HeartbeatConfig {
             store_remote_geolocation: false,
             ..Default::default()
         };
 
         let local_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
-        let remote_node_id = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
 
         let service = create_test_service(config, local_node_id);
 
-        let mut heartbeat = HeartbeatMessage {
-            node_id: remote_node_id,
-            timestamp: current_timestamp(),
-            adapters: Vec::new(),
-            geolocation: Some(GeolocationData {
-                latitude: 40.7128,
-                longitude: -74.0060,
-                accuracy_meters: 100.0,
-                country_code: Some("US".to_string()),
-                city: Some("New York".to_string()),
-            }),
-            signature: Vec::new(),
-        };
+        let geolocation = Some(GeolocationData {
+            latitude: 40.7128,
+            longitude: -74.0060,
+            accuracy_meters: 100.0,
+            country_code: Some("US".to_string()),
+            city: Some("New York".to_string()),
+        });
 
-        // Sign the heartbeat
-        heartbeat.signature = service.sign_heartbeat(&heartbeat).unwrap();
+        let timestamp = current_timestamp();
+        let public_key_bytes = identity.public_key.as_ref().to_vec();
+
+        // Build message to sign
+        let mut message = Vec::new();
+        message.extend_from_slice(remote_node_id.as_bytes());
+        message.extend_from_slice(&timestamp.to_be_bytes());
+        message.extend_from_slice(&serde_json::to_vec(&Vec::<AdapterInfo>::new()).unwrap());
+        message.extend_from_slice(&serde_json::to_vec(&geolocation).unwrap());
+        message.extend_from_slice(&public_key_bytes);
+
+        // Sign message
+        let signature = sign_message(&identity, &message).unwrap();
+
+        let heartbeat = HeartbeatMessage {
+            node_id: remote_node_id,
+            timestamp,
+            adapters: Vec::new(),
+            geolocation,
+            public_key: public_key_bytes,
+            signature: signature.as_bytes().to_vec(),
+        };
 
         service.handle_heartbeat(heartbeat).await.unwrap();
 
@@ -870,5 +976,212 @@ mod tests {
         let node_info = service.get_node_info(&remote_node_id).await;
         assert!(node_info.is_some());
         assert!(node_info.unwrap().geolocation.is_none());
+    }
+
+    // SECURITY H3: Route poisoning prevention tests
+
+    #[tokio::test]
+    async fn test_heartbeat_missing_public_key_rejected() {
+        // SECURITY H3: Verify heartbeats without public key are rejected
+        let config = HeartbeatConfig::default();
+        let local_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let remote_node_id = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+
+        let service = create_test_service(config, local_node_id);
+
+        let heartbeat = HeartbeatMessage {
+            node_id: remote_node_id,
+            timestamp: current_timestamp(),
+            adapters: Vec::new(),
+            geolocation: None,
+            public_key: Vec::new(), // Missing public key
+            signature: vec![0u8; 64],
+        };
+
+        let result = service.handle_heartbeat(heartbeat).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("missing public key"));
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_invalid_signature_rejected() {
+        // SECURITY H3: Verify heartbeats with invalid signatures are rejected
+        myriadmesh_crypto::init().ok();
+        let identity = NodeIdentity::generate().unwrap();
+        let node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
+
+        let config = HeartbeatConfig::default();
+        let local_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+
+        let service = create_test_service(config, local_node_id);
+
+        let heartbeat = HeartbeatMessage {
+            node_id,
+            timestamp: current_timestamp(),
+            adapters: Vec::new(),
+            geolocation: None,
+            public_key: identity.public_key.as_ref().to_vec(),
+            signature: vec![0u8; 64], // Invalid signature
+        };
+
+        let result = service.handle_heartbeat(heartbeat).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Signature verification failed"));
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_public_key_derivation_mismatch() {
+        // SECURITY H3: Verify heartbeats with wrong public key are rejected
+        myriadmesh_crypto::init().ok();
+        let identity1 = NodeIdentity::generate().unwrap();
+        let identity2 = NodeIdentity::generate().unwrap();
+
+        let config = HeartbeatConfig::default();
+        let local_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+
+        let service = create_test_service(config, local_node_id);
+
+        let node_id1 = NodeId::from_bytes(*identity1.node_id.as_bytes());
+
+        // Build message
+        let mut message = Vec::new();
+        message.extend_from_slice(node_id1.as_bytes());
+        message.extend_from_slice(&current_timestamp().to_be_bytes());
+        message.extend_from_slice(&serde_json::to_vec(&Vec::<AdapterInfo>::new()).unwrap());
+        message.extend_from_slice(identity2.public_key.as_ref());
+
+        // Sign with identity2 but claim to be identity1
+        let signature = sign_message(&identity2, &message).unwrap();
+
+        let heartbeat = HeartbeatMessage {
+            node_id: node_id1, // Claim to be identity1
+            timestamp: current_timestamp(),
+            adapters: Vec::new(),
+            geolocation: None,
+            public_key: identity2.public_key.as_ref().to_vec(), // But use identity2's public key
+            signature: signature.as_bytes().to_vec(),
+        };
+
+        let result = service.handle_heartbeat(heartbeat).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Public key derivation mismatch"));
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_tampered_data_rejected() {
+        // SECURITY H3: Verify tampered heartbeats are rejected
+        myriadmesh_crypto::init().ok();
+        let identity = NodeIdentity::generate().unwrap();
+        let node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
+
+        let config = HeartbeatConfig::default();
+        let local_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+
+        let service = create_test_service(config, local_node_id);
+
+        // Create and sign original heartbeat
+        let original_adapters = vec![AdapterInfo {
+            adapter_id: "eth0".to_string(),
+            adapter_type: "ethernet".to_string(),
+            active: true,
+            is_backhaul: false,
+            bandwidth_bps: 100_000_000,
+            latency_ms: 10,
+            reliability: 0.99,
+            privacy_level: 0.15,
+        }];
+
+        let timestamp = current_timestamp();
+        let public_key_bytes = identity.public_key.as_ref().to_vec();
+
+        // Build original message
+        let mut message = Vec::new();
+        message.extend_from_slice(node_id.as_bytes());
+        message.extend_from_slice(&timestamp.to_be_bytes());
+        message.extend_from_slice(&serde_json::to_vec(&original_adapters).unwrap());
+        message.extend_from_slice(&public_key_bytes);
+
+        // Sign original message
+        let signature = sign_message(&identity, &message).unwrap();
+
+        // Tamper with adapters after signing
+        let tampered_adapters = vec![AdapterInfo {
+            adapter_id: "eth0".to_string(),
+            adapter_type: "ethernet".to_string(),
+            active: true,
+            is_backhaul: true, // Changed
+            bandwidth_bps: 1_000_000_000, // Changed
+            latency_ms: 10,
+            reliability: 0.99,
+            privacy_level: 0.15,
+        }];
+
+        let heartbeat = HeartbeatMessage {
+            node_id,
+            timestamp,
+            adapters: tampered_adapters, // Tampered data
+            geolocation: None,
+            public_key: public_key_bytes,
+            signature: signature.as_bytes().to_vec(), // Original signature
+        };
+
+        let result = service.handle_heartbeat(heartbeat).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Signature verification failed"));
+    }
+
+    #[tokio::test]
+    async fn test_valid_signed_heartbeat_accepted() {
+        // SECURITY H3: Verify properly signed heartbeats are accepted
+        myriadmesh_crypto::init().ok();
+        let identity = NodeIdentity::generate().unwrap();
+        let node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
+
+        let config = HeartbeatConfig::default();
+        let local_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+
+        let service = create_test_service(config, local_node_id);
+
+        // Create heartbeat
+        let adapters = vec![AdapterInfo {
+            adapter_id: "eth0".to_string(),
+            adapter_type: "ethernet".to_string(),
+            active: true,
+            is_backhaul: false,
+            bandwidth_bps: 100_000_000,
+            latency_ms: 10,
+            reliability: 0.99,
+            privacy_level: 0.15,
+        }];
+
+        let timestamp = current_timestamp();
+        let public_key_bytes = identity.public_key.as_ref().to_vec();
+
+        // Build message to sign
+        let mut message = Vec::new();
+        message.extend_from_slice(node_id.as_bytes());
+        message.extend_from_slice(&timestamp.to_be_bytes());
+        message.extend_from_slice(&serde_json::to_vec(&adapters).unwrap());
+        message.extend_from_slice(&public_key_bytes);
+
+        // Sign message
+        let signature = sign_message(&identity, &message).unwrap();
+
+        let heartbeat = HeartbeatMessage {
+            node_id,
+            timestamp,
+            adapters,
+            geolocation: None,
+            public_key: public_key_bytes,
+            signature: signature.as_bytes().to_vec(),
+        };
+
+        // Should be accepted
+        let result = service.handle_heartbeat(heartbeat).await;
+        assert!(result.is_ok());
+
+        // Verify node was added to map
+        let node_info = service.get_node_info(&node_id).await;
+        assert!(node_info.is_some());
     }
 }
