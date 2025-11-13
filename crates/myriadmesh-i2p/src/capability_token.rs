@@ -145,6 +145,18 @@ impl I2pCapabilityToken {
         recipient_node_id: &NodeId,
         issuer_public_key: &ed25519::PublicKey,
     ) -> Result<bool, String> {
+        // SECURITY FIX C1: Verify the public key matches the claimed issuer
+        // Derive NodeId from the provided public key (using crypto module)
+        let derived_node_id_crypto = NodeIdentity::derive_node_id(issuer_public_key);
+
+        // Convert to protocol NodeId for comparison
+        let derived_node_id = NodeId::from_bytes(*derived_node_id_crypto.as_bytes());
+
+        // Check that it matches the issuer_node_id in the token
+        if derived_node_id != self.issuer_node_id {
+            return Ok(false); // Public key doesn't match claimed issuer!
+        }
+
         // Check expiration
         if self.is_expired() {
             return Ok(false);
@@ -155,7 +167,7 @@ impl I2pCapabilityToken {
             return Ok(false);
         }
 
-        // Verify signature
+        // Verify signature (now we know the key belongs to the claimed issuer)
         self.verify(issuer_public_key)
     }
 
@@ -347,6 +359,67 @@ mod tests {
         assert_eq!(token.for_node, deserialized.for_node);
         assert_eq!(token.i2p_destination, deserialized.i2p_destination);
         assert_eq!(token.i2p_node_id, deserialized.i2p_node_id);
+    }
+
+    #[test]
+    fn test_token_forgery_prevention() {
+        // SECURITY TEST C1: Verify that tokens cannot be forged with wrong key
+        myriadmesh_crypto::init().unwrap();
+
+        // Create legitimate issuer identity
+        let legitimate_issuer = NodeIdentity::generate().unwrap();
+        let legitimate_issuer_node_id = NodeId::from_bytes(*legitimate_issuer.node_id.as_bytes());
+
+        // Create attacker identity
+        let attacker = NodeIdentity::generate().unwrap();
+
+        let recipient_node_id = NodeId::from_bytes([1u8; 32]);
+        let i2p_node_id = NodeId::from_bytes([2u8; 32]);
+        let dest = I2pDestination::new("victim.b32.i2p".to_string());
+
+        // Attacker creates token claiming to be from legitimate_issuer
+        let mut forged_token = I2pCapabilityToken::new(
+            recipient_node_id,
+            dest,
+            i2p_node_id,
+            legitimate_issuer_node_id, // Claiming to be from legitimate issuer!
+            30,
+        );
+
+        // Attacker signs with their own key
+        forged_token.sign(&attacker).unwrap();
+
+        // Try to validate with attacker's public key
+        // This should FAIL because attacker's public key doesn't derive to legitimate_issuer_node_id
+        let valid_with_attacker_key = forged_token
+            .is_valid(&recipient_node_id, &attacker.public_key)
+            .unwrap();
+        assert!(!valid_with_attacker_key, "Forged token should be rejected!");
+
+        // Try to validate with legitimate issuer's public key
+        // This should also FAIL because the signature was made with attacker's key
+        let valid_with_legitimate_key = forged_token
+            .is_valid(&recipient_node_id, &legitimate_issuer.public_key)
+            .unwrap();
+        assert!(!valid_with_legitimate_key, "Forged token should be rejected!");
+
+        // Now create a LEGITIMATE token
+        let mut legitimate_token = I2pCapabilityToken::new(
+            recipient_node_id,
+            I2pDestination::new("real.b32.i2p".to_string()),
+            i2p_node_id,
+            legitimate_issuer_node_id,
+            30,
+        );
+
+        // Sign with correct key
+        legitimate_token.sign(&legitimate_issuer).unwrap();
+
+        // This should succeed
+        let valid = legitimate_token
+            .is_valid(&recipient_node_id, &legitimate_issuer.public_key)
+            .unwrap();
+        assert!(valid, "Legitimate token should be accepted!");
     }
 
     #[test]
