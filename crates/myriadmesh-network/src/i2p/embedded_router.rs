@@ -350,9 +350,11 @@ mod tests {
 
     #[test]
     fn test_custom_config() {
-        let mut config = I2pRouterConfig::default();
-        config.sam_port = 7777;
-        config.bandwidth_limit_kbps = None;
+        let config = I2pRouterConfig {
+            sam_port: 7777,
+            bandwidth_limit_kbps: None,
+            ..Default::default()
+        };
 
         let config_str = config.generate_config();
         assert!(config_str.contains("port = 7777"));

@@ -8,19 +8,18 @@
  * - Backhaul detection
  * - End-to-end workflows
  */
-
 use anyhow::Result;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use myriadmesh_network::AdapterManager;
 use myriadmesh_protocol::NodeId;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 // Import modules from myriadnode
-use myriadnode::scoring::{AdapterScorer, ScoringWeights, AdapterMetrics};
-use myriadnode::failover::FailoverManager;
-use myriadnode::heartbeat::{HeartbeatService, HeartbeatConfig};
-use myriadnode::backhaul::{BackhaulDetector, BackhaulConfig};
+use myriadnode::backhaul::{BackhaulConfig, BackhaulDetector};
 use myriadnode::config::FailoverConfig;
+use myriadnode::failover::FailoverManager;
+use myriadnode::heartbeat::{HeartbeatConfig, HeartbeatService};
+use myriadnode::scoring::{AdapterMetrics, AdapterScorer, ScoringWeights};
 
 // Helper function to create a test NodeId
 fn create_test_node_id(seed: u8) -> NodeId {
@@ -44,7 +43,11 @@ async fn test_scoring_all_modes() {
     ];
 
     for (name, weights) in modes {
-        let sum = weights.latency + weights.bandwidth + weights.reliability + weights.power + weights.privacy;
+        let sum = weights.latency
+            + weights.bandwidth
+            + weights.reliability
+            + weights.power
+            + weights.privacy;
         assert!(
             (sum - 1.0).abs() < 0.01,
             "Mode '{}' weights should sum to ~1.0, got {}",
@@ -91,7 +94,8 @@ async fn test_scoring_adapter_selection() {
     // Now test with privacy-optimized weights
     let privacy_scorer = AdapterScorer::new(ScoringWeights::privacy_optimized());
     let fast_privacy_score = privacy_scorer.calculate_score("fast".to_string(), &fast_adapter);
-    let private_privacy_score = privacy_scorer.calculate_score("private".to_string(), &private_adapter);
+    let private_privacy_score =
+        privacy_scorer.calculate_score("private".to_string(), &private_adapter);
 
     // With privacy weights, private adapter should score higher
     assert!(
@@ -129,8 +133,14 @@ async fn test_scoring_edge_cases() {
     };
 
     let max_score = scorer.calculate_score("max".to_string(), &max_metrics);
-    assert!(max_score.total_score >= 0.0, "Max score should be non-negative");
-    assert!(max_score.total_score <= 1.0, "Max score should not exceed 1.0");
+    assert!(
+        max_score.total_score >= 0.0,
+        "Max score should be non-negative"
+    );
+    assert!(
+        max_score.total_score <= 1.0,
+        "Max score should not exceed 1.0"
+    );
 }
 
 // ==========================
@@ -153,7 +163,11 @@ async fn test_failover_manager_initialization() {
 
     // Verify basic initialization
     let events = failover_manager.get_recent_events(10).await;
-    assert_eq!(events.len(), 0, "New failover manager should have no events");
+    assert_eq!(
+        events.len(),
+        0,
+        "New failover manager should have no events"
+    );
 }
 
 #[tokio::test]
@@ -190,8 +204,13 @@ async fn test_failover_force_failover_validation() {
     let failover_manager = FailoverManager::new(config, adapter_manager, weights);
 
     // Try to force failover to non-existent adapter
-    let result = failover_manager.force_failover("nonexistent".to_string()).await;
-    assert!(result.is_err(), "Force failover to non-existent adapter should fail");
+    let result = failover_manager
+        .force_failover("nonexistent".to_string())
+        .await;
+    assert!(
+        result.is_err(),
+        "Force failover to non-existent adapter should fail"
+    );
 }
 
 // ==========================
@@ -233,7 +252,10 @@ async fn test_heartbeat_privacy_controls() {
     let private_service = HeartbeatService::new(private_config, node_id);
 
     let stats = private_service.get_stats().await;
-    assert_eq!(stats.nodes_with_location, 0, "Private mode should not store locations");
+    assert_eq!(
+        stats.nodes_with_location, 0,
+        "Private mode should not store locations"
+    );
 
     // Test with geolocation enabled
     let public_config = HeartbeatConfig {
@@ -280,8 +302,14 @@ async fn test_heartbeat_node_map_updates() {
 async fn test_backhaul_config_defaults() {
     let config = BackhaulConfig::default();
 
-    assert_eq!(config.allow_backhaul_mesh, false, "Should default to no backhaul mesh");
-    assert_eq!(config.check_interval_secs, 300, "Should default to 300s (5 min) check interval");
+    assert_eq!(
+        config.allow_backhaul_mesh, false,
+        "Should default to no backhaul mesh"
+    );
+    assert_eq!(
+        config.check_interval_secs, 300,
+        "Should default to 300s (5 min) check interval"
+    );
 }
 
 #[tokio::test]
@@ -479,7 +507,10 @@ async fn test_empty_adapter_manager_queries() {
     assert_eq!(adapter_ids.len(), 0);
 
     let adapter = manager_read.get_adapter("nonexistent");
-    assert!(adapter.is_none(), "Should return None for nonexistent adapter");
+    assert!(
+        adapter.is_none(),
+        "Should return None for nonexistent adapter"
+    );
 }
 
 // ==========================

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-use tracing::{info, error};
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 // Use library modules
@@ -56,7 +56,10 @@ async fn main() -> Result<()> {
         Config::load(cli.config, cli.data_dir)?
     };
 
-    info!("Loaded configuration from: {}", config.config_path().display());
+    info!(
+        "Loaded configuration from: {}",
+        config.config_path().display()
+    );
     info!("Node ID: {}", hex::encode(&config.node.id));
     info!("Node name: {}", config.node.name);
 

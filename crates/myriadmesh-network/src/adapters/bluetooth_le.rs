@@ -45,6 +45,7 @@ impl Default for BleConfig {
 
 /// BLE peer information
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct BlePeer {
     address: String,
     name: Option<String>,
@@ -149,7 +150,11 @@ impl NetworkAdapter for BleAdapter {
 
         let _ble_address = match destination {
             Address::BluetoothLE(addr) => addr,
-            _ => return Err(NetworkError::InvalidAddress("Expected Bluetooth LE address".to_string())),
+            _ => {
+                return Err(NetworkError::InvalidAddress(
+                    "Expected Bluetooth LE address".to_string(),
+                ))
+            }
         };
 
         // TODO: Send frame over BLE GATT characteristic
@@ -197,7 +202,7 @@ impl NetworkAdapter for BleAdapter {
     }
 
     fn get_status(&self) -> AdapterStatus {
-        futures::executor::block_on(self.status.read()).clone()
+        *futures::executor::block_on(self.status.read())
     }
 
     fn get_capabilities(&self) -> &AdapterCapabilities {
@@ -212,7 +217,11 @@ impl NetworkAdapter for BleAdapter {
 
         let _ble_address = match destination {
             Address::BluetoothLE(addr) => addr,
-            _ => return Err(NetworkError::InvalidAddress("Expected Bluetooth LE address".to_string())),
+            _ => {
+                return Err(NetworkError::InvalidAddress(
+                    "Expected Bluetooth LE address".to_string(),
+                ))
+            }
         };
 
         // TODO: Implement connection test
@@ -233,12 +242,16 @@ impl NetworkAdapter for BleAdapter {
     fn parse_address(&self, addr_str: &str) -> Result<Address> {
         let parts: Vec<&str> = addr_str.split(':').collect();
         if parts.len() != 6 {
-            return Err(NetworkError::InvalidAddress("BLE address must be in format XX:XX:XX:XX:XX:XX".to_string()));
+            return Err(NetworkError::InvalidAddress(
+                "BLE address must be in format XX:XX:XX:XX:XX:XX".to_string(),
+            ));
         }
 
         for part in &parts {
             if part.len() != 2 || !part.chars().all(|c| c.is_ascii_hexdigit()) {
-                return Err(NetworkError::InvalidAddress("BLE address must contain hex digits only".to_string()));
+                return Err(NetworkError::InvalidAddress(
+                    "BLE address must contain hex digits only".to_string(),
+                ));
             }
         }
 
@@ -259,7 +272,10 @@ mod tests {
         let config = BleConfig::default();
         let adapter = BleAdapter::new(config);
 
-        assert_eq!(adapter.get_capabilities().adapter_type, AdapterType::BluetoothLE);
+        assert_eq!(
+            adapter.get_capabilities().adapter_type,
+            AdapterType::BluetoothLE
+        );
         assert_eq!(adapter.get_status(), AdapterStatus::Uninitialized);
     }
 

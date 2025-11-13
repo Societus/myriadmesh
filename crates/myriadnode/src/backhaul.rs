@@ -8,7 +8,6 @@ use tracing::{debug, warn};
 /// This module detects when a network interface (e.g., Wi-Fi, Ethernet) is being
 /// used as the primary internet uplink (backhaul) and should not be used for
 /// mesh networking to avoid interfering with the user's internet connection.
-
 /// Backhaul status for a network interface
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackhaulStatus {
@@ -117,21 +116,25 @@ impl BackhaulDetector {
         // Format: "default via 192.168.1.1 dev wlan0 proto dhcp metric 600"
         for line in stdout.lines() {
             if line.contains("default") && line.contains(&format!("dev {}", interface_name)) {
-                debug!("Interface {} has default route (is backhaul)", interface_name);
+                debug!(
+                    "Interface {} has default route (is backhaul)",
+                    interface_name
+                );
                 return Ok(BackhaulStatus::IsBackhaul);
             }
         }
 
-        debug!("Interface {} does not have default route (not backhaul)", interface_name);
+        debug!(
+            "Interface {} does not have default route (not backhaul)",
+            interface_name
+        );
         Ok(BackhaulStatus::NotBackhaul)
     }
 
     #[cfg(target_os = "macos")]
     fn check_interface_macos(&self, interface_name: &str) -> Result<BackhaulStatus> {
         // Use `netstat -rn` to check for default gateway
-        let output = Command::new("netstat")
-            .args(["-rn"])
-            .output()?;
+        let output = Command::new("netstat").args(["-rn"]).output()?;
 
         if !output.status.success() {
             warn!("Failed to execute 'netstat' command");
@@ -144,21 +147,25 @@ impl BackhaulDetector {
         // Format: "default            192.168.1.1        UGSc           en0"
         for line in stdout.lines() {
             if line.starts_with("default") && line.ends_with(interface_name) {
-                debug!("Interface {} has default route (is backhaul)", interface_name);
+                debug!(
+                    "Interface {} has default route (is backhaul)",
+                    interface_name
+                );
                 return Ok(BackhaulStatus::IsBackhaul);
             }
         }
 
-        debug!("Interface {} does not have default route (not backhaul)", interface_name);
+        debug!(
+            "Interface {} does not have default route (not backhaul)",
+            interface_name
+        );
         Ok(BackhaulStatus::NotBackhaul)
     }
 
     #[cfg(target_os = "windows")]
     fn check_interface_windows(&self, interface_name: &str) -> Result<BackhaulStatus> {
         // Use `route print` to check for default gateway
-        let output = Command::new("route")
-            .args(["print", "0.0.0.0"])
-            .output()?;
+        let output = Command::new("route").args(["print", "0.0.0.0"]).output()?;
 
         if !output.status.success() {
             warn!("Failed to execute 'route print' command");
@@ -170,7 +177,10 @@ impl BackhaulDetector {
         // Look for default route (0.0.0.0) with this interface
         // This is a simplified check - Windows interface names are complex
         if stdout.contains(interface_name) && stdout.contains("0.0.0.0") {
-            debug!("Interface {} may be backhaul (Windows detection)", interface_name);
+            debug!(
+                "Interface {} may be backhaul (Windows detection)",
+                interface_name
+            );
             return Ok(BackhaulStatus::IsBackhaul);
         }
 
@@ -181,9 +191,7 @@ impl BackhaulDetector {
     fn get_interface_for_ip(&self, ip: IpAddr) -> Result<Option<String>> {
         #[cfg(target_os = "linux")]
         {
-            let output = Command::new("ip")
-                .args(["addr", "show"])
-                .output()?;
+            let output = Command::new("ip").args(["addr", "show"]).output()?;
 
             if !output.status.success() {
                 return Ok(None);
@@ -242,9 +250,7 @@ impl BackhaulDetector {
 
         #[cfg(target_os = "macos")]
         {
-            let output = Command::new("netstat")
-                .args(["-rn"])
-                .output()?;
+            let output = Command::new("netstat").args(["-rn"]).output()?;
 
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -314,7 +320,10 @@ mod tests {
             }
             Err(e) => {
                 // Failed (e.g., no `ip` command) - this is okay
-                println!("Backhaul detection failed (expected in some environments): {}", e);
+                println!(
+                    "Backhaul detection failed (expected in some environments): {}",
+                    e
+                );
             }
         }
     }

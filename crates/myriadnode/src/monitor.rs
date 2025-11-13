@@ -1,8 +1,8 @@
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{interval, Duration, Instant};
 use tokio::task::JoinHandle;
+use tokio::time::{interval, Duration, Instant};
 use tracing::{debug, info, warn};
 
 use crate::config::MonitoringConfig;
@@ -66,7 +66,10 @@ impl NetworkMonitor {
                 }
             }
         }));
-        debug!("Throughput monitor started (interval: {}s)", throughput_interval);
+        debug!(
+            "Throughput monitor started (interval: {}s)",
+            throughput_interval
+        );
 
         // Start reliability monitor
         let reliability_interval = self.config.reliability_interval_secs;
@@ -81,7 +84,10 @@ impl NetworkMonitor {
                 }
             }
         }));
-        debug!("Reliability monitor started (interval: {}s)", reliability_interval);
+        debug!(
+            "Reliability monitor started (interval: {}s)",
+            reliability_interval
+        );
 
         Ok(())
     }
@@ -155,7 +161,9 @@ impl NetworkMonitor {
 
                     debug!(
                         "Adapter '{}': bandwidth={} bps, latency={} ms",
-                        adapter_id, capabilities.typical_bandwidth_bps, capabilities.typical_latency_ms
+                        adapter_id,
+                        capabilities.typical_bandwidth_bps,
+                        capabilities.typical_latency_ms
                     );
 
                     // TODO: Perform actual throughput test by sending test frames

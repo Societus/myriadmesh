@@ -1,13 +1,19 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 use tracing::{debug, info, warn};
 
+use myriadmesh_crypto::identity::NodeIdentity;
+use myriadmesh_crypto::signing::{sign_message, Signature};
+use myriadmesh_network::AdapterManager;
 use myriadmesh_protocol::NodeId;
+
+use crate::backhaul::{BackhaulDetector, BackhaulStatus};
+use crate::config::AdapterConfig;
 
 /// Heartbeat message sent between nodes
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,11 +123,11 @@ impl Default for HeartbeatConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            interval_secs: 60,         // Send heartbeat every minute
-            timeout_secs: 300,         // Consider node offline after 5 minutes
-            include_geolocation: false, // Privacy-first default
+            interval_secs: 60,               // Send heartbeat every minute
+            timeout_secs: 300,               // Consider node offline after 5 minutes
+            include_geolocation: false,      // Privacy-first default
             store_remote_geolocation: false, // Don't store others' locations by default
-            max_nodes: 1000,           // Track up to 1000 nodes
+            max_nodes: 1000,                 // Track up to 1000 nodes
         }
     }
 }
@@ -129,20 +135,204 @@ impl Default for HeartbeatConfig {
 /// NodeMap stored in DHT - maps NodeId to NodeInfo
 pub type NodeMap = HashMap<NodeId, NodeInfo>;
 
+/// Rate limiter for heartbeat messages
+pub struct HeartbeatRateLimiter {
+    /// Last heartbeat received per node
+    last_received: HashMap<NodeId, Instant>,
+
+    /// Minimum interval between heartbeats from same node
+    min_interval: Duration,
+
+    /// Global rate limit (heartbeats per second)
+    max_per_second: usize,
+
+    /// Recent heartbeat timestamps (sliding window)
+    recent: VecDeque<Instant>,
+}
+
+impl HeartbeatRateLimiter {
+    pub fn new(min_interval_secs: u64, max_per_second: usize) -> Self {
+        Self {
+            last_received: HashMap::new(),
+            min_interval: Duration::from_secs(min_interval_secs),
+            max_per_second,
+            recent: VecDeque::new(),
+        }
+    }
+
+    pub fn allow(&mut self, node_id: &NodeId) -> bool {
+        let now = Instant::now();
+
+        // Check per-node rate limit
+        if let Some(last) = self.last_received.get(node_id) {
+            if now.duration_since(*last) < self.min_interval {
+                return false;
+            }
+        }
+
+        // Check global rate limit
+        // Remove entries older than 1 second
+        while let Some(front) = self.recent.front() {
+            if now.duration_since(*front) > Duration::from_secs(1) {
+                self.recent.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        if self.recent.len() >= self.max_per_second {
+            return false;
+        }
+
+        // Allow heartbeat
+        self.last_received.insert(*node_id, now);
+        self.recent.push_back(now);
+
+        true
+    }
+}
+
 /// Heartbeat service for node discovery and status reporting
 pub struct HeartbeatService {
     config: HeartbeatConfig,
     local_node_id: NodeId,
     node_map: Arc<RwLock<NodeMap>>,
+    identity: Arc<NodeIdentity>,
+    adapter_manager: Arc<RwLock<AdapterManager>>,
+    backhaul_detector: Arc<BackhaulDetector>,
+    rate_limiter: Arc<RwLock<HeartbeatRateLimiter>>,
+    adapter_configs: HashMap<String, AdapterConfig>,
 }
 
 impl HeartbeatService {
-    pub fn new(config: HeartbeatConfig, local_node_id: NodeId) -> Self {
+    pub fn new(
+        config: HeartbeatConfig,
+        local_node_id: NodeId,
+        identity: Arc<NodeIdentity>,
+        adapter_manager: Arc<RwLock<AdapterManager>>,
+        backhaul_detector: Arc<BackhaulDetector>,
+        adapter_configs: HashMap<String, AdapterConfig>,
+    ) -> Self {
+        // Create rate limiter (30 second minimum per node, 100/sec global)
+        let rate_limiter = Arc::new(RwLock::new(HeartbeatRateLimiter::new(30, 100)));
+
         Self {
             config,
             local_node_id,
             node_map: Arc::new(RwLock::new(HashMap::new())),
+            identity,
+            adapter_manager,
+            backhaul_detector,
+            rate_limiter,
+            adapter_configs,
         }
+    }
+
+    /// Collect adapter information for heartbeat broadcast
+    async fn collect_adapter_info(&self) -> Result<Vec<AdapterInfo>> {
+        let manager = self.adapter_manager.read().await;
+        let mut adapters = Vec::new();
+
+        for adapter_id in manager.adapter_ids() {
+            // Check if heartbeat allowed (from config)
+            if let Some(adapter_config) = self.adapter_configs.get(&adapter_id) {
+                if !adapter_config.allow_heartbeat {
+                    debug!(
+                        "Adapter {} excluded: heartbeat disabled in config",
+                        adapter_id
+                    );
+                    continue;
+                }
+            }
+
+            // Get adapter
+            let adapter_arc = match manager.get_adapter(&adapter_id) {
+                Some(a) => a,
+                None => continue,
+            };
+
+            let adapter = adapter_arc.read().await;
+
+            // Check if adapter is ready
+            let status = adapter.get_status();
+            if status != myriadmesh_network::adapter::AdapterStatus::Ready {
+                debug!("Adapter {} excluded: status = {:?}", adapter_id, status);
+                continue;
+            }
+
+            // Check if backhaul (exclude by default unless configured)
+            let is_backhaul = self
+                .backhaul_detector
+                .check_interface(&adapter_id)
+                .unwrap_or(BackhaulStatus::Unknown)
+                == BackhaulStatus::IsBackhaul;
+
+            if is_backhaul {
+                if let Some(adapter_config) = self.adapter_configs.get(&adapter_id) {
+                    if !adapter_config.allow_backhaul_mesh {
+                        debug!(
+                            "Adapter {} excluded: is backhaul and backhaul mesh disabled",
+                            adapter_id
+                        );
+                        continue;
+                    }
+                }
+            }
+
+            // Get capabilities and metrics
+            let capabilities = adapter.get_capabilities();
+            let metrics = manager.get_metrics(&adapter_id);
+
+            let (bandwidth_bps, latency_ms, reliability) = if let Some(m) = metrics {
+                (m.bandwidth_bps, m.latency_ms as u32, m.reliability)
+            } else {
+                // Use capabilities as fallback
+                (
+                    capabilities.typical_bandwidth_bps,
+                    capabilities.typical_latency_ms as u32,
+                    capabilities.reliability,
+                )
+            };
+
+            // Collect adapter info
+            let info = AdapterInfo {
+                adapter_id: adapter_id.clone(),
+                adapter_type: format!("{:?}", capabilities.adapter_type),
+                active: true,
+                is_backhaul,
+                bandwidth_bps,
+                latency_ms,
+                reliability,
+                privacy_level: estimate_privacy_level(&capabilities.adapter_type),
+            };
+
+            adapters.push(info);
+        }
+
+        Ok(adapters)
+    }
+
+    /// Sign a heartbeat message
+    fn sign_heartbeat(&self, heartbeat: &HeartbeatMessage) -> Result<Vec<u8>> {
+        // Canonical serialization
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(heartbeat.node_id.as_bytes());
+        bytes.extend_from_slice(&heartbeat.timestamp.to_be_bytes());
+
+        // Serialize adapters (deterministic)
+        let adapters_json = serde_json::to_vec(&heartbeat.adapters)?;
+        bytes.extend_from_slice(&adapters_json);
+
+        // Include geolocation if present
+        if let Some(geo) = &heartbeat.geolocation {
+            let geo_json = serde_json::to_vec(geo)?;
+            bytes.extend_from_slice(&geo_json);
+        }
+
+        // Sign with node's keypair
+        let signature = sign_message(&self.identity, &bytes)?;
+
+        Ok(signature.as_bytes().to_vec())
     }
 
     /// Start the heartbeat service
@@ -153,23 +343,79 @@ impl HeartbeatService {
         }
 
         info!("Starting heartbeat service...");
-        info!("  Heartbeat interval: {} seconds", self.config.interval_secs);
+        info!(
+            "  Heartbeat interval: {} seconds",
+            self.config.interval_secs
+        );
         info!("  Node timeout: {} seconds", self.config.timeout_secs);
         info!("  Geolocation sharing: {}", self.config.include_geolocation);
 
         // Start heartbeat broadcasting task
         let config = self.config.clone();
         let local_node_id = self.local_node_id;
+        let identity = Arc::clone(&self.identity);
+        let adapter_manager = Arc::clone(&self.adapter_manager);
+        let backhaul_detector = Arc::clone(&self.backhaul_detector);
+        let adapter_configs = self.adapter_configs.clone();
+
+        // Clone self for the closure
+        let service = HeartbeatService {
+            config: config.clone(),
+            local_node_id,
+            node_map: Arc::clone(&self.node_map),
+            identity: Arc::clone(&identity),
+            adapter_manager: Arc::clone(&adapter_manager),
+            backhaul_detector: Arc::clone(&backhaul_detector),
+            rate_limiter: Arc::clone(&self.rate_limiter),
+            adapter_configs: adapter_configs.clone(),
+        };
+
         tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(config.interval_secs));
 
             loop {
                 ticker.tick().await;
 
-                // TODO: Collect adapter information from AdapterManager
-                // TODO: Generate and broadcast heartbeat message
+                // Collect adapter information
+                match service.collect_adapter_info().await {
+                    Ok(adapters) => {
+                        if adapters.is_empty() {
+                            debug!("No adapters available for heartbeat broadcast");
+                            continue;
+                        }
 
-                debug!("Heartbeat broadcast (not yet implemented)");
+                        debug!("Broadcasting heartbeat with {} adapters", adapters.len());
+
+                        // Generate heartbeat
+                        let mut heartbeat = HeartbeatMessage {
+                            node_id: local_node_id,
+                            timestamp: current_timestamp(),
+                            adapters,
+                            geolocation: None, // TODO: Implement geolocation collection
+                            signature: Vec::new(),
+                        };
+
+                        // Sign heartbeat
+                        match service.sign_heartbeat(&heartbeat) {
+                            Ok(signature) => {
+                                heartbeat.signature = signature;
+
+                                // TODO: Broadcast via all eligible adapters
+                                // For now, just log that we would broadcast
+                                debug!(
+                                    "Would broadcast signed heartbeat (signature: {} bytes)",
+                                    heartbeat.signature.len()
+                                );
+                            }
+                            Err(e) => {
+                                warn!("Failed to sign heartbeat: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to collect adapter info: {}", e);
+                    }
+                }
             }
         });
 
@@ -202,14 +448,57 @@ impl HeartbeatService {
     pub async fn handle_heartbeat(&self, heartbeat: HeartbeatMessage) -> Result<()> {
         debug!("Received heartbeat from node {:?}", heartbeat.node_id);
 
-        // Verify signature (TODO: implement signature verification)
-        // For now, we trust the heartbeat
+        // Verify signature
+        if heartbeat.signature.is_empty() {
+            bail!("Heartbeat missing signature");
+        }
+
+        // Reconstruct signed bytes
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(heartbeat.node_id.as_bytes());
+        bytes.extend_from_slice(&heartbeat.timestamp.to_be_bytes());
+        let adapters_json = serde_json::to_vec(&heartbeat.adapters)?;
+        bytes.extend_from_slice(&adapters_json);
+        if let Some(geo) = &heartbeat.geolocation {
+            let geo_json = serde_json::to_vec(geo)?;
+            bytes.extend_from_slice(&geo_json);
+        }
+
+        // Convert NodeId to public key (derive from node ID)
+        // Note: We need to get the actual public key from the node
+        // For now, we'll trust the signature if it's present and properly formatted
+        // TODO: Implement proper public key retrieval from NodeId
+        let signature_bytes: [u8; 64] = heartbeat
+            .signature
+            .as_slice()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid signature length"))?;
+        let _signature = Signature::from_bytes(signature_bytes);
+
+        // Check timestamp freshness (replay protection)
+        let now = current_timestamp();
+        let age = (now as i64 - heartbeat.timestamp as i64).abs();
+        if age > 300 {
+            bail!(
+                "Heartbeat timestamp too old or too far in future (age: {}s)",
+                age
+            );
+        }
+
+        // Check rate limiting
+        if !self.rate_limiter.write().await.allow(&heartbeat.node_id) {
+            warn!("Rate limiting heartbeat from {:?}", heartbeat.node_id);
+            return Ok(());
+        }
 
         let mut map = self.node_map.write().await;
 
         // Check if we're at capacity
         if map.len() >= self.config.max_nodes && !map.contains_key(&heartbeat.node_id) {
-            warn!("NodeMap at capacity ({}), ignoring heartbeat", self.config.max_nodes);
+            warn!(
+                "NodeMap at capacity ({}), ignoring heartbeat",
+                self.config.max_nodes
+            );
             return Ok(());
         }
 
@@ -307,7 +596,8 @@ impl HeartbeatService {
         map.iter()
             .filter(|(_, info)| {
                 if let Some(geo) = &info.geolocation {
-                    haversine_distance(latitude, longitude, geo.latitude, geo.longitude) <= radius_km
+                    haversine_distance(latitude, longitude, geo.latitude, geo.longitude)
+                        <= radius_km
                 } else {
                     false
                 }
@@ -327,7 +617,9 @@ impl HeartbeatService {
         for node_info in map.values() {
             for adapter in &node_info.adapters {
                 if adapter.active {
-                    *adapter_counts.entry(adapter.adapter_type.clone()).or_insert(0) += 1;
+                    *adapter_counts
+                        .entry(adapter.adapter_type.clone())
+                        .or_insert(0) += 1;
                 }
             }
         }
@@ -356,6 +648,41 @@ fn current_timestamp() -> u64 {
         .as_secs()
 }
 
+/// Estimate privacy level for an adapter type
+/// Returns value from 0.0 (traceable/IP-based) to 1.0 (anonymous)
+fn estimate_privacy_level(adapter_type: &myriadmesh_protocol::types::AdapterType) -> f64 {
+    use myriadmesh_protocol::types::AdapterType;
+
+    match adapter_type {
+        // IP-based adapters are traceable
+        AdapterType::Ethernet => 0.15,
+        AdapterType::WiFiHaLoW => 0.15,
+        AdapterType::Cellular => 0.10, // Most traceable
+
+        // Bluetooth has MAC addresses but short range
+        AdapterType::Bluetooth => 0.30,
+        AdapterType::BluetoothLE => 0.30,
+
+        // LoRa has limited traceability
+        AdapterType::LoRaWAN => 0.50,
+        AdapterType::Meshtastic => 0.50,
+
+        // I2P is anonymous
+        AdapterType::I2P => 0.95,
+
+        // Other wireless with varying privacy
+        AdapterType::APRS => 0.40,
+        AdapterType::FRSGMRS => 0.35,
+        AdapterType::CBRadio => 0.35,
+        AdapterType::Shortwave => 0.30,
+        AdapterType::Dialup => 0.20,
+        AdapterType::PPPoE => 0.15,
+
+        // Unknown defaults to low privacy
+        _ => 0.20,
+    }
+}
+
 /// Calculate distance between two geographic coordinates using Haversine formula
 fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let r = 6371.0; // Earth radius in kilometers
@@ -376,6 +703,28 @@ fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use myriadmesh_network::AdapterManager;
+    use crate::backhaul::{BackhaulDetector, BackhaulConfig};
+    use myriadmesh_crypto::identity::NodeIdentity;
+    use std::collections::HashMap;
+
+    // Helper function to create a HeartbeatService for testing
+    fn create_test_service(config: HeartbeatConfig, node_id: NodeId) -> HeartbeatService {
+        myriadmesh_crypto::init().ok();
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        let adapter_manager = Arc::new(RwLock::new(AdapterManager::new()));
+        let backhaul_detector = Arc::new(BackhaulDetector::new(BackhaulConfig::default()));
+        let adapter_configs = HashMap::new();
+
+        HeartbeatService::new(
+            config,
+            node_id,
+            identity,
+            adapter_manager,
+            backhaul_detector,
+            adapter_configs,
+        )
+    }
 
     #[test]
     fn test_heartbeat_config_default() {
@@ -440,7 +789,7 @@ mod tests {
     async fn test_heartbeat_service_creation() {
         let config = HeartbeatConfig::default();
         let node_id = NodeId::from_bytes([1u8; 32]);
-        let service = HeartbeatService::new(config, node_id);
+        let service = create_test_service(config, node_id);
 
         assert_eq!(service.local_node_id, node_id);
     }
@@ -451,7 +800,7 @@ mod tests {
         let local_node_id = NodeId::from_bytes([1u8; 32]);
         let remote_node_id = NodeId::from_bytes([2u8; 32]);
 
-        let service = HeartbeatService::new(config, local_node_id);
+        let service = create_test_service(config, local_node_id);
 
         let heartbeat = HeartbeatMessage {
             node_id: remote_node_id,
@@ -492,7 +841,7 @@ mod tests {
         let local_node_id = NodeId::from_bytes([1u8; 32]);
         let remote_node_id = NodeId::from_bytes([2u8; 32]);
 
-        let service = HeartbeatService::new(config, local_node_id);
+        let service = create_test_service(config, local_node_id);
 
         let heartbeat = HeartbeatMessage {
             node_id: remote_node_id,

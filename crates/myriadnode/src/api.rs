@@ -14,13 +14,14 @@ use tower_http::cors::CorsLayer;
 use tracing::info;
 
 use crate::config::ApiConfig;
-use crate::heartbeat::HeartbeatService;
 use crate::failover::FailoverManager;
+use crate::heartbeat::HeartbeatService;
 use myriadmesh_network::{AdapterManager, AdapterStatus as NetworkAdapterStatus};
 
 /// API server state
 #[derive(Clone)]
 pub struct ApiState {
+    #[allow(dead_code)]
     config: ApiConfig,
     adapter_manager: Arc<RwLock<AdapterManager>>,
     heartbeat_service: Arc<HeartbeatService>,
@@ -79,29 +80,23 @@ impl ApiServer {
         Router::new()
             // Health check
             .route("/health", get(health_check))
-
             // Node endpoints (Web UI expects /api/ prefix)
             .route("/api/node/info", get(get_node_info))
             .route("/api/node/status", get(get_node_status))
-
             // Adapter endpoints
             .route("/api/adapters", get(list_adapters))
             .route("/api/adapters/:id", get(get_adapter))
             .route("/api/adapters/:id/start", post(start_adapter))
             .route("/api/adapters/:id/stop", post(stop_adapter))
-
             // Heartbeat endpoints
             .route("/api/heartbeat/stats", get(get_heartbeat_stats))
             .route("/api/heartbeat/nodes", get(get_heartbeat_nodes))
-
             // Failover endpoints
             .route("/api/failover/events", get(get_failover_events))
             .route("/api/failover/force", post(force_failover))
-
             // Network config endpoints
             .route("/api/config/network", get(get_network_config))
             .route("/api/config/network", post(update_network_config))
-
             // Legacy v1 endpoints (for backwards compatibility)
             .route("/api/v1/node/status", get(get_node_status))
             .route("/api/v1/node/info", get(get_node_info))
@@ -109,7 +104,6 @@ impl ApiServer {
             .route("/api/v1/messages", get(list_messages))
             .route("/api/v1/adapters", get(list_adapters))
             .route("/api/v1/dht/nodes", get(list_dht_nodes))
-
             // Add CORS middleware
             .layer(CorsLayer::permissive())
             .with_state(self.state.clone())
@@ -151,11 +145,7 @@ struct NodeStatusResponse {
 }
 
 async fn get_node_info(State(state): State<Arc<ApiState>>) -> Json<NodeInfoResponse> {
-    let uptime_secs = state
-        .start_time
-        .elapsed()
-        .unwrap_or_default()
-        .as_secs();
+    let uptime_secs = state.start_time.elapsed().unwrap_or_default().as_secs();
 
     Json(NodeInfoResponse {
         id: state.node_id.clone(),
@@ -187,6 +177,7 @@ async fn send_message(
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct SendMessageRequest {
     destination: String,
     payload: String,
@@ -220,7 +211,9 @@ async fn list_adapters(State(state): State<Arc<ApiState>>) -> Json<Vec<AdapterSt
 
     let mut adapters = Vec::new();
     for adapter_id in adapter_ids {
-        if let Some(adapter_status) = get_adapter_status_internal(&manager, adapter_id.as_str()).await {
+        if let Some(adapter_status) =
+            get_adapter_status_internal(&manager, adapter_id.as_str()).await
+        {
             adapters.push(adapter_status);
         }
     }
@@ -438,29 +431,46 @@ struct HeartbeatAdapterInfo {
 
 // === Failover Endpoints ===
 
-async fn get_failover_events(State(state): State<Arc<ApiState>>) -> Json<Vec<FailoverEventResponse>> {
+async fn get_failover_events(
+    State(state): State<Arc<ApiState>>,
+) -> Json<Vec<FailoverEventResponse>> {
     let events = state.failover_manager.get_recent_events(100).await;
 
     let responses: Vec<FailoverEventResponse> = events
         .into_iter()
         .map(|event| {
             let (event_type, details) = match event {
-                crate::failover::FailoverEvent::AdapterSwitch { from, to, reason } => {
-                    ("AdapterSwitch".to_string(), format!("Switched from {} to {} ({})", from, to, reason))
-                }
-                crate::failover::FailoverEvent::ThresholdViolation { adapter, metric, value, threshold } => {
-                    ("ThresholdViolation".to_string(), format!("{}: {} exceeded threshold {} (current: {})", adapter, metric, threshold, value))
-                }
-                crate::failover::FailoverEvent::AdapterDown { adapter, reason } => {
-                    ("AdapterDown".to_string(), format!("{} went down ({})", adapter, reason))
-                }
-                crate::failover::FailoverEvent::AdapterRecovered { adapter } => {
-                    ("AdapterRecovered".to_string(), format!("{} recovered", adapter))
-                }
+                crate::failover::FailoverEvent::AdapterSwitch { from, to, reason } => (
+                    "AdapterSwitch".to_string(),
+                    format!("Switched from {} to {} ({})", from, to, reason),
+                ),
+                crate::failover::FailoverEvent::ThresholdViolation {
+                    adapter,
+                    metric,
+                    value,
+                    threshold,
+                } => (
+                    "ThresholdViolation".to_string(),
+                    format!(
+                        "{}: {} exceeded threshold {} (current: {})",
+                        adapter, metric, threshold, value
+                    ),
+                ),
+                crate::failover::FailoverEvent::AdapterDown { adapter, reason } => (
+                    "AdapterDown".to_string(),
+                    format!("{} went down ({})", adapter, reason),
+                ),
+                crate::failover::FailoverEvent::AdapterRecovered { adapter } => (
+                    "AdapterRecovered".to_string(),
+                    format!("{} recovered", adapter),
+                ),
             };
 
             FailoverEventResponse {
-                timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                timestamp: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
                 event_type,
                 details,
             }
@@ -481,9 +491,16 @@ async fn force_failover(
     State(state): State<Arc<ApiState>>,
     Json(request): Json<ForceFailoverRequest>,
 ) -> Result<StatusCode, StatusCode> {
-    tracing::info!("Force failover requested to adapter: {}", request.adapter_id);
+    tracing::info!(
+        "Force failover requested to adapter: {}",
+        request.adapter_id
+    );
 
-    match state.failover_manager.force_failover(request.adapter_id).await {
+    match state
+        .failover_manager
+        .force_failover(request.adapter_id)
+        .await
+    {
         Ok(_) => Ok(StatusCode::OK),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
@@ -523,6 +540,7 @@ async fn update_network_config(
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct UpdateNetworkConfigRequest {
     scoring_mode: Option<String>,
     failover_enabled: Option<bool>,

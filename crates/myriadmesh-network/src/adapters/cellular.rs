@@ -3,7 +3,7 @@
 use crate::adapter::{AdapterStatus, NetworkAdapter, PeerInfo, TestResults};
 use crate::error::{NetworkError, Result};
 use crate::types::{AdapterCapabilities, Address, PowerConsumption};
-use myriadmesh_protocol::{types::AdapterType, Frame, NodeId};
+use myriadmesh_protocol::{types::AdapterType, Frame};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -166,7 +166,11 @@ impl NetworkAdapter for CellularAdapter {
 
         let _ip_addr = match destination {
             Address::Cellular(addr) => addr,
-            _ => return Err(NetworkError::InvalidAddress("Expected cellular address".to_string())),
+            _ => {
+                return Err(NetworkError::InvalidAddress(
+                    "Expected cellular address".to_string(),
+                ))
+            }
         };
 
         // TODO: Send frame over cellular connection
@@ -192,7 +196,7 @@ impl NetworkAdapter for CellularAdapter {
     }
 
     fn get_status(&self) -> AdapterStatus {
-        futures::executor::block_on(self.status.read()).clone()
+        *futures::executor::block_on(self.status.read())
     }
 
     fn get_capabilities(&self) -> &AdapterCapabilities {
@@ -207,7 +211,11 @@ impl NetworkAdapter for CellularAdapter {
 
         let _ip_addr = match destination {
             Address::Cellular(addr) => addr,
-            _ => return Err(NetworkError::InvalidAddress("Expected cellular address".to_string())),
+            _ => {
+                return Err(NetworkError::InvalidAddress(
+                    "Expected cellular address".to_string(),
+                ))
+            }
         };
 
         // TODO: Implement ping test
@@ -236,7 +244,9 @@ impl NetworkAdapter for CellularAdapter {
     fn parse_address(&self, addr_str: &str) -> Result<Address> {
         // Accept any string as cellular address (phone number or IP)
         if addr_str.is_empty() {
-            return Err(NetworkError::InvalidAddress("Cellular address cannot be empty".to_string()));
+            return Err(NetworkError::InvalidAddress(
+                "Cellular address cannot be empty".to_string(),
+            ));
         }
         Ok(Address::Cellular(addr_str.to_string()))
     }
@@ -255,7 +265,10 @@ mod tests {
         let config = CellularConfig::default();
         let adapter = CellularAdapter::new(config);
 
-        assert_eq!(adapter.get_capabilities().adapter_type, AdapterType::Cellular);
+        assert_eq!(
+            adapter.get_capabilities().adapter_type,
+            AdapterType::Cellular
+        );
         assert_eq!(adapter.get_status(), AdapterStatus::Uninitialized);
     }
 
@@ -272,8 +285,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_data_cap_check() {
-        let mut config = CellularConfig::default();
-        config.data_cap_mb = 100;
+        let config = CellularConfig {
+            data_cap_mb: 100,
+            ..Default::default()
+        };
 
         let adapter = CellularAdapter::new(config);
 

@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
+use myriadmesh_crypto::identity::NodeIdentity;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use myriadmesh_crypto::identity::NodeIdentity;
 
 /// Main application configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,8 +173,8 @@ impl Default for HeartbeatConfig {
 impl Config {
     /// Load configuration from file or use defaults
     pub fn load(config_path: Option<PathBuf>, data_dir: Option<PathBuf>) -> Result<Self> {
-        let config_path = config_path.unwrap_or_else(|| Self::default_config_path());
-        let data_dir = data_dir.unwrap_or_else(|| Self::default_data_dir());
+        let config_path = config_path.unwrap_or_else(Self::default_config_path);
+        let data_dir = data_dir.unwrap_or_else(Self::default_data_dir);
 
         if !config_path.exists() {
             anyhow::bail!(
@@ -183,11 +183,11 @@ impl Config {
             );
         }
 
-        let contents = fs::read_to_string(&config_path)
-            .context("Failed to read configuration file")?;
+        let contents =
+            fs::read_to_string(&config_path).context("Failed to read configuration file")?;
 
-        let mut config: Config = serde_yaml::from_str(&contents)
-            .context("Failed to parse configuration file")?;
+        let mut config: Config =
+            serde_yaml::from_str(&contents).context("Failed to parse configuration file")?;
 
         config.config_file_path = config_path;
         config.data_directory = data_dir;
@@ -197,8 +197,8 @@ impl Config {
 
     /// Create a new default configuration
     pub fn create_default(config_path: Option<PathBuf>, data_dir: Option<PathBuf>) -> Result<Self> {
-        let config_path = config_path.unwrap_or_else(|| Self::default_config_path());
-        let data_dir = data_dir.unwrap_or_else(|| Self::default_data_dir());
+        let config_path = config_path.unwrap_or_else(Self::default_config_path);
+        let data_dir = data_dir.unwrap_or_else(Self::default_data_dir);
 
         // Create directories
         if let Some(parent) = config_path.parent() {

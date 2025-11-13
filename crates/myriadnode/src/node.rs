@@ -1,29 +1,34 @@
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
 use tokio::signal;
-use tracing::{info, warn, error};
+use tokio::sync::{mpsc, RwLock};
+use tracing::{error, info, warn};
 
-use crate::config::Config;
 use crate::api::ApiServer;
-use crate::storage::Storage;
-use crate::monitor::NetworkMonitor;
+use crate::backhaul::{BackhaulConfig, BackhaulDetector};
+use crate::config::Config;
 use crate::failover::FailoverManager;
-use crate::scoring::ScoringWeights;
-use crate::backhaul::{BackhaulDetector, BackhaulConfig, BackhaulStatus};
 use crate::heartbeat::HeartbeatService;
+use crate::monitor::NetworkMonitor;
+use crate::scoring::ScoringWeights;
+use crate::storage::Storage;
 
-use myriadmesh_network::{AdapterManager, NetworkAdapter, adapters::*};
-use myriadmesh_routing::PriorityQueue;
+use myriadmesh_crypto::identity::NodeIdentity;
 use myriadmesh_dht::routing_table::RoutingTable;
+use myriadmesh_network::{adapters::*, AdapterManager, NetworkAdapter};
 use myriadmesh_protocol::NodeId;
+use myriadmesh_routing::PriorityQueue;
+use std::collections::HashMap;
+use std::fs;
 
 /// Main node orchestrator
 pub struct Node {
     config: Config,
     storage: Arc<RwLock<Storage>>,
     adapter_manager: Arc<RwLock<AdapterManager>>,
+    #[allow(dead_code)]
     message_queue: PriorityQueue,
+    #[allow(dead_code)]
     dht: RoutingTable,
     api_server: Option<ApiServer>,
     monitor: NetworkMonitor,
@@ -50,7 +55,11 @@ impl Node {
         info!("✓ Message queue initialized");
 
         // Initialize DHT
-        let node_id_bytes: [u8; 32] = config.node.id.as_slice().try_into()
+        let node_id_bytes: [u8; 32] = config
+            .node
+            .id
+            .as_slice()
+            .try_into()
             .expect("Node ID must be 32 bytes");
         let node_id = myriadmesh_protocol::NodeId::from_bytes(node_id_bytes);
         let dht = RoutingTable::new(node_id);
@@ -77,7 +86,57 @@ impl Node {
             Arc::clone(&adapter_manager),
             scoring_weights,
         ));
-        info!("✓ Failover manager initialized (mode: {})", config.network.scoring.mode);
+        info!(
+            "✓ Failover manager initialized (mode: {})",
+            config.network.scoring.mode
+        );
+
+        // Load node identity
+        myriadmesh_crypto::init()?;
+        let key_dir = config.data_directory.join("keys");
+        let private_key_path = key_dir.join("node.key");
+        let public_key_path = key_dir.join("node.pub");
+
+        let identity = if private_key_path.exists() && public_key_path.exists() {
+            let secret_bytes = fs::read(&private_key_path)?;
+            let public_bytes = fs::read(&public_key_path)?;
+            NodeIdentity::from_bytes(&public_bytes, &secret_bytes)?
+        } else {
+            warn!("Node identity keys not found, generating new identity");
+            let new_identity = NodeIdentity::generate()?;
+            fs::create_dir_all(&key_dir)?;
+            fs::write(&private_key_path, new_identity.export_secret_key())?;
+            fs::write(&public_key_path, new_identity.export_public_key())?;
+            new_identity
+        };
+        let identity = Arc::new(identity);
+        info!("✓ Node identity loaded");
+
+        // Initialize backhaul detector
+        let backhaul_detector = Arc::new(BackhaulDetector::new(BackhaulConfig {
+            allow_backhaul_mesh: false,
+            check_interval_secs: 300,
+        }));
+        info!("✓ Backhaul detector initialized");
+
+        // Build adapter configs map
+        let mut adapter_configs = HashMap::new();
+        adapter_configs.insert(
+            "ethernet".to_string(),
+            config.network.adapters.ethernet.clone(),
+        );
+        adapter_configs.insert(
+            "bluetooth".to_string(),
+            config.network.adapters.bluetooth.clone(),
+        );
+        adapter_configs.insert(
+            "bluetooth_le".to_string(),
+            config.network.adapters.bluetooth_le.clone(),
+        );
+        adapter_configs.insert(
+            "cellular".to_string(),
+            config.network.adapters.cellular.clone(),
+        );
 
         // Initialize heartbeat service
         let heartbeat_service = Arc::new(HeartbeatService::new(
@@ -90,8 +149,15 @@ impl Node {
                 max_nodes: config.heartbeat.max_nodes,
             },
             node_id,
+            Arc::clone(&identity),
+            Arc::clone(&adapter_manager),
+            Arc::clone(&backhaul_detector),
+            adapter_configs,
         ));
-        info!("✓ Heartbeat service initialized (interval: {}s)", config.heartbeat.interval_secs);
+        info!(
+            "✓ Heartbeat service initialized (interval: {}s)",
+            config.heartbeat.interval_secs
+        );
 
         // Initialize API server if enabled
         let api_server = if config.api.enabled {
@@ -104,7 +170,10 @@ impl Node {
                 config.node.name.clone(),
             )
             .await?;
-            info!("✓ API server initialized on {}:{}", config.api.bind, config.api.port);
+            info!(
+                "✓ API server initialized on {}:{}",
+                config.api.bind, config.api.port
+            );
             Some(server)
         } else {
             info!("API server disabled");
@@ -176,7 +245,10 @@ impl Node {
         info!("  MyriadNode is now running");
         info!("═══════════════════════════════════════════════");
         if self.config.api.enabled {
-            info!("  API: http://{}:{}", self.config.api.bind, self.config.api.port);
+            info!(
+                "  API: http://{}:{}",
+                self.config.api.bind, self.config.api.port
+            );
         }
         info!("  Node ID: {}", hex::encode(&self.config.node.id));
         info!("  Data Dir: {}", self.config.data_directory.display());
@@ -237,7 +309,12 @@ impl Node {
         let config = EthernetConfig::default();
 
         // Get NodeId for the adapter
-        let node_id_bytes: [u8; 32] = self.config.node.id.as_slice().try_into()
+        let node_id_bytes: [u8; 32] = self
+            .config
+            .node
+            .id
+            .as_slice()
+            .try_into()
             .expect("Node ID must be 32 bytes");
         let node_id = NodeId::from_bytes(node_id_bytes);
 
@@ -278,10 +355,9 @@ impl Node {
         }
 
         let mut manager = self.adapter_manager.write().await;
-        manager.register_adapter(
-            "ethernet".to_string(),
-            Box::new(adapter)
-        ).await?;
+        manager
+            .register_adapter("ethernet".to_string(), Box::new(adapter))
+            .await?;
 
         Ok(())
     }
@@ -297,10 +373,9 @@ impl Node {
         }
 
         let mut manager = self.adapter_manager.write().await;
-        manager.register_adapter(
-            "bluetooth".to_string(),
-            Box::new(adapter)
-        ).await?;
+        manager
+            .register_adapter("bluetooth".to_string(), Box::new(adapter))
+            .await?;
 
         Ok(())
     }
@@ -316,10 +391,9 @@ impl Node {
         }
 
         let mut manager = self.adapter_manager.write().await;
-        manager.register_adapter(
-            "bluetooth_le".to_string(),
-            Box::new(adapter)
-        ).await?;
+        manager
+            .register_adapter("bluetooth_le".to_string(), Box::new(adapter))
+            .await?;
 
         Ok(())
     }
@@ -335,10 +409,9 @@ impl Node {
         }
 
         let mut manager = self.adapter_manager.write().await;
-        manager.register_adapter(
-            "cellular".to_string(),
-            Box::new(adapter)
-        ).await?;
+        manager
+            .register_adapter("cellular".to_string(), Box::new(adapter))
+            .await?;
 
         Ok(())
     }
@@ -373,7 +446,7 @@ impl Node {
 
         info!("Closing storage...");
         {
-            let mut storage = self.storage.write().await;
+            let storage = self.storage.write().await;
             storage.close().await?;
         }
 

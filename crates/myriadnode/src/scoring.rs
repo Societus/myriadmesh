@@ -14,11 +14,11 @@ pub struct ScoringWeights {
 impl Default for ScoringWeights {
     fn default() -> Self {
         Self {
-            latency: 0.25,      // 25% weight on latency
-            bandwidth: 0.20,    // 20% weight on bandwidth
-            reliability: 0.30,  // 30% weight on reliability
-            power: 0.10,        // 10% weight on power consumption
-            privacy: 0.15,      // 15% weight on privacy/anonymity
+            latency: 0.25,     // 25% weight on latency
+            bandwidth: 0.20,   // 20% weight on bandwidth
+            reliability: 0.30, // 30% weight on reliability
+            power: 0.10,       // 10% weight on power consumption
+            privacy: 0.15,     // 15% weight on privacy/anonymity
         }
     }
 }
@@ -30,7 +30,7 @@ impl ScoringWeights {
             latency: 0.15,
             bandwidth: 0.10,
             reliability: 0.25,
-            power: 0.40,        // Higher weight on power for battery mode
+            power: 0.40, // Higher weight on power for battery mode
             privacy: 0.10,
         }
     }
@@ -38,11 +38,11 @@ impl ScoringWeights {
     /// Performance-optimized weights (prioritize speed and bandwidth)
     pub fn performance_optimized() -> Self {
         Self {
-            latency: 0.35,      // Higher weight on latency
-            bandwidth: 0.30,    // Higher weight on bandwidth
+            latency: 0.35,   // Higher weight on latency
+            bandwidth: 0.30, // Higher weight on bandwidth
             reliability: 0.20,
             power: 0.05,
-            privacy: 0.10,      // Lower priority for performance mode
+            privacy: 0.10, // Lower priority for performance mode
         }
     }
 
@@ -51,7 +51,7 @@ impl ScoringWeights {
         Self {
             latency: 0.10,
             bandwidth: 0.10,
-            reliability: 0.65,  // Much higher weight on reliability
+            reliability: 0.65, // Much higher weight on reliability
             power: 0.05,
             privacy: 0.10,
         }
@@ -60,11 +60,11 @@ impl ScoringWeights {
     /// Privacy-optimized weights (prioritize anonymous/non-IP adapters for SENSITIVE messages)
     pub fn privacy_optimized() -> Self {
         Self {
-            latency: 0.10,      // Lower priority - privacy over speed
-            bandwidth: 0.05,    // Lower priority
+            latency: 0.10,   // Lower priority - privacy over speed
+            bandwidth: 0.05, // Lower priority
             reliability: 0.20,
             power: 0.10,
-            privacy: 0.55,      // 55% weight on privacy for sensitive messages
+            privacy: 0.55, // 55% weight on privacy for sensitive messages
         }
     }
 
@@ -123,7 +123,7 @@ impl AdapterScorer {
         Self {
             weights,
             max_bandwidth_bps: 100_000_000, // 100 Mbps as baseline
-            max_latency_ms: 1000.0,          // 1 second as baseline
+            max_latency_ms: 1000.0,         // 1 second as baseline
         }
     }
 
@@ -132,11 +132,7 @@ impl AdapterScorer {
     }
 
     /// Calculate score for a single adapter
-    pub fn calculate_score(
-        &self,
-        adapter_id: String,
-        metrics: &AdapterMetrics,
-    ) -> AdapterScore {
+    pub fn calculate_score(&self, adapter_id: String, metrics: &AdapterMetrics) -> AdapterScore {
         // Calculate individual scores (0.0 to 1.0)
         let latency_score = self.score_latency(metrics.latency_ms);
         let bandwidth_score = self.score_bandwidth(metrics.bandwidth_bps);
@@ -145,16 +141,21 @@ impl AdapterScorer {
         let privacy_score = metrics.privacy_level; // Already 0.0 to 1.0
 
         // Calculate weighted total score
-        let total_score =
-            (latency_score * self.weights.latency) +
-            (bandwidth_score * self.weights.bandwidth) +
-            (reliability_score * self.weights.reliability) +
-            (power_score * self.weights.power) +
-            (privacy_score * self.weights.privacy);
+        let total_score = (latency_score * self.weights.latency)
+            + (bandwidth_score * self.weights.bandwidth)
+            + (reliability_score * self.weights.reliability)
+            + (power_score * self.weights.power)
+            + (privacy_score * self.weights.privacy);
 
         debug!(
             "Adapter '{}' score: {:.3} (lat={:.3}, bw={:.3}, rel={:.3}, pwr={:.3}, priv={:.3})",
-            adapter_id, total_score, latency_score, bandwidth_score, reliability_score, power_score, privacy_score
+            adapter_id,
+            total_score,
+            latency_score,
+            bandwidth_score,
+            reliability_score,
+            power_score,
+            privacy_score
         );
 
         AdapterScore {
@@ -169,10 +170,7 @@ impl AdapterScorer {
     }
 
     /// Calculate scores for multiple adapters and return them sorted by score (highest first)
-    pub fn rank_adapters(
-        &self,
-        adapters: HashMap<String, AdapterMetrics>,
-    ) -> Vec<AdapterScore> {
+    pub fn rank_adapters(&self, adapters: HashMap<String, AdapterMetrics>) -> Vec<AdapterScore> {
         let mut scores: Vec<AdapterScore> = adapters
             .into_iter()
             .map(|(id, metrics)| self.calculate_score(id, &metrics))
@@ -205,7 +203,7 @@ impl AdapterScorer {
         // Use exponential decay for latency scoring
         // Score drops to 0.5 at max_latency_ms/2, approaches 0 at max_latency_ms
         let normalized = latency_ms / self.max_latency_ms;
-        (1.0 - normalized).max(0.0).min(1.0)
+        (1.0 - normalized).clamp(0.0, 1.0)
     }
 
     /// Score bandwidth (higher is better)
@@ -218,7 +216,7 @@ impl AdapterScorer {
     fn score_power(&self, power_consumption: f64) -> f64 {
         // power_consumption is 0.0 (low) to 1.0 (high)
         // We want score to be 1.0 (low power) to 0.0 (high power)
-        (1.0 - power_consumption).max(0.0).min(1.0)
+        (1.0 - power_consumption).clamp(0.0, 1.0)
     }
 
     /// Update weights (useful for dynamic adjustment)

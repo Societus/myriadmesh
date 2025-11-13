@@ -41,6 +41,7 @@ impl Default for BluetoothConfig {
 
 /// Bluetooth peer information
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct BluetoothPeer {
     address: String,
     name: Option<String>,
@@ -50,6 +51,7 @@ struct BluetoothPeer {
 
 /// Bluetooth Classic network adapter
 pub struct BluetoothAdapter {
+    #[allow(dead_code)]
     config: BluetoothConfig,
     status: Arc<RwLock<AdapterStatus>>,
     capabilities: AdapterCapabilities,
@@ -65,8 +67,8 @@ impl BluetoothAdapter {
             max_message_size: 1024 * 64, // 64 KB typical for Bluetooth Classic
             typical_latency_ms: 50.0,
             typical_bandwidth_bps: 3_000_000, // ~3 Mbps for Bluetooth 2.0+EDR
-            reliability: 0.95, // Generally reliable within range
-            range_meters: 100.0, // Class 1 Bluetooth can reach 100m
+            reliability: 0.95,                // Generally reliable within range
+            range_meters: 100.0,              // Class 1 Bluetooth can reach 100m
             power_consumption: PowerConsumption::Low,
             cost_per_mb: 0.0, // No data cost
             supports_broadcast: false,
@@ -170,7 +172,7 @@ impl NetworkAdapter for BluetoothAdapter {
         Ok(())
     }
 
-    async fn send(&self, destination: &Address, frame: &Frame) -> Result<()> {
+    async fn send(&self, destination: &Address, _frame: &Frame) -> Result<()> {
         let status = self.status.read().await;
         if *status != AdapterStatus::Ready {
             return Err(NetworkError::AdapterNotReady);
@@ -179,7 +181,11 @@ impl NetworkAdapter for BluetoothAdapter {
         // Extract Bluetooth address from destination
         let _bt_address = match destination {
             Address::Bluetooth(addr) => addr,
-            _ => return Err(NetworkError::InvalidAddress("Expected Bluetooth address".to_string())),
+            _ => {
+                return Err(NetworkError::InvalidAddress(
+                    "Expected Bluetooth address".to_string(),
+                ))
+            }
         };
 
         // TODO: Send frame over RFCOMM connection
@@ -239,7 +245,7 @@ impl NetworkAdapter for BluetoothAdapter {
 
     fn get_status(&self) -> AdapterStatus {
         // Use blocking read for sync method
-        futures::executor::block_on(self.status.read()).clone()
+        *futures::executor::block_on(self.status.read())
     }
 
     fn get_capabilities(&self) -> &AdapterCapabilities {
@@ -254,7 +260,11 @@ impl NetworkAdapter for BluetoothAdapter {
 
         let _bt_address = match destination {
             Address::Bluetooth(addr) => addr,
-            _ => return Err(NetworkError::InvalidAddress("Expected Bluetooth address".to_string())),
+            _ => {
+                return Err(NetworkError::InvalidAddress(
+                    "Expected Bluetooth address".to_string(),
+                ))
+            }
         };
 
         // TODO: Implement connection test
@@ -280,12 +290,16 @@ impl NetworkAdapter for BluetoothAdapter {
         // Validate Bluetooth MAC address format (XX:XX:XX:XX:XX:XX)
         let parts: Vec<&str> = addr_str.split(':').collect();
         if parts.len() != 6 {
-            return Err(NetworkError::InvalidAddress("Bluetooth address must be in format XX:XX:XX:XX:XX:XX".to_string()));
+            return Err(NetworkError::InvalidAddress(
+                "Bluetooth address must be in format XX:XX:XX:XX:XX:XX".to_string(),
+            ));
         }
 
         for part in &parts {
             if part.len() != 2 || !part.chars().all(|c| c.is_ascii_hexdigit()) {
-                return Err(NetworkError::InvalidAddress("Bluetooth address must contain hex digits only".to_string()));
+                return Err(NetworkError::InvalidAddress(
+                    "Bluetooth address must contain hex digits only".to_string(),
+                ));
             }
         }
 
@@ -306,7 +320,10 @@ mod tests {
         let config = BluetoothConfig::default();
         let adapter = BluetoothAdapter::new(config);
 
-        assert_eq!(adapter.get_capabilities().adapter_type, AdapterType::Bluetooth);
+        assert_eq!(
+            adapter.get_capabilities().adapter_type,
+            AdapterType::Bluetooth
+        );
         assert_eq!(adapter.get_status(), AdapterStatus::Uninitialized);
     }
 

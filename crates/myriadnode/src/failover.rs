@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration, Instant};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 use crate::scoring::{AdapterMetrics, AdapterScorer, ScoringWeights};
 use myriadmesh_network::AdapterManager;
@@ -28,14 +28,9 @@ pub enum FailoverEvent {
         threshold: f64,
     },
     /// Adapter became unavailable
-    AdapterDown {
-        adapter: String,
-        reason: String,
-    },
+    AdapterDown { adapter: String, reason: String },
     /// Adapter recovered and is now available
-    AdapterRecovered {
-        adapter: String,
-    },
+    AdapterRecovered { adapter: String },
 }
 
 /// Adapter health status
@@ -49,6 +44,7 @@ pub enum HealthStatus {
 /// Tracks adapter health and metrics over time
 #[derive(Debug, Clone)]
 struct AdapterHealth {
+    #[allow(dead_code)]
     adapter_id: String,
     status: HealthStatus,
     consecutive_failures: u32,
@@ -198,10 +194,7 @@ impl FailoverManager {
                 let status = adapter_guard.get_status();
 
                 // Check if adapter is available
-                if !matches!(
-                    status,
-                    myriadmesh_network::adapter::AdapterStatus::Ready
-                ) {
+                if !matches!(status, myriadmesh_network::adapter::AdapterStatus::Ready) {
                     if let Some(health) = health_map.get_mut(adapter_id) {
                         health.record_failure();
 
@@ -217,10 +210,10 @@ impl FailoverManager {
                 }
 
                 // Get metrics from adapter manager
-                let metrics = if let Some(adapter_metrics) = manager.get_metrics(adapter_id) {
+                let metrics = if let Some(_adapter_metrics) = manager.get_metrics(adapter_id) {
                     // Convert network metrics to scoring metrics
                     AdapterMetrics {
-                        latency_ms: capabilities.typical_latency_ms as f64,
+                        latency_ms: capabilities.typical_latency_ms,
                         bandwidth_bps: capabilities.typical_bandwidth_bps,
                         reliability: capabilities.reliability,
                         power_consumption: match capabilities.power_consumption {
@@ -236,7 +229,7 @@ impl FailoverManager {
                 } else {
                     // Fallback to capability-based metrics
                     AdapterMetrics {
-                        latency_ms: capabilities.typical_latency_ms as f64,
+                        latency_ms: capabilities.typical_latency_ms,
                         bandwidth_bps: capabilities.typical_bandwidth_bps,
                         reliability: capabilities.reliability,
                         power_consumption: 0.5,
@@ -344,10 +337,7 @@ impl FailoverManager {
     }
 
     /// Log a failover event
-    async fn log_event(
-        event_log: &Arc<RwLock<Vec<FailoverEvent>>>,
-        event: FailoverEvent,
-    ) {
+    async fn log_event(event_log: &Arc<RwLock<Vec<FailoverEvent>>>, event: FailoverEvent) {
         debug!("Failover event: {:?}", event);
         let mut log = event_log.write().await;
         log.push(event);
@@ -482,7 +472,10 @@ mod tests {
     fn test_privacy_level_estimation() {
         assert_eq!(FailoverManager::estimate_privacy_level("i2p"), 0.95);
         assert_eq!(FailoverManager::estimate_privacy_level("bluetooth"), 0.85);
-        assert_eq!(FailoverManager::estimate_privacy_level("bluetooth_le"), 0.70);
+        assert_eq!(
+            FailoverManager::estimate_privacy_level("bluetooth_le"),
+            0.70
+        );
         assert_eq!(FailoverManager::estimate_privacy_level("ethernet"), 0.15);
         assert_eq!(FailoverManager::estimate_privacy_level("cellular"), 0.10);
         assert_eq!(FailoverManager::estimate_privacy_level("unknown"), 0.50);
