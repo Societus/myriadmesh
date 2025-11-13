@@ -27,8 +27,8 @@ pub struct Node {
     dht: RoutingTable,
     api_server: Option<ApiServer>,
     monitor: NetworkMonitor,
-    failover_manager: FailoverManager,
-    heartbeat_service: HeartbeatService,
+    failover_manager: Arc<FailoverManager>,
+    heartbeat_service: Arc<HeartbeatService>,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
 }
@@ -72,15 +72,15 @@ impl Node {
             "privacy" => ScoringWeights::privacy_optimized(),
             _ => ScoringWeights::default(),
         };
-        let failover_manager = FailoverManager::new(
+        let failover_manager = Arc::new(FailoverManager::new(
             config.network.failover.clone(),
             Arc::clone(&adapter_manager),
             scoring_weights,
-        );
+        ));
         info!("✓ Failover manager initialized (mode: {})", config.network.scoring.mode);
 
         // Initialize heartbeat service
-        let heartbeat_service = HeartbeatService::new(
+        let heartbeat_service = Arc::new(HeartbeatService::new(
             crate::heartbeat::HeartbeatConfig {
                 enabled: config.heartbeat.enabled,
                 interval_secs: config.heartbeat.interval_secs,
@@ -90,7 +90,7 @@ impl Node {
                 max_nodes: config.heartbeat.max_nodes,
             },
             node_id,
-        );
+        ));
         info!("✓ Heartbeat service initialized (interval: {}s)", config.heartbeat.interval_secs);
 
         // Initialize API server if enabled
@@ -98,6 +98,8 @@ impl Node {
             let server = ApiServer::new(
                 config.api.clone(),
                 Arc::clone(&adapter_manager),
+                Arc::clone(&heartbeat_service),
+                Arc::clone(&failover_manager),
                 hex::encode(&config.node.id),
                 config.node.name.clone(),
             )
