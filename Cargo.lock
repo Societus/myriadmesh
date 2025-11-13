@@ -1399,6 +1399,7 @@ dependencies = [
  "myriadmesh-protocol",
  "rand",
  "serde",
+ "sodiumoxide",
  "thiserror 1.0.69",
  "tokio",
  "uuid",
