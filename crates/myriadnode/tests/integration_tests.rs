@@ -8,23 +8,42 @@
  * - Backhaul detection
  * - End-to-end workflows
  */
-use anyhow::Result;
 use myriadmesh_network::AdapterManager;
 use myriadmesh_protocol::NodeId;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 // Import modules from myriadnode
+use myriadmesh_crypto::identity::NodeIdentity;
 use myriadnode::backhaul::{BackhaulConfig, BackhaulDetector};
 use myriadnode::config::FailoverConfig;
 use myriadnode::failover::FailoverManager;
 use myriadnode::heartbeat::{HeartbeatConfig, HeartbeatService};
 use myriadnode::scoring::{AdapterMetrics, AdapterScorer, ScoringWeights};
+use std::collections::HashMap;
 
 // Helper function to create a test NodeId
 fn create_test_node_id(seed: u8) -> NodeId {
     let bytes = [seed; 32];
     NodeId::from_bytes(bytes)
+}
+
+// Helper function to create a HeartbeatService for testing
+fn create_test_heartbeat_service(config: HeartbeatConfig, node_id: NodeId) -> HeartbeatService {
+    myriadmesh_crypto::init().ok();
+    let identity = Arc::new(NodeIdentity::generate().unwrap());
+    let adapter_manager = Arc::new(RwLock::new(AdapterManager::new()));
+    let backhaul_detector = Arc::new(BackhaulDetector::new(BackhaulConfig::default()));
+    let adapter_configs = HashMap::new();
+
+    HeartbeatService::new(
+        config,
+        node_id,
+        identity,
+        adapter_manager,
+        backhaul_detector,
+        adapter_configs,
+    )
 }
 
 // ====================
@@ -186,7 +205,7 @@ async fn test_failover_event_logging() {
 
     // Get events (should be empty initially)
     let events = failover_manager.get_recent_events(100).await;
-    assert!(events.len() == 0, "Should start with no events");
+    assert!(events.is_empty(), "Should start with no events");
 }
 
 #[tokio::test]
@@ -229,7 +248,7 @@ async fn test_heartbeat_service_initialization() {
     };
 
     let node_id = create_test_node_id(1);
-    let service = HeartbeatService::new(config, node_id);
+    let service = create_test_heartbeat_service(config, node_id);
 
     // Get initial stats
     let stats = service.get_stats().await;
@@ -249,7 +268,7 @@ async fn test_heartbeat_privacy_controls() {
     };
 
     let node_id = create_test_node_id(2);
-    let private_service = HeartbeatService::new(private_config, node_id);
+    let private_service = create_test_heartbeat_service(private_config, node_id);
 
     let stats = private_service.get_stats().await;
     assert_eq!(
@@ -268,7 +287,7 @@ async fn test_heartbeat_privacy_controls() {
     };
 
     let node_id2 = create_test_node_id(3);
-    let public_service = HeartbeatService::new(public_config, node_id2);
+    let public_service = create_test_heartbeat_service(public_config, node_id2);
     let public_stats = public_service.get_stats().await;
 
     // Stats should still be 0 initially
@@ -287,7 +306,7 @@ async fn test_heartbeat_node_map_updates() {
     };
 
     let node_id = create_test_node_id(4);
-    let service = HeartbeatService::new(config, node_id);
+    let service = create_test_heartbeat_service(config, node_id);
 
     // Get node map (should be empty)
     let node_map = service.get_node_map().await;
@@ -302,8 +321,8 @@ async fn test_heartbeat_node_map_updates() {
 async fn test_backhaul_config_defaults() {
     let config = BackhaulConfig::default();
 
-    assert_eq!(
-        config.allow_backhaul_mesh, false,
+    assert!(
+        !config.allow_backhaul_mesh,
         "Should default to no backhaul mesh"
     );
     assert_eq!(
@@ -319,11 +338,11 @@ async fn test_backhaul_detection_override() {
         check_interval_secs: 30,
     };
 
-    let detector = BackhaulDetector::new(allow_config.clone());
+    let _detector = BackhaulDetector::new(allow_config.clone());
 
     // Even with backhaul mesh allowed, detector should still detect backhauls
     // (The config just changes how we use that information)
-    assert_eq!(allow_config.allow_backhaul_mesh, true);
+    assert!(allow_config.allow_backhaul_mesh);
 }
 
 #[tokio::test]
@@ -380,7 +399,7 @@ async fn test_complete_node_component_initialization() {
         max_nodes: 1000,
     };
     let node_id = create_test_node_id(5);
-    let _heartbeat = HeartbeatService::new(heartbeat_config, node_id);
+    let _heartbeat = create_test_heartbeat_service(heartbeat_config, node_id);
 
     // 5. Create backhaul detector
     let backhaul_config = BackhaulConfig::default();
@@ -461,7 +480,7 @@ async fn test_heartbeat_nodemap_capacity() {
     };
 
     let node_id = create_test_node_id(6);
-    let service = HeartbeatService::new(config, node_id);
+    let service = create_test_heartbeat_service(config, node_id);
 
     // Get stats (capacity enforced internally)
     let stats = service.get_stats().await;
@@ -582,7 +601,7 @@ async fn test_heartbeat_service_thread_safety() {
     };
 
     let node_id = create_test_node_id(7);
-    let service = Arc::new(HeartbeatService::new(config, node_id));
+    let service = Arc::new(create_test_heartbeat_service(config, node_id));
 
     // Spawn multiple concurrent queries
     let mut handles = vec![];

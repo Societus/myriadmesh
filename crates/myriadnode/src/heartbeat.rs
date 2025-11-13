@@ -703,9 +703,9 @@ fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use myriadmesh_network::AdapterManager;
-    use crate::backhaul::{BackhaulDetector, BackhaulConfig};
+    use crate::backhaul::{BackhaulConfig, BackhaulDetector};
     use myriadmesh_crypto::identity::NodeIdentity;
+    use myriadmesh_network::AdapterManager;
     use std::collections::HashMap;
 
     // Helper function to create a HeartbeatService for testing
