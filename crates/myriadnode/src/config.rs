@@ -78,6 +78,16 @@ pub struct AdapterConfig {
     /// Allow mesh networking on backhaul interfaces (IP adapters only)
     #[serde(default)]
     pub allow_backhaul_mesh: bool,
+    /// Allow heartbeat broadcasting on this adapter
+    #[serde(default = "default_allow_heartbeat")]
+    pub allow_heartbeat: bool,
+    /// Override heartbeat interval for this adapter (optional)
+    #[serde(default)]
+    pub heartbeat_interval_override: Option<u64>,
+}
+
+fn default_allow_heartbeat() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,6 +155,19 @@ pub struct HeartbeatConfig {
     pub include_geolocation: bool,
     pub store_remote_geolocation: bool,
     pub max_nodes: usize,
+}
+
+impl Default for HeartbeatConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_secs: 60,
+            timeout_secs: 300,
+            include_geolocation: false,
+            store_remote_geolocation: false,
+            max_nodes: 1000,
+        }
+    }
 }
 
 impl Config {
@@ -229,21 +252,29 @@ impl Config {
                         enabled: true,
                         auto_start: true,
                         allow_backhaul_mesh: false,
+                        allow_heartbeat: true,
+                        heartbeat_interval_override: None,
                     },
                     bluetooth: AdapterConfig {
                         enabled: false,
                         auto_start: false,
                         allow_backhaul_mesh: false,
+                        allow_heartbeat: true,
+                        heartbeat_interval_override: None,
                     },
                     bluetooth_le: AdapterConfig {
                         enabled: false,
                         auto_start: false,
                         allow_backhaul_mesh: false,
+                        allow_heartbeat: true,
+                        heartbeat_interval_override: None,
                     },
                     cellular: AdapterConfig {
                         enabled: false,
                         auto_start: false,
                         allow_backhaul_mesh: false,
+                        allow_heartbeat: false, // Don't use cellular for heartbeats
+                        heartbeat_interval_override: None,
                     },
                 },
                 monitoring: MonitoringConfig {
