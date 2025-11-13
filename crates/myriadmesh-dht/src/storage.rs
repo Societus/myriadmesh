@@ -84,6 +84,15 @@ impl StorageEntry {
     }
 }
 
+/// Per-node storage tracking
+#[derive(Debug, Clone)]
+struct NodeQuota {
+    /// Number of keys stored by this node
+    key_count: usize,
+    /// Total bytes stored by this node
+    bytes_used: usize,
+}
+
 /// DHT storage layer
 #[derive(Debug)]
 pub struct DhtStorage {
@@ -98,7 +107,23 @@ pub struct DhtStorage {
 
     /// Maximum number of keys
     max_keys: usize,
+
+    /// SECURITY M2: Per-node storage quotas
+    /// Tracks how much storage each publisher is using
+    node_quotas: HashMap<[u8; 32], NodeQuota>,
+
+    /// SECURITY M2: Maximum keys per node
+    max_keys_per_node: usize,
+
+    /// SECURITY M2: Maximum bytes per node
+    max_bytes_per_node: usize,
 }
+
+/// SECURITY M2: Default maximum keys per node (10% of total)
+const DEFAULT_MAX_KEYS_PER_NODE: usize = MAX_DHT_KEYS / 10;
+
+/// SECURITY M2: Default maximum bytes per node (10% of total)
+const DEFAULT_MAX_BYTES_PER_NODE: usize = MAX_DHT_STORAGE_BYTES / 10;
 
 impl DhtStorage {
     /// Create new DHT storage
@@ -108,6 +133,9 @@ impl DhtStorage {
             current_size: 0,
             max_size: MAX_DHT_STORAGE_BYTES,
             max_keys: MAX_DHT_KEYS,
+            node_quotas: HashMap::new(),
+            max_keys_per_node: DEFAULT_MAX_KEYS_PER_NODE,
+            max_bytes_per_node: DEFAULT_MAX_BYTES_PER_NODE,
         }
     }
 
@@ -118,6 +146,28 @@ impl DhtStorage {
             current_size: 0,
             max_size,
             max_keys,
+            node_quotas: HashMap::new(),
+            max_keys_per_node: max_keys / 10, // 10% per node
+            max_bytes_per_node: max_size / 10, // 10% per node
+        }
+    }
+
+    /// Create with custom per-node quotas
+    /// SECURITY M2: Allows fine-tuning resource limits per publisher
+    pub fn with_quotas(
+        max_size: usize,
+        max_keys: usize,
+        max_keys_per_node: usize,
+        max_bytes_per_node: usize,
+    ) -> Self {
+        DhtStorage {
+            entries: HashMap::new(),
+            current_size: 0,
+            max_size,
+            max_keys,
+            node_quotas: HashMap::new(),
+            max_keys_per_node,
+            max_bytes_per_node,
         }
     }
 
@@ -131,6 +181,65 @@ impl DhtStorage {
         self.entries.len()
     }
 
+    /// SECURITY M2: Get node quota usage
+    pub fn get_node_usage(&self, publisher: &[u8; 32]) -> (usize, usize) {
+        self.node_quotas
+            .get(publisher)
+            .map(|quota| (quota.key_count, quota.bytes_used))
+            .unwrap_or((0, 0))
+    }
+
+    /// SECURITY M2: Check if node has quota available
+    fn node_has_quota(&self, publisher: &[u8; 32], value_size: usize, is_update: bool) -> bool {
+        let quota = self.node_quotas.get(publisher);
+
+        match quota {
+            Some(q) => {
+                // If updating existing key, don't count against key quota
+                let key_check = if is_update {
+                    true
+                } else {
+                    q.key_count < self.max_keys_per_node
+                };
+
+                let byte_check = q.bytes_used + value_size <= self.max_bytes_per_node;
+
+                key_check && byte_check
+            }
+            None => {
+                // New publisher - check if adding first entry would exceed quotas
+                value_size <= self.max_bytes_per_node
+            }
+        }
+    }
+
+    /// SECURITY M2: Update node quota
+    fn update_node_quota(&mut self, publisher: [u8; 32], key_delta: i32, bytes_delta: i64) {
+        let quota = self.node_quotas.entry(publisher).or_insert(NodeQuota {
+            key_count: 0,
+            bytes_used: 0,
+        });
+
+        // Update key count
+        if key_delta > 0 {
+            quota.key_count += key_delta as usize;
+        } else if key_delta < 0 {
+            quota.key_count = quota.key_count.saturating_sub((-key_delta) as usize);
+        }
+
+        // Update bytes used
+        if bytes_delta > 0 {
+            quota.bytes_used += bytes_delta as usize;
+        } else if bytes_delta < 0 {
+            quota.bytes_used = quota.bytes_used.saturating_sub((-bytes_delta) as usize);
+        }
+
+        // Remove quota entry if node has nothing stored
+        if quota.key_count == 0 && quota.bytes_used == 0 {
+            self.node_quotas.remove(&publisher);
+        }
+    }
+
     /// Check if storage has capacity for a value
     fn has_capacity(&self, value_size: usize) -> bool {
         self.key_count() < self.max_keys && (self.current_size + value_size) <= self.max_size
@@ -138,6 +247,7 @@ impl DhtStorage {
 
     /// Store a value
     /// SECURITY H7: Requires valid signature from publisher
+    /// SECURITY M2: Enforces per-node storage quotas
     pub fn store(
         &mut self,
         key: [u8; 32],
@@ -169,20 +279,57 @@ impl DhtStorage {
         // SECURITY H7: Verify signature before storing
         entry.verify_signature()?;
 
-        // If key exists, remove old value first for accurate size tracking
-        if let Some(old_entry) = self.entries.remove(&key) {
-            self.current_size -= old_entry.value.len();
+        // Check if this is an update to existing key
+        let is_update = self.entries.contains_key(&key);
+        let old_entry = if is_update {
+            self.entries.remove(&key)
+        } else {
+            None
+        };
+
+        // SECURITY M2: Check per-node quota
+        if !self.node_has_quota(&publisher, value.len(), is_update) {
+            // Restore old entry if this was an update
+            if let Some(old) = old_entry {
+                self.entries.insert(key, old);
+            }
+
+            let (keys, bytes) = self.get_node_usage(&publisher);
+            return Err(DhtError::NodeQuotaExceeded {
+                publisher,
+                current_keys: keys,
+                current_bytes: bytes,
+                max_keys: self.max_keys_per_node,
+                max_bytes: self.max_bytes_per_node,
+            });
         }
 
-        // Check capacity
+        // Update size tracking for old entry
+        if let Some(ref old) = old_entry {
+            self.current_size -= old.value.len();
+            // Update quota for old value removal
+            self.update_node_quota(old.publisher, 0, -(old.value.len() as i64));
+        }
+
+        // Check global capacity
         if !self.has_capacity(value.len()) {
             // Try to make space by removing expired entries
             self.cleanup_expired();
 
             if !self.has_capacity(value.len()) {
+                // Restore old entry if this was an update
+                if let Some(old) = old_entry {
+                    self.current_size += old.value.len();
+                    self.update_node_quota(old.publisher, 0, old.value.len() as i64);
+                    self.entries.insert(key, old);
+                }
                 return Err(DhtError::StorageFull { max: self.max_size });
             }
         }
+
+        // SECURITY M2: Update node quota
+        let key_delta = if is_update { 0 } else { 1 };
+        self.update_node_quota(publisher, key_delta, value.len() as i64);
 
         // Store
         self.entries.insert(key, entry);
@@ -203,9 +350,12 @@ impl DhtStorage {
     }
 
     /// Remove a value
+    /// SECURITY M2: Updates node quotas
     pub fn remove(&mut self, key: &[u8; 32]) -> Option<StorageEntry> {
         if let Some(entry) = self.entries.remove(key) {
             self.current_size -= entry.value.len();
+            // SECURITY M2: Update node quota
+            self.update_node_quota(entry.publisher, -1, -(entry.value.len() as i64));
             Some(entry)
         } else {
             None
@@ -213,21 +363,27 @@ impl DhtStorage {
     }
 
     /// Cleanup expired entries
+    /// SECURITY M2: Updates node quotas for removed entries
     pub fn cleanup_expired(&mut self) -> usize {
-        let mut removed = 0;
         let current_time = now();
 
-        self.entries.retain(|_, entry| {
-            if entry.expires_at <= current_time {
-                self.current_size -= entry.value.len();
-                removed += 1;
-                false
-            } else {
-                true
-            }
-        });
+        // Collect expired entries first to avoid borrow checker issues
+        let expired_entries: Vec<_> = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.expires_at <= current_time)
+            .map(|(key, entry)| (*key, entry.publisher, entry.value.len()))
+            .collect();
 
-        removed
+        // Remove expired entries and update quotas
+        for (key, publisher, value_len) in expired_entries.iter() {
+            self.entries.remove(key);
+            self.current_size -= value_len;
+            // SECURITY M2: Update node quota
+            self.update_node_quota(*publisher, -1, -(*value_len as i64));
+        }
+
+        expired_entries.len()
     }
 
     /// Get all entries (for republishing)
@@ -249,9 +405,11 @@ impl DhtStorage {
     }
 
     /// Clear all storage
+    /// SECURITY M2: Clears node quotas
     pub fn clear(&mut self) {
         self.entries.clear();
         self.current_size = 0;
+        self.node_quotas.clear();
     }
 }
 
@@ -525,5 +683,206 @@ mod tests {
         let result = storage.store(key2, value, 3600, publisher, signature);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), DhtError::InvalidSignature));
+    }
+
+    #[test]
+    fn test_per_node_key_quota() {
+        // SECURITY TEST M2: Verify per-node key quota enforcement
+        let mut storage = DhtStorage::with_quotas(10_000, 100, 5, 5000); // Max 5 keys per node
+
+        let publisher = [1u8; 32];
+        let value = b"test".to_vec();
+
+        sodiumoxide::init().unwrap();
+        let (pk, sk) = ed25519::gen_keypair();
+        let mut pk_bytes = [0u8; 32];
+        pk_bytes.copy_from_slice(&pk[..]);
+
+        // Store 5 keys (should succeed)
+        for i in 0..5 {
+            let mut key = [0u8; 32];
+            key[0] = i as u8;
+            let signature = sign_value(&key, &value, now() + 3600, &sk);
+            assert!(storage.store(key, value.clone(), 3600, pk_bytes, signature).is_ok());
+        }
+
+        // Verify quota tracking
+        let (keys, bytes) = storage.get_node_usage(&pk_bytes);
+        assert_eq!(keys, 5);
+        assert_eq!(bytes, 5 * value.len());
+
+        // Try to store 6th key (should fail)
+        let mut key6 = [0u8; 32];
+        key6[0] = 6;
+        let signature6 = sign_value(&key6, &value, now() + 3600, &sk);
+        let result = storage.store(key6, value.clone(), 3600, pk_bytes, signature6);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), DhtError::NodeQuotaExceeded { .. }));
+    }
+
+    #[test]
+    fn test_per_node_byte_quota() {
+        // SECURITY TEST M2: Verify per-node byte quota enforcement
+        let mut storage = DhtStorage::with_quotas(10_000, 100, 100, 1000); // Max 1000 bytes per node
+
+        let publisher = [1u8; 32];
+
+        sodiumoxide::init().unwrap();
+        let (pk, sk) = ed25519::gen_keypair();
+        let mut pk_bytes = [0u8; 32];
+        pk_bytes.copy_from_slice(&pk[..]);
+
+        // Store values totaling 1000 bytes (should succeed)
+        let value1 = vec![0u8; 500];
+        let key1 = [1u8; 32];
+        let sig1 = sign_value(&key1, &value1, now() + 3600, &sk);
+        assert!(storage.store(key1, value1, 3600, pk_bytes, sig1).is_ok());
+
+        let value2 = vec![0u8; 500];
+        let key2 = [2u8; 32];
+        let sig2 = sign_value(&key2, &value2, now() + 3600, &sk);
+        assert!(storage.store(key2, value2, 3600, pk_bytes, sig2).is_ok());
+
+        // Verify quota tracking
+        let (keys, bytes) = storage.get_node_usage(&pk_bytes);
+        assert_eq!(keys, 2);
+        assert_eq!(bytes, 1000);
+
+        // Try to store more bytes (should fail)
+        let value3 = vec![0u8; 100];
+        let key3 = [3u8; 32];
+        let sig3 = sign_value(&key3, &value3, now() + 3600, &sk);
+        let result = storage.store(key3, value3, 3600, pk_bytes, sig3);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), DhtError::NodeQuotaExceeded { .. }));
+    }
+
+    #[test]
+    fn test_quota_update_on_removal() {
+        // SECURITY TEST M2: Verify quotas are updated when entries are removed
+        let mut storage = DhtStorage::with_quotas(10_000, 100, 10, 5000);
+
+        let value = b"test value".to_vec();
+        let key = [1u8; 32];
+        let (publisher, signature) = create_signed_value(key, value.clone(), 3600);
+
+        // Store a value
+        storage.store(key, value.clone(), 3600, publisher, signature).unwrap();
+
+        // Check quota
+        let (keys, bytes) = storage.get_node_usage(&publisher);
+        assert_eq!(keys, 1);
+        assert_eq!(bytes, value.len());
+
+        // Remove the value
+        storage.remove(&key);
+
+        // Verify quota is cleared
+        let (keys, bytes) = storage.get_node_usage(&publisher);
+        assert_eq!(keys, 0);
+        assert_eq!(bytes, 0);
+    }
+
+    #[test]
+    fn test_quota_update_on_expiration() {
+        // SECURITY TEST M2: Verify quotas are updated when entries expire
+        let mut storage = DhtStorage::with_quotas(10_000, 100, 10, 5000);
+
+        let value = b"test value".to_vec();
+        let key = [1u8; 32];
+        let (publisher, signature) = create_signed_value(key, value.clone(), 0); // Immediate expiration
+
+        // Store with 0 TTL
+        storage.store(key, value.clone(), 0, publisher, signature).unwrap();
+
+        // Check quota before cleanup
+        let (keys, bytes) = storage.get_node_usage(&publisher);
+        assert_eq!(keys, 1);
+
+        // Cleanup expired entries
+        storage.cleanup_expired();
+
+        // Verify quota is cleared
+        let (keys, bytes) = storage.get_node_usage(&publisher);
+        assert_eq!(keys, 0);
+        assert_eq!(bytes, 0);
+    }
+
+    #[test]
+    fn test_multiple_publishers_independent_quotas() {
+        // SECURITY TEST M2: Verify each publisher has independent quotas
+        let mut storage = DhtStorage::with_quotas(10_000, 100, 5, 5000);
+
+        sodiumoxide::init().unwrap();
+
+        // Publisher 1
+        let (pk1, sk1) = ed25519::gen_keypair();
+        let mut publisher1 = [0u8; 32];
+        publisher1.copy_from_slice(&pk1[..]);
+
+        // Publisher 2
+        let (pk2, sk2) = ed25519::gen_keypair();
+        let mut publisher2 = [0u8; 32];
+        publisher2.copy_from_slice(&pk2[..]);
+
+        let value = b"test".to_vec();
+
+        // Store 5 keys for publisher 1
+        for i in 0..5 {
+            let mut key = [1u8; 32];
+            key[0] = i as u8;
+            let signature = sign_value(&key, &value, now() + 3600, &sk1);
+            assert!(storage.store(key, value.clone(), 3600, publisher1, signature).is_ok());
+        }
+
+        // Store 5 keys for publisher 2 (should also succeed)
+        for i in 0..5 {
+            let mut key = [2u8; 32];
+            key[0] = i as u8;
+            let signature = sign_value(&key, &value, now() + 3600, &sk2);
+            assert!(storage.store(key, value.clone(), 3600, publisher2, signature).is_ok());
+        }
+
+        // Verify independent quotas
+        let (keys1, bytes1) = storage.get_node_usage(&publisher1);
+        assert_eq!(keys1, 5);
+
+        let (keys2, bytes2) = storage.get_node_usage(&publisher2);
+        assert_eq!(keys2, 5);
+
+        // Publisher 1 cannot store more
+        let mut key6 = [1u8; 32];
+        key6[0] = 6;
+        let signature = sign_value(&key6, &value, now() + 3600, &sk1);
+        let result = storage.store(key6, value.clone(), 3600, publisher1, signature);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_quota_allows_value_update() {
+        // SECURITY TEST M2: Verify updating existing value doesn't exceed key quota
+        let mut storage = DhtStorage::with_quotas(10_000, 100, 1, 5000); // Only 1 key per node
+
+        sodiumoxide::init().unwrap();
+        let (pk, sk) = ed25519::gen_keypair();
+        let mut publisher = [0u8; 32];
+        publisher.copy_from_slice(&pk[..]);
+
+        let key = [1u8; 32];
+
+        // Store initial value
+        let value1 = b"first value".to_vec();
+        let sig1 = sign_value(&key, &value1, now() + 3600, &sk);
+        assert!(storage.store(key, value1, 3600, publisher, sig1).is_ok());
+
+        // Update with different value (should succeed even though quota is 1 key)
+        let value2 = b"second value".to_vec();
+        let sig2 = sign_value(&key, &value2, now() + 3600, &sk);
+        assert!(storage.store(key, value2.clone(), 3600, publisher, sig2).is_ok());
+
+        // Verify still only 1 key in quota
+        let (keys, bytes) = storage.get_node_usage(&publisher);
+        assert_eq!(keys, 1);
+        assert_eq!(bytes, value2.len());
     }
 }

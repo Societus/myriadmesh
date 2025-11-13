@@ -20,6 +20,16 @@ pub enum DhtError {
     #[error("Too many keys (max {0})")]
     TooManyKeys(usize),
 
+    // SECURITY M2: Per-node quota exceeded
+    #[error("Node quota exceeded: {current_keys}/{max_keys} keys, {current_bytes}/{max_bytes} bytes")]
+    NodeQuotaExceeded {
+        publisher: [u8; 32],
+        current_keys: usize,
+        current_bytes: usize,
+        max_keys: usize,
+        max_bytes: usize,
+    },
+
     #[error("Invalid signature")]
     InvalidSignature,
 
