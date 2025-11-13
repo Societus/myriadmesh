@@ -75,6 +75,20 @@ impl Default for EthernetConfig {
     }
 }
 
+/// SECURITY H1: Authenticated discovery message
+/// Prevents multicast spoofing attacks where attackers claim to be arbitrary NodeIDs
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct DiscoveryMessage {
+    /// NodeID of the announcing peer (64 bytes)
+    #[serde(with = "serde_big_array::BigArray")]
+    node_id: [u8; NODE_ID_SIZE],
+    /// Ed25519 public key (32 bytes) for verification
+    public_key: [u8; PUBLIC_KEY_SIZE],
+    /// Ed25519 signature (64 bytes) over (node_id || public_key)
+    #[serde(with = "serde_big_array::BigArray")]
+    signature: [u8; SIGNATURE_SIZE],
+}
+
 /// Ethernet/UDP network adapter
 pub struct EthernetAdapter {
     /// Adapter status
@@ -247,7 +261,7 @@ impl EthernetAdapter {
         Ok(())
     }
 
-    /// Send multicast discovery announcement
+    /// SECURITY H1: Send authenticated multicast discovery announcement
     async fn send_discovery_announcement(&self) -> Result<()> {
         if !self.config.enable_multicast {
             return Ok(());
@@ -258,24 +272,52 @@ impl EthernetAdapter {
             NetworkError::InitializationFailed("Multicast socket not initialized".to_string())
         })?;
 
-        // Simple discovery message with NodeId
-        let message = format!(
-            "MYRIADMESH_DISCOVER:{}",
-            hex::encode(self.local_node_id.as_bytes())
-        );
+        // SECURITY H1: Create signed discovery message
+        let node_id_bytes = *self.local_node_id.as_bytes();
+        let public_key_bytes = {
+            let mut bytes = [0u8; PUBLIC_KEY_SIZE];
+            bytes.copy_from_slice(self.identity.public_key.as_ref());
+            bytes
+        };
+
+        // Sign the message: node_id || public_key
+        let mut signable_data = Vec::with_capacity(NODE_ID_SIZE + PUBLIC_KEY_SIZE);
+        signable_data.extend_from_slice(&node_id_bytes);
+        signable_data.extend_from_slice(&public_key_bytes);
+
+        let signature = sign_message(&self.identity, &signable_data)
+            .map_err(|e| NetworkError::SendFailed(format!("Failed to sign discovery: {}", e)))?;
+
+        let signature_bytes = {
+            let mut bytes = [0u8; SIGNATURE_SIZE];
+            bytes.copy_from_slice(signature.as_bytes());
+            bytes
+        };
+
+        let discovery_msg = DiscoveryMessage {
+            node_id: node_id_bytes,
+            public_key: public_key_bytes,
+            signature: signature_bytes,
+        };
+
+        // Serialize and send
+        let serialized = bincode::serialize(&discovery_msg).map_err(|e| {
+            NetworkError::SendFailed(format!("Failed to serialize discovery: {}", e))
+        })?;
+
         let dest = format!(
             "{}:{}",
             self.config.multicast_addr, self.config.multicast_port
         );
 
         socket
-            .send_to(message.as_bytes(), dest)
+            .send_to(&serialized, dest)
             .map_err(|e| NetworkError::SendFailed(format!("Multicast send failed: {}", e)))?;
 
         Ok(())
     }
 
-    /// Listen for multicast discovery messages (non-blocking)
+    /// SECURITY H1: Listen for authenticated multicast discovery messages (non-blocking)
     fn receive_discovery_messages(&self) -> Result<Vec<PeerInfo>> {
         if !self.config.enable_multicast {
             return Ok(Vec::new());
@@ -293,23 +335,20 @@ impl EthernetAdapter {
         loop {
             match socket.recv_from(&mut buf) {
                 Ok((size, source_addr)) => {
-                    if let Ok(message) = std::str::from_utf8(&buf[..size]) {
-                        if let Some(node_id_hex) = message.strip_prefix("MYRIADMESH_DISCOVER:") {
-                            if let Ok(node_id_bytes) = hex::decode(node_id_hex) {
-                                if node_id_bytes.len() == NODE_ID_SIZE {
-                                    let mut bytes = [0u8; NODE_ID_SIZE];
-                                    bytes.copy_from_slice(&node_id_bytes);
-                                    let node_id = NodeId::from_bytes(bytes);
-
-                                    // Don't add ourselves
-                                    if node_id != self.local_node_id {
-                                        discovered.push(PeerInfo {
-                                            node_id,
-                                            address: Address::Ethernet(source_addr.to_string()),
-                                        });
-                                    }
-                                }
+                    // SECURITY H1: Verify signed discovery message
+                    match self.verify_discovery_message(&buf[..size]) {
+                        Ok(node_id) => {
+                            // Don't add ourselves
+                            if node_id != self.local_node_id {
+                                discovered.push(PeerInfo {
+                                    node_id,
+                                    address: Address::Ethernet(source_addr.to_string()),
+                                });
                             }
+                        }
+                        Err(_) => {
+                            // Ignore invalid/unsigned discovery messages
+                            continue;
                         }
                     }
                 }
@@ -325,6 +364,41 @@ impl EthernetAdapter {
         }
 
         Ok(discovered)
+    }
+
+    /// SECURITY H1: Verify discovery message signature and return NodeId
+    fn verify_discovery_message(&self, data: &[u8]) -> Result<NodeId> {
+        // Deserialize discovery message
+        let msg: DiscoveryMessage = bincode::deserialize(data)
+            .map_err(|e| NetworkError::ReceiveFailed(format!("Invalid discovery format: {}", e)))?;
+
+        // Parse public key
+        let public_key = ed25519::PublicKey::from_slice(&msg.public_key).ok_or_else(|| {
+            NetworkError::ReceiveFailed("Invalid public key in discovery".to_string())
+        })?;
+
+        // Reconstruct signed data: node_id || public_key
+        let mut signable_data = Vec::with_capacity(NODE_ID_SIZE + PUBLIC_KEY_SIZE);
+        signable_data.extend_from_slice(&msg.node_id);
+        signable_data.extend_from_slice(&msg.public_key);
+
+        // Verify signature
+        let signature = myriadmesh_crypto::signing::Signature::from_bytes(msg.signature);
+        verify_signature(&public_key, &signable_data, &signature).map_err(|e| {
+            NetworkError::ReceiveFailed(format!("Discovery signature invalid: {}", e))
+        })?;
+
+        // SECURITY H1: Verify that public key derives to claimed NodeId (prevents impersonation)
+        let derived_node_id = NodeIdentity::derive_node_id(&public_key);
+        let claimed_node_id = NodeId::from_bytes(msg.node_id);
+
+        if derived_node_id.as_bytes() != claimed_node_id.as_bytes() {
+            return Err(NetworkError::ReceiveFailed(
+                "Discovery public key does not derive to claimed NodeId".to_string(),
+            ));
+        }
+
+        Ok(claimed_node_id)
     }
 }
 
@@ -680,5 +754,156 @@ mod tests {
 
         // Verification should fail
         assert!(adapter.verify_authenticated_packet(&packet).is_err());
+    }
+
+    // SECURITY H1: Test that valid signed discovery messages are accepted
+    #[test]
+    fn test_valid_discovery_message() {
+        myriadmesh_crypto::init().unwrap();
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        let adapter = EthernetAdapter::new_default(identity.clone());
+
+        let node_id_bytes = *adapter.local_node_id.as_bytes();
+        let public_key_bytes = {
+            let mut bytes = [0u8; PUBLIC_KEY_SIZE];
+            bytes.copy_from_slice(identity.public_key.as_ref());
+            bytes
+        };
+
+        // Create signed discovery message
+        let mut signable_data = Vec::with_capacity(NODE_ID_SIZE + PUBLIC_KEY_SIZE);
+        signable_data.extend_from_slice(&node_id_bytes);
+        signable_data.extend_from_slice(&public_key_bytes);
+
+        let signature = sign_message(&identity, &signable_data).unwrap();
+        let signature_bytes = {
+            let mut bytes = [0u8; SIGNATURE_SIZE];
+            bytes.copy_from_slice(signature.as_bytes());
+            bytes
+        };
+
+        let discovery_msg = DiscoveryMessage {
+            node_id: node_id_bytes,
+            public_key: public_key_bytes,
+            signature: signature_bytes,
+        };
+
+        let serialized = bincode::serialize(&discovery_msg).unwrap();
+
+        // Verify discovery message
+        let verified_node_id = adapter.verify_discovery_message(&serialized).unwrap();
+        assert_eq!(verified_node_id, adapter.local_node_id);
+    }
+
+    // SECURITY H1: Test that discovery messages with invalid signatures are rejected
+    #[test]
+    fn test_reject_invalid_discovery_signature() {
+        myriadmesh_crypto::init().unwrap();
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        let adapter = EthernetAdapter::new_default(identity.clone());
+
+        let node_id_bytes = *adapter.local_node_id.as_bytes();
+        let public_key_bytes = {
+            let mut bytes = [0u8; PUBLIC_KEY_SIZE];
+            bytes.copy_from_slice(identity.public_key.as_ref());
+            bytes
+        };
+
+        // Create discovery message with invalid signature
+        let mut invalid_signature = [0u8; SIGNATURE_SIZE];
+        invalid_signature[0] = 0xFF;
+
+        let discovery_msg = DiscoveryMessage {
+            node_id: node_id_bytes,
+            public_key: public_key_bytes,
+            signature: invalid_signature,
+        };
+
+        let serialized = bincode::serialize(&discovery_msg).unwrap();
+
+        // Verification should fail
+        assert!(adapter.verify_discovery_message(&serialized).is_err());
+    }
+
+    // SECURITY H1: Test that discovery messages with mismatched NodeID are rejected
+    #[test]
+    fn test_reject_discovery_nodeid_mismatch() {
+        myriadmesh_crypto::init().unwrap();
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        let adapter = EthernetAdapter::new_default(identity.clone());
+
+        // Use wrong NodeID (all zeros instead of derived from public key)
+        let wrong_node_id_bytes = [0u8; NODE_ID_SIZE];
+        let public_key_bytes = {
+            let mut bytes = [0u8; PUBLIC_KEY_SIZE];
+            bytes.copy_from_slice(identity.public_key.as_ref());
+            bytes
+        };
+
+        // Sign with wrong node_id
+        let mut signable_data = Vec::with_capacity(NODE_ID_SIZE + PUBLIC_KEY_SIZE);
+        signable_data.extend_from_slice(&wrong_node_id_bytes);
+        signable_data.extend_from_slice(&public_key_bytes);
+
+        let signature = sign_message(&identity, &signable_data).unwrap();
+        let signature_bytes = {
+            let mut bytes = [0u8; SIGNATURE_SIZE];
+            bytes.copy_from_slice(signature.as_bytes());
+            bytes
+        };
+
+        let discovery_msg = DiscoveryMessage {
+            node_id: wrong_node_id_bytes,
+            public_key: public_key_bytes,
+            signature: signature_bytes,
+        };
+
+        let serialized = bincode::serialize(&discovery_msg).unwrap();
+
+        // Verification should fail due to NodeID derivation mismatch
+        assert!(adapter.verify_discovery_message(&serialized).is_err());
+    }
+
+    // SECURITY H1: Test that tampered discovery messages are rejected
+    #[test]
+    fn test_reject_tampered_discovery_message() {
+        myriadmesh_crypto::init().unwrap();
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        let adapter = EthernetAdapter::new_default(identity.clone());
+
+        let node_id_bytes = *adapter.local_node_id.as_bytes();
+        let public_key_bytes = {
+            let mut bytes = [0u8; PUBLIC_KEY_SIZE];
+            bytes.copy_from_slice(identity.public_key.as_ref());
+            bytes
+        };
+
+        // Create valid signed discovery message
+        let mut signable_data = Vec::with_capacity(NODE_ID_SIZE + PUBLIC_KEY_SIZE);
+        signable_data.extend_from_slice(&node_id_bytes);
+        signable_data.extend_from_slice(&public_key_bytes);
+
+        let signature = sign_message(&identity, &signable_data).unwrap();
+        let signature_bytes = {
+            let mut bytes = [0u8; SIGNATURE_SIZE];
+            bytes.copy_from_slice(signature.as_bytes());
+            bytes
+        };
+
+        let discovery_msg = DiscoveryMessage {
+            node_id: node_id_bytes,
+            public_key: public_key_bytes,
+            signature: signature_bytes,
+        };
+
+        let mut serialized = bincode::serialize(&discovery_msg).unwrap();
+
+        // Tamper with the serialized data (modify a byte in the middle)
+        if serialized.len() > 10 {
+            serialized[5] ^= 0xFF;
+        }
+
+        // Verification should fail
+        assert!(adapter.verify_discovery_message(&serialized).is_err());
     }
 }

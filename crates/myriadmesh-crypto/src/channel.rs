@@ -179,11 +179,7 @@ impl EncryptedChannel {
             .map_err(|e| CryptoError::InvalidState(format!("System time error: {}", e)))?
             .as_secs();
 
-        let time_diff = if now > timestamp {
-            now - timestamp
-        } else {
-            timestamp - now
-        };
+        let time_diff = now.abs_diff(timestamp);
 
         if time_diff > MAX_TIME_SKEW_SECS {
             return Err(CryptoError::InvalidState(format!(
@@ -362,9 +358,9 @@ impl EncryptedChannel {
         self.verify_timestamp(response.timestamp)?;
 
         // SECURITY H4: Verify request nonce matches our original request
-        let expected_nonce = self.request_nonce.ok_or_else(|| {
-            CryptoError::InvalidState("No request nonce stored".to_string())
-        })?;
+        let expected_nonce = self
+            .request_nonce
+            .ok_or_else(|| CryptoError::InvalidState("No request nonce stored".to_string()))?;
 
         if response.request_nonce != expected_nonce {
             return Err(CryptoError::InvalidState(
@@ -738,7 +734,9 @@ fn test_replay_request_rejected() {
     // Bob processes it successfully the first time
     let bob_kp = KeyExchangeKeypair::generate();
     let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
-    let kx_response = bob_channel.process_key_exchange_request(&kx_request).unwrap();
+    let kx_response = bob_channel
+        .process_key_exchange_request(&kx_request)
+        .unwrap();
     assert!(kx_response.request_nonce == kx_request.nonce);
 
     // Try to replay the same request to another Bob instance (should fail due to state)
@@ -786,7 +784,10 @@ fn test_old_timestamp_rejected() {
 
     let result = bob_channel.process_key_exchange_request(&old_request);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Timestamp out of acceptable range"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("Timestamp out of acceptable range"));
 }
 
 #[test]
@@ -821,7 +822,10 @@ fn test_future_timestamp_rejected() {
 
     let result = bob_channel.process_key_exchange_request(&future_request);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Timestamp out of acceptable range"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("Timestamp out of acceptable range"));
 }
 
 #[test]

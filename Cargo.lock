@@ -1405,6 +1405,7 @@ dependencies = [
  "myriadmesh-protocol",
  "rand",
  "serde",
+ "serde-big-array",
  "sodiumoxide",
  "thiserror 1.0.69",
  "tokio",
