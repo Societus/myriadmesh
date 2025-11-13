@@ -802,7 +802,7 @@ mod tests {
 
         let service = create_test_service(config, local_node_id);
 
-        let heartbeat = HeartbeatMessage {
+        let mut heartbeat = HeartbeatMessage {
             node_id: remote_node_id,
             timestamp: current_timestamp(),
             adapters: vec![AdapterInfo {
@@ -818,6 +818,9 @@ mod tests {
             geolocation: None,
             signature: Vec::new(),
         };
+
+        // Sign the heartbeat
+        heartbeat.signature = service.sign_heartbeat(&heartbeat).unwrap();
 
         service.handle_heartbeat(heartbeat).await.unwrap();
 
@@ -843,7 +846,7 @@ mod tests {
 
         let service = create_test_service(config, local_node_id);
 
-        let heartbeat = HeartbeatMessage {
+        let mut heartbeat = HeartbeatMessage {
             node_id: remote_node_id,
             timestamp: current_timestamp(),
             adapters: Vec::new(),
@@ -856,6 +859,9 @@ mod tests {
             }),
             signature: Vec::new(),
         };
+
+        // Sign the heartbeat
+        heartbeat.signature = service.sign_heartbeat(&heartbeat).unwrap();
 
         service.handle_heartbeat(heartbeat).await.unwrap();
 
