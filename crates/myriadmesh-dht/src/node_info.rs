@@ -236,7 +236,8 @@ mod tests {
         let node = create_test_node();
         assert_eq!(node.failures, 0);
         assert_eq!(node.total_successes, 0);
-        assert!(node.reputation.is_trustworthy());
+        // SECURITY C7: New nodes start with low reputation, must earn trust
+        assert!(!node.reputation.is_trustworthy());
     }
 
     #[test]
@@ -337,7 +338,8 @@ mod tests {
 
         assert_eq!(public.node_id, node_id);
         assert_eq!(public.capabilities, caps);
-        assert!(public.reputation.is_trustworthy());
+        // SECURITY C7: New nodes start with low reputation, must earn trust
+        assert!(!public.reputation.is_trustworthy());
     }
 
     #[test]
