@@ -293,6 +293,37 @@ impl EncryptedChannel {
         })
     }
 
+    /// Restore channel state from a previously sent key exchange request
+    ///
+    /// SECURITY H4: This allows restoring the request nonce for proper
+    /// replay protection when processing responses to requests we sent earlier.
+    /// Used when recreating a channel from stored request/response pairs.
+    pub fn restore_request_state(
+        &mut self,
+        request: &KeyExchangeRequest,
+        remote_node_id: [u8; NODE_ID_SIZE],
+    ) -> Result<()> {
+        if self.state != ChannelState::Uninitialized {
+            return Err(CryptoError::InvalidState(
+                "Channel already initialized".to_string(),
+            ));
+        }
+
+        // Verify the request is from us
+        if request.from_node_id != self.local_node_id {
+            return Err(CryptoError::InvalidState(
+                "Cannot restore state from request not sent by us".to_string(),
+            ));
+        }
+
+        // Restore state as if we had just sent this request
+        self.remote_node_id = Some(remote_node_id);
+        self.state = ChannelState::KeyExchangeSent;
+        self.request_nonce = Some(request.nonce);
+
+        Ok(())
+    }
+
     /// Process a key exchange request and generate response
     ///
     /// SECURITY H4: Verifies timestamp and nonce for replay protection

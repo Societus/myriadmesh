@@ -98,21 +98,22 @@ impl SecureTokenExchange {
     pub fn decrypt_token(
         &self,
         encrypted_msg: &EncryptedTokenMessage,
-        _kx_request: &KeyExchangeRequest,
+        kx_request: &KeyExchangeRequest,
         kx_response: &KeyExchangeResponse,
     ) -> Result<I2pCapabilityToken, String> {
-        // Create channel and establish it
+        // Create channel
         let mut channel = EncryptedChannel::new(
             *self.identity.get_clearnet_node_id().as_bytes(),
             self.kx_keypair.clone(),
         );
 
-        // Initiate key exchange
-        let _req = channel
-            .create_key_exchange_request(kx_response.from_node_id)
-            .map_err(|e| format!("Failed to create key exchange: {}", e))?;
+        // SECURITY H4: Manually restore channel state from the original request
+        // instead of creating a new request (which would have a different nonce)
+        channel
+            .restore_request_state(kx_request, kx_response.from_node_id)
+            .map_err(|e| format!("Failed to restore request state: {}", e))?;
 
-        // Complete key exchange
+        // Complete key exchange with response
         channel
             .process_key_exchange_response(kx_response)
             .map_err(|e| format!("Failed to process key exchange response: {}", e))?;
@@ -216,7 +217,7 @@ mod tests {
         let alice_dest = I2pDestination::new("alice.b32.i2p".to_string());
         let alice_identity = DualIdentity::generate(alice_dest).unwrap();
         let alice_kx_kp = KeyExchangeKeypair::generate();
-        let mut alice_exchange = SecureTokenExchange::new(alice_identity.clone(), alice_kx_kp);
+        let alice_exchange = SecureTokenExchange::new(alice_identity.clone(), alice_kx_kp);
 
         // Setup Bob
         let bob_dest = I2pDestination::new("bob.b32.i2p".to_string());
@@ -229,14 +230,19 @@ mod tests {
             .create_key_exchange_request(alice_identity.get_clearnet_node_id())
             .unwrap();
 
-        // Alice grants access with encryption
-        let (_token, encrypted) = alice_exchange
-            .grant_access_with_encryption(bob_identity.get_clearnet_node_id(), 30, &kx_request)
-            .unwrap();
-
-        // Alice processes request to get response
+        // Alice processes request and creates response
         let kx_response = alice_exchange
             .process_key_exchange_request(&kx_request)
+            .unwrap();
+
+        // Alice grants Bob access
+        let token = alice_identity
+            .grant_i2p_access(bob_identity.get_clearnet_node_id(), 30)
+            .unwrap();
+
+        // Alice encrypts token for Bob
+        let encrypted = alice_exchange
+            .encrypt_token(&token, &kx_request, &kx_response)
             .unwrap();
 
         // Bob decrypts and stores token

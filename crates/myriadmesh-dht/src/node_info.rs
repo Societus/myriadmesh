@@ -736,7 +736,9 @@ mod tests {
 
         // Private node knows the actual address
         assert_eq!(private_node.adapters.len(), 1);
-        assert!(private_node.adapters[0].address.contains("secretdestination"));
+        assert!(private_node.adapters[0]
+            .address
+            .contains("secretdestination"));
 
         // Public version only has capability flag
         let public_node = private_node.to_public();

@@ -553,7 +553,10 @@ mod tests {
         }
 
         // Should accept MAX_NODES_PER_SUBNET (2), reject the rest
-        assert_eq!(accepted, 2, "Only 2 nodes from same subnet should be accepted");
+        assert_eq!(
+            accepted, 2,
+            "Only 2 nodes from same subnet should be accepted"
+        );
         assert_eq!(rejected, 18, "Remaining 18 should be rejected");
         assert_eq!(bucket.len(), 2);
     }

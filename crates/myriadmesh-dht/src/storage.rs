@@ -72,8 +72,8 @@ impl StorageEntry {
         // For verification, we need to store the actual public key or have it provided
         // For now, we'll assume publisher is the public key itself (32 bytes)
         // NOTE: This may need adjustment based on actual NodeID derivation
-        let public_key = ed25519::PublicKey::from_slice(&self.publisher)
-            .ok_or(DhtError::InvalidPublicKey)?;
+        let public_key =
+            ed25519::PublicKey::from_slice(&self.publisher).ok_or(DhtError::InvalidPublicKey)?;
 
         // Verify signature
         if ed25519::verify_detached(&signature, &message, &public_key) {
@@ -268,7 +268,12 @@ mod tests {
 
     /// Helper to sign a DHT value for testing
     /// Returns signature bytes
-    fn sign_value(key: &[u8; 32], value: &[u8], expires_at: u64, sk: &ed25519::SecretKey) -> [u8; 64] {
+    fn sign_value(
+        key: &[u8; 32],
+        value: &[u8],
+        expires_at: u64,
+        sk: &ed25519::SecretKey,
+    ) -> [u8; 64] {
         // Build message to sign: key || value || expires_at
         let mut message = Vec::new();
         message.extend_from_slice(key);
@@ -305,7 +310,9 @@ mod tests {
         let value = b"test value".to_vec();
         let (publisher, signature) = create_signed_value(key, value.clone(), 3600);
 
-        storage.store(key, value.clone(), 3600, publisher, signature).unwrap();
+        storage
+            .store(key, value.clone(), 3600, publisher, signature)
+            .unwrap();
 
         assert_eq!(storage.key_count(), 1);
         assert!(storage.size() > 0);
@@ -344,11 +351,15 @@ mod tests {
         let value2 = b"second value".to_vec();
 
         let (publisher1, signature1) = create_signed_value(key, value1.clone(), 3600);
-        storage.store(key, value1, 3600, publisher1, signature1).unwrap();
+        storage
+            .store(key, value1, 3600, publisher1, signature1)
+            .unwrap();
         assert_eq!(storage.key_count(), 1);
 
         let (publisher2, signature2) = create_signed_value(key, value2.clone(), 3600);
-        storage.store(key, value2.clone(), 3600, publisher2, signature2).unwrap();
+        storage
+            .store(key, value2.clone(), 3600, publisher2, signature2)
+            .unwrap();
         assert_eq!(storage.key_count(), 1); // Still only 1 entry
 
         let retrieved = storage.get(&key).unwrap();
@@ -362,7 +373,9 @@ mod tests {
         let value = b"test".to_vec();
         let (publisher, signature) = create_signed_value(key, value.clone(), 3600);
 
-        storage.store(key, value, 3600, publisher, signature).unwrap();
+        storage
+            .store(key, value, 3600, publisher, signature)
+            .unwrap();
         assert_eq!(storage.key_count(), 1);
 
         let removed = storage.remove(&key);
@@ -393,13 +406,17 @@ mod tests {
         let key1 = [1u8; 32];
         let value1 = b"expired".to_vec();
         let (publisher1, signature1) = create_signed_value(key1, value1.clone(), 0);
-        storage.store(key1, value1, 0, publisher1, signature1).unwrap();
+        storage
+            .store(key1, value1, 0, publisher1, signature1)
+            .unwrap();
 
         // Add valid entry
         let key2 = [2u8; 32];
         let value2 = b"valid".to_vec();
         let (publisher2, signature2) = create_signed_value(key2, value2.clone(), 3600);
-        storage.store(key2, value2, 3600, publisher2, signature2).unwrap();
+        storage
+            .store(key2, value2, 3600, publisher2, signature2)
+            .unwrap();
 
         assert_eq!(storage.key_count(), 2);
 
@@ -415,7 +432,9 @@ mod tests {
         let value = b"test".to_vec();
         let (publisher, signature) = create_signed_value(key, value.clone(), 3600);
 
-        storage.store(key, value, 3600, publisher, signature).unwrap();
+        storage
+            .store(key, value, 3600, publisher, signature)
+            .unwrap();
         assert_eq!(storage.key_count(), 1);
 
         storage.clear();

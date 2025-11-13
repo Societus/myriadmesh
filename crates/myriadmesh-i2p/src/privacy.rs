@@ -134,11 +134,14 @@ impl PrivacyLayer {
                     5120, 6144, 7168, 8192, // 1KB increments 4-8KB
                     10240, 12288, 14336, 16384, // 2KB increments 8-16KB
                 ];
+
+                // Find the smallest bucket that fits the data and respects min_message_size
+                let min_size = self.config.min_message_size.max(data.len() + 2);
                 let target_size = buckets
                     .iter()
-                    .find(|&&size| size >= data.len() + 2)
+                    .find(|&&size| size >= min_size)
                     .copied()
-                    .unwrap_or(data.len() + 2);
+                    .unwrap_or(min_size);
 
                 if target_size > data.len() + 2 {
                     let padding_needed = target_size - data.len() - 2;
@@ -626,6 +629,7 @@ mod tests {
         // SECURITY H6: Test that granular buckets reduce information leakage
         let config = PrivacyConfig {
             padding_strategy: PaddingStrategy::FixedBuckets,
+            min_message_size: 0, // Test pure bucket behavior without minimum
             ..Default::default()
         };
 

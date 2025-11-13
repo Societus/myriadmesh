@@ -492,9 +492,7 @@ impl HeartbeatService {
         let derived_node_id = NodeId::from_bytes(derived_id_bytes);
 
         if derived_node_id != heartbeat.node_id {
-            bail!(
-                "Public key derivation mismatch: public key does not derive to claimed node_id"
-            );
+            bail!("Public key derivation mismatch: public key does not derive to claimed node_id");
         }
 
         // SECURITY H3: Reconstruct signed message
@@ -1000,7 +998,10 @@ mod tests {
 
         let result = service.handle_heartbeat(heartbeat).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("missing public key"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("missing public key"));
     }
 
     #[tokio::test]
@@ -1026,7 +1027,10 @@ mod tests {
 
         let result = service.handle_heartbeat(heartbeat).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Signature verification failed"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Signature verification failed"));
     }
 
     #[tokio::test]
@@ -1064,7 +1068,10 @@ mod tests {
 
         let result = service.handle_heartbeat(heartbeat).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Public key derivation mismatch"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Public key derivation mismatch"));
     }
 
     #[tokio::test]
@@ -1109,7 +1116,7 @@ mod tests {
             adapter_id: "eth0".to_string(),
             adapter_type: "ethernet".to_string(),
             active: true,
-            is_backhaul: true, // Changed
+            is_backhaul: true,            // Changed
             bandwidth_bps: 1_000_000_000, // Changed
             latency_ms: 10,
             reliability: 0.99,
@@ -1127,7 +1134,10 @@ mod tests {
 
         let result = service.handle_heartbeat(heartbeat).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Signature verification failed"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Signature verification failed"));
     }
 
     #[tokio::test]
