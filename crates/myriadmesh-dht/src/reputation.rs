@@ -142,15 +142,28 @@ impl NodeReputation {
     /// - Penalty for suspicious behavior
     /// - Minimum activity threshold
     /// - Slower reputation growth for new nodes
+    /// SECURITY M4: Faster decay for suspicious/penalized nodes
     fn update_score(&mut self) {
         let current_time = now();
 
-        // SECURITY C7: Apply time decay for inactivity
+        // SECURITY C7 + M4: Apply time decay for inactivity with accelerated decay for suspicious nodes
         let time_since_activity = current_time.saturating_sub(self.last_activity);
-        let decay_factor = if time_since_activity > 86400 {
-            // Decay by 10% per day of inactivity
-            let days_inactive = time_since_activity as f64 / 86400.0;
-            0.9_f64.powf(days_inactive).max(0.1)
+
+        // SECURITY M4: Calculate decay rate based on penalty count
+        // - Normal nodes: 10% per day after 24 hours
+        // - Penalized nodes (1-3 penalties): 20% per day after 12 hours
+        // - Highly suspicious nodes (4+ penalties): 30% per day after 6 hours
+        let (decay_rate, decay_threshold): (f64, u64) = if self.penalty_count >= 4 {
+            (0.7, 6 * 3600) // 30% per day, starts after 6 hours
+        } else if self.penalty_count >= 1 {
+            (0.8, 12 * 3600) // 20% per day, starts after 12 hours
+        } else {
+            (0.9, 86400) // 10% per day, starts after 24 hours
+        };
+
+        let decay_factor = if time_since_activity > decay_threshold {
+            let time_units = time_since_activity as f64 / 86400.0; // Still measure in days
+            decay_rate.powf(time_units).max(0.05) // Min 5% for suspicious nodes
         } else {
             1.0
         };
@@ -180,12 +193,20 @@ impl NodeReputation {
         let age_seconds = current_time.saturating_sub(self.first_seen);
         let age_score = (age_seconds as f64 / (30.0 * 86400.0)).min(1.0);
 
-        // SECURITY C7: Penalty factor - multiplicative reduction
-        // Each penalty reduces score by 10%, multiplicative
+        // SECURITY C7 + M4: Penalty factor - multiplicative reduction with progressive severity
+        // SECURITY M4: More aggressive penalties for highly suspicious nodes
+        // - 1-2 penalties: 10% reduction each (90% retention)
+        // - 3-5 penalties: 15% reduction each (85% retention)
+        // - 6+ penalties: 20% reduction each (80% retention)
         let penalty_factor = if self.penalty_count == 0 {
             1.0
+        } else if self.penalty_count <= 2 {
+            0.9_f64.powf(self.penalty_count as f64).max(0.05)
+        } else if self.penalty_count <= 5 {
+            0.85_f64.powf(self.penalty_count as f64).max(0.05)
         } else {
-            0.9_f64.powf(self.penalty_count as f64).max(0.1)
+            // Severe penalties for highly suspicious nodes
+            0.80_f64.powf(self.penalty_count as f64).max(0.01)
         };
 
         // Weighted average: reliability(50%) + uptime(25%) + age(15%) + base(10%)
@@ -504,5 +525,141 @@ fn test_failure_impact() {
     assert!(
         !rep.is_good_relay(),
         "50% reliability should not be good relay"
+    );
+}
+
+#[test]
+fn test_accelerated_decay_for_penalized_nodes() {
+    // SECURITY M4: Penalized nodes decay faster
+    let mut rep = NodeReputation::new();
+
+    // Build up reputation
+    for _ in 0..200 {
+        rep.record_success();
+    }
+
+    // Apply 2 penalties
+    rep.apply_penalty("Test penalty 1");
+    rep.apply_penalty("Test penalty 2");
+
+    let initial_score = rep.score();
+
+    // Simulate 1 day of inactivity
+    rep.last_activity = now() - 86400;
+    rep.recalculate();
+
+    let decayed_score = rep.score();
+
+    // Penalized nodes should decay faster than normal nodes
+    // Normal: 10% decay per day
+    // Penalized (1-3 penalties): 20% decay per day after only 12 hours
+    assert!(
+        decayed_score < initial_score * 0.9,
+        "Penalized nodes should decay faster than 10%/day"
+    );
+}
+
+#[test]
+fn test_highly_suspicious_node_rapid_decay() {
+    // SECURITY M4: Highly suspicious nodes (4+ penalties) decay very quickly
+    let mut rep = NodeReputation::new();
+
+    // Build up reputation
+    for _ in 0..200 {
+        rep.record_success();
+    }
+
+    // Apply 5 penalties (highly suspicious)
+    for _ in 0..5 {
+        rep.apply_penalty("Suspicious behavior");
+    }
+
+    let initial_score = rep.score();
+
+    // Simulate 1 day of inactivity
+    rep.last_activity = now() - 86400;
+    rep.recalculate();
+
+    let decayed_score = rep.score();
+
+    // Highly suspicious nodes should decay at 30% per day
+    assert!(
+        decayed_score < initial_score * 0.8,
+        "Highly suspicious nodes should decay faster than 20%/day: {} should be < {}",
+        decayed_score,
+        initial_score * 0.8
+    );
+}
+
+#[test]
+fn test_early_decay_threshold_for_penalized_nodes() {
+    // SECURITY M4: Penalized nodes start decaying earlier (12 hours vs 24 hours)
+    let mut rep = NodeReputation::new();
+
+    // Build reputation
+    for _ in 0..200 {
+        rep.record_success();
+    }
+
+    rep.apply_penalty("Test penalty");
+
+    let initial_score = rep.score();
+
+    // Simulate 18 hours of inactivity (between 12 and 24 hours)
+    rep.last_activity = now() - (18 * 3600);
+    rep.recalculate();
+
+    let decayed_score = rep.score();
+
+    // Should have decayed because penalized nodes decay after 12 hours
+    assert!(
+        decayed_score < initial_score,
+        "Penalized nodes should start decaying after 12 hours"
+    );
+}
+
+#[test]
+fn test_progressive_penalty_severity() {
+    // SECURITY M4: Penalties become progressively more severe
+    let mut rep = NodeReputation::new();
+
+    // Build reputation
+    for _ in 0..200 {
+        rep.record_success();
+    }
+
+    let initial_score = rep.score();
+
+    // Apply 2 penalties (should use 90% retention rate)
+    rep.apply_penalty("Penalty 1");
+    rep.apply_penalty("Penalty 2");
+    let score_after_2 = rep.score();
+
+    // Apply 2 more penalties (now at 4, should use 85% retention)
+    rep.apply_penalty("Penalty 3");
+    rep.apply_penalty("Penalty 4");
+    let score_after_4 = rep.score();
+
+    // Apply 3 more penalties (now at 7, should use 80% retention)
+    rep.apply_penalty("Penalty 5");
+    rep.apply_penalty("Penalty 6");
+    rep.apply_penalty("Penalty 7");
+    let score_after_7 = rep.score();
+
+    // Penalties 3-4 should have bigger impact than penalties 1-2
+    let impact_1_2 = initial_score - score_after_2;
+    let impact_3_4 = score_after_2 - score_after_4;
+
+    assert!(
+        impact_3_4 > impact_1_2,
+        "Penalties should become progressively more severe: impact 3-4 ({}) should be > impact 1-2 ({})",
+        impact_3_4,
+        impact_1_2
+    );
+
+    // Final score should be very low
+    assert!(
+        score_after_7 < initial_score * 0.3,
+        "7 penalties should severely reduce reputation"
     );
 }
