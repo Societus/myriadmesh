@@ -10,11 +10,18 @@ use std::fmt;
 
 use crate::error::{CryptoError, Result};
 
-/// Size of a node ID in bytes (32 bytes / 256 bits)
-pub const NODE_ID_SIZE: usize = 32;
+/// Size of a node ID in bytes (64 bytes / 512 bits)
+///
+/// SECURITY C6: Increased from 32 to 64 bytes to prevent birthday collision attacks.
+/// Birthday attack complexity: 2^(n/2) for n-bit hash
+/// - 256-bit: 2^128 ≈ 10^38 operations (potentially feasible for nation-states)
+/// - 512-bit: 2^256 ≈ 10^77 operations (exceeds atoms in universe, quantum-resistant)
+pub const NODE_ID_SIZE: usize = 64;
 
 /// A unique identifier for a node in the MyriadMesh network
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// SECURITY C6: Uses custom serde implementation for 64-byte array support
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId([u8; NODE_ID_SIZE]);
 
 impl NodeId {
@@ -62,6 +69,64 @@ impl fmt::Display for NodeId {
     }
 }
 
+// SECURITY C6: Custom serde implementation for 64-byte arrays
+impl Serialize for NodeId {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_bytes(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for NodeId {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct NodeIdVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for NodeIdVisitor {
+            type Value = NodeId;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str(&format!("a byte array of length {}", NODE_ID_SIZE))
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> std::result::Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if v.len() != NODE_ID_SIZE {
+                    return Err(E::custom(format!(
+                        "Invalid NodeId length: expected {}, got {}",
+                        NODE_ID_SIZE,
+                        v.len()
+                    )));
+                }
+                let mut bytes = [0u8; NODE_ID_SIZE];
+                bytes.copy_from_slice(v);
+                Ok(NodeId(bytes))
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut bytes = [0u8; NODE_ID_SIZE];
+                for i in 0..NODE_ID_SIZE {
+                    bytes[i] = seq
+                        .next_element()?
+                        .ok_or_else(|| serde::de::Error::invalid_length(i, &self))?;
+                }
+                Ok(NodeId(bytes))
+            }
+        }
+
+        deserializer.deserialize_bytes(NodeIdVisitor)
+    }
+}
+
 /// A node's identity including its key pair
 #[derive(Clone)]
 pub struct NodeIdentity {
@@ -86,13 +151,16 @@ impl NodeIdentity {
         })
     }
 
-    /// Derive a node ID from a public key using BLAKE2b-512 truncated to 256 bits
+    /// Derive a node ID from a public key using BLAKE2b-512 (full 512 bits)
+    ///
+    /// SECURITY C6: Uses full 64-byte BLAKE2b-512 output for maximum collision resistance.
+    /// This prevents birthday attacks that could enable identity theft or DHT takeover.
     pub fn derive_node_id(public_key: &ed25519::PublicKey) -> NodeId {
         let mut hasher = Blake2b512::new();
         hasher.update(public_key.as_ref());
         let hash = hasher.finalize();
 
-        // Take first 32 bytes (256 bits) of the hash
+        // SECURITY C6: Use all 64 bytes (512 bits) of the hash for collision resistance
         let mut node_id = [0u8; NODE_ID_SIZE];
         node_id.copy_from_slice(&hash[..NODE_ID_SIZE]);
 

@@ -3,11 +3,16 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Size of a node ID in bytes (32 bytes / 256 bits)
-pub const NODE_ID_SIZE: usize = 32;
+/// Size of a node ID in bytes (64 bytes / 512 bits)
+///
+/// SECURITY C6: Increased from 32 to 64 bytes to prevent birthday collision attacks.
+/// 512-bit NodeIDs provide ~2^256 collision resistance, secure against quantum computers.
+pub const NODE_ID_SIZE: usize = 64;
 
 /// A unique identifier for a node in the MyriadMesh network
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+///
+/// SECURITY C6: Uses custom serde implementation for 64-byte array support
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeId([u8; NODE_ID_SIZE]);
 
 impl NodeId {
@@ -62,6 +67,64 @@ impl fmt::Debug for NodeId {
 impl fmt::Display for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", &self.to_hex()[..16])
+    }
+}
+
+// SECURITY C6: Custom serde implementation for 64-byte arrays
+impl Serialize for NodeId {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_bytes(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for NodeId {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct NodeIdVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for NodeIdVisitor {
+            type Value = NodeId;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str(&format!("a byte array of length {}", NODE_ID_SIZE))
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> std::result::Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if v.len() != NODE_ID_SIZE {
+                    return Err(E::custom(format!(
+                        "Invalid NodeId length: expected {}, got {}",
+                        NODE_ID_SIZE,
+                        v.len()
+                    )));
+                }
+                let mut bytes = [0u8; NODE_ID_SIZE];
+                bytes.copy_from_slice(v);
+                Ok(NodeId(bytes))
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut bytes = [0u8; NODE_ID_SIZE];
+                for i in 0..NODE_ID_SIZE {
+                    bytes[i] = seq
+                        .next_element()?
+                        .ok_or_else(|| serde::de::Error::invalid_length(i, &self))?;
+                }
+                Ok(NodeId(bytes))
+            }
+        }
+
+        deserializer.deserialize_bytes(NodeIdVisitor)
     }
 }
 

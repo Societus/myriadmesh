@@ -3,7 +3,7 @@
 //! Frames are the on-wire representation of messages, following the MyriadMesh
 //! Protocol Specification (docs/protocol/specification.md).
 //!
-//! Frame Structure (99-byte header + payload + 64-byte signature):
+//! Frame Structure (163-byte header + payload + 64-byte signature):
 //! - Magic (4 bytes): 0x4D594D53 ("MYMS")
 //! - Version (1 byte): Protocol version (0x01)
 //! - Flags (1 byte): Message flags bitfield
@@ -12,8 +12,8 @@
 //! - TTL (1 byte): Time-to-live (hop count)
 //! - Payload Length (2 bytes): Length of payload (big-endian)
 //! - Message ID (16 bytes): Unique message identifier
-//! - Source Node ID (32 bytes): Sender's node ID
-//! - Dest Node ID (32 bytes): Recipient's node ID
+//! - Source Node ID (64 bytes): Sender's node ID (SECURITY C6: increased for collision resistance)
+//! - Dest Node ID (64 bytes): Recipient's node ID (SECURITY C6: increased for collision resistance)
 //! - Timestamp (8 bytes): Unix timestamp in milliseconds (big-endian)
 //! - Payload (variable): Encrypted message payload
 //! - Signature (64 bytes): Ed25519 signature of header+payload
@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{ProtocolError, Result};
 use crate::message::{Message, MessageId, MessageType};
-use crate::types::{NodeId, Priority};
+use crate::types::{NodeId, Priority, NODE_ID_SIZE};
 
 /// Protocol version
 pub const PROTOCOL_VERSION: u8 = 1;
@@ -30,9 +30,11 @@ pub const PROTOCOL_VERSION: u8 = 1;
 /// Magic bytes to identify MyriadMesh frames: "MYMS"
 pub const MAGIC_BYTES: [u8; 4] = [0x4D, 0x59, 0x4D, 0x53];
 
-/// Total header size: 4 + 1 + 1 + 1 + 1 + 1 + 2 + 16 + 32 + 32 + 8 = 99 bytes
-/// (Note: specification.md incorrectly states 162 bytes)
-pub const HEADER_SIZE: usize = 99;
+/// Total header size: 4 + 1 + 1 + 1 + 1 + 1 + 2 + 16 + 64 + 64 + 8 = 163 bytes
+///
+/// SECURITY C6: Increased from 99 to 163 bytes due to NodeID expansion (32→64 bytes each)
+/// for collision resistance against birthday attacks.
+pub const HEADER_SIZE: usize = 163;
 
 /// Signature size (64 bytes for Ed25519)
 pub const SIGNATURE_SIZE: usize = 64;
@@ -279,17 +281,17 @@ impl FrameHeader {
         let message_id = MessageId::from_bytes(message_id_bytes);
         offset += 16;
 
-        // Source Node ID (32 bytes)
-        let mut source_bytes = [0u8; 32];
-        source_bytes.copy_from_slice(&bytes[offset..offset + 32]);
+        // SECURITY C6: Source Node ID (64 bytes for collision resistance)
+        let mut source_bytes = [0u8; NODE_ID_SIZE];
+        source_bytes.copy_from_slice(&bytes[offset..offset + NODE_ID_SIZE]);
         let source = NodeId::from_bytes(source_bytes);
-        offset += 32;
+        offset += NODE_ID_SIZE;
 
-        // Destination Node ID (32 bytes)
-        let mut dest_bytes = [0u8; 32];
-        dest_bytes.copy_from_slice(&bytes[offset..offset + 32]);
+        // SECURITY C6: Destination Node ID (64 bytes for collision resistance)
+        let mut dest_bytes = [0u8; NODE_ID_SIZE];
+        dest_bytes.copy_from_slice(&bytes[offset..offset + NODE_ID_SIZE]);
         let destination = NodeId::from_bytes(dest_bytes);
-        offset += 32;
+        offset += NODE_ID_SIZE;
 
         // Timestamp (8 bytes, big-endian)
         let timestamp = u64::from_be_bytes([
