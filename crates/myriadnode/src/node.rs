@@ -95,7 +95,13 @@ impl Node {
 
         // Initialize API server if enabled
         let api_server = if config.api.enabled {
-            let server = ApiServer::new(config.api.clone()).await?;
+            let server = ApiServer::new(
+                config.api.clone(),
+                Arc::clone(&adapter_manager),
+                hex::encode(&config.node.id),
+                config.node.name.clone(),
+            )
+            .await?;
             info!("✓ API server initialized on {}:{}", config.api.bind, config.api.port);
             Some(server)
         } else {
