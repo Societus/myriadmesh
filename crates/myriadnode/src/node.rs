@@ -16,7 +16,6 @@ use crate::storage::Storage;
 use myriadmesh_crypto::identity::NodeIdentity;
 use myriadmesh_dht::routing_table::RoutingTable;
 use myriadmesh_network::{adapters::*, AdapterManager, NetworkAdapter};
-use myriadmesh_protocol::NodeId;
 use myriadmesh_routing::PriorityQueue;
 use std::collections::HashMap;
 use std::fs;
@@ -24,6 +23,7 @@ use std::fs;
 /// Main node orchestrator
 pub struct Node {
     config: Config,
+    identity: Arc<NodeIdentity>, // SECURITY C3: Node identity for adapter authentication
     storage: Arc<RwLock<Storage>>,
     adapter_manager: Arc<RwLock<AdapterManager>>,
     #[allow(dead_code)]
@@ -184,6 +184,7 @@ impl Node {
 
         Ok(Self {
             config,
+            identity,
             storage,
             adapter_manager,
             message_queue,
@@ -308,17 +309,8 @@ impl Node {
     async fn initialize_ethernet_adapter(&mut self) -> Result<()> {
         let config = EthernetConfig::default();
 
-        // Get NodeId for the adapter
-        let node_id_bytes: [u8; 32] = self
-            .config
-            .node
-            .id
-            .as_slice()
-            .try_into()
-            .expect("Node ID must be 32 bytes");
-        let node_id = NodeId::from_bytes(node_id_bytes);
-
-        let mut adapter = EthernetAdapter::new(node_id, config);
+        // SECURITY C3: Pass identity for authenticated UDP
+        let mut adapter = EthernetAdapter::new(Arc::clone(&self.identity), config);
 
         adapter.initialize().await?;
 
