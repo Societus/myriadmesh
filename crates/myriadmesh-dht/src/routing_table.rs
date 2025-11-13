@@ -75,10 +75,22 @@ impl RoutingTable {
     }
 
     /// Add or update a node in the routing table
+    ///
+    /// SECURITY C2: Verifies Proof-of-Work before admitting nodes to prevent Sybil attacks
     pub fn add_or_update(&mut self, node: NodeInfo) -> Result<()> {
         // Don't add ourselves
         if node.node_id == self.local_node_id {
             return Ok(());
+        }
+
+        // SECURITY C2: Verify Proof-of-Work to prevent Sybil attacks
+        if !node.verify_pow() {
+            return Err(crate::error::DhtError::InvalidProofOfWork(format!(
+                "Node {} has invalid PoW nonce {}",
+                hex::encode(node.node_id.as_bytes()),
+                node.pow_nonce
+            ))
+            .into());
         }
 
         let bucket_idx = self.bucket_index(&node.node_id);
@@ -235,7 +247,10 @@ mod tests {
     use super::*;
 
     fn create_test_node(id: u8) -> NodeInfo {
-        NodeInfo::new(NodeId::from_bytes([id; 32]))
+        let mut node = NodeInfo::new(NodeId::from_bytes([id; 32]));
+        // SECURITY C2: Compute valid PoW for test nodes
+        node.compute_pow();
+        node
     }
 
     #[test]
@@ -352,5 +367,66 @@ mod tests {
         let pruned = table.prune_stale(3600);
         assert_eq!(pruned, 1);
         assert_eq!(table.node_count(), 1);
+    }
+
+    // SECURITY C2: Proof-of-Work enforcement tests
+
+    #[test]
+    fn test_reject_node_without_valid_pow() {
+        // SECURITY C2: Verify routing table rejects nodes without valid PoW
+        let local_id = NodeId::from_bytes([0; 32]);
+        let mut table = RoutingTable::new(local_id);
+
+        // Create node with invalid PoW
+        let mut invalid_node = NodeInfo::new(NodeId::from_bytes([42; 32]));
+        invalid_node.pow_nonce = 12345; // Arbitrary invalid nonce
+
+        // Should be rejected
+        let result = table.add_or_update(invalid_node);
+        assert!(result.is_err());
+        assert_eq!(table.node_count(), 0);
+    }
+
+    #[test]
+    fn test_accept_node_with_valid_pow() {
+        // SECURITY C2: Verify routing table accepts nodes with valid PoW
+        let local_id = NodeId::from_bytes([0; 32]);
+        let mut table = RoutingTable::new(local_id);
+
+        // Create node and compute valid PoW
+        let valid_node = create_test_node(99);
+
+        // Should be accepted
+        let result = table.add_or_update(valid_node);
+        assert!(result.is_ok());
+        assert_eq!(table.node_count(), 1);
+    }
+
+    #[test]
+    fn test_pow_prevents_sybil_flooding() {
+        // SECURITY C2: PoW makes it expensive to flood DHT with many identities
+        let local_id = NodeId::from_bytes([0; 32]);
+        let mut table = RoutingTable::new(local_id);
+
+        // Try to add 10 nodes with invalid PoW (should all fail)
+        for i in 1..=10 {
+            let mut invalid_node = NodeInfo::new(NodeId::from_bytes([i; 32]));
+            invalid_node.pow_nonce = i as u64 * 1000; // Invalid nonces
+
+            let result = table.add_or_update(invalid_node);
+            assert!(result.is_err(), "Node {} with invalid PoW should be rejected", i);
+        }
+
+        // No nodes should have been added
+        assert_eq!(table.node_count(), 0);
+
+        // Now add legitimate nodes with valid PoW
+        for i in 1..=3 {
+            let valid_node = create_test_node(i);
+            table.add_or_update(valid_node).unwrap();
+        }
+
+        // Only legitimate nodes added
+        assert_eq!(table.node_count(), 3);
     }
 }
