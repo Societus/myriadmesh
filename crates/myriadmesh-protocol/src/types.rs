@@ -65,32 +65,119 @@ impl fmt::Display for NodeId {
     }
 }
 
-/// Priority level for message routing
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
-#[repr(u8)]
-pub enum Priority {
-    Low = 0,
-    #[default]
-    Normal = 1,
-    High = 2,
-    Urgent = 3,
-}
+/// Priority level for message routing (0-255)
+///
+/// Per specification.md:109-116:
+/// - 0-63: BACKGROUND
+/// - 64-127: LOW
+/// - 128-191: NORMAL
+/// - 192-223: HIGH
+/// - 224-255: EMERGENCY
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Priority(u8);
 
 impl Priority {
-    /// Create priority from u8
-    pub fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(Priority::Low),
-            1 => Some(Priority::Normal),
-            2 => Some(Priority::High),
-            3 => Some(Priority::Urgent),
-            _ => None,
-        }
+    /// Background priority (0-63)
+    pub const BACKGROUND_MIN: u8 = 0;
+    pub const BACKGROUND_MAX: u8 = 63;
+
+    /// Low priority (64-127)
+    pub const LOW_MIN: u8 = 64;
+    pub const LOW_MAX: u8 = 127;
+
+    /// Normal priority (128-191)
+    pub const NORMAL_MIN: u8 = 128;
+    pub const NORMAL_MAX: u8 = 191;
+
+    /// High priority (192-223)
+    pub const HIGH_MIN: u8 = 192;
+    pub const HIGH_MAX: u8 = 223;
+
+    /// Emergency priority (224-255)
+    pub const EMERGENCY_MIN: u8 = 224;
+    pub const EMERGENCY_MAX: u8 = 255;
+
+    /// Create priority from u8 (any value 0-255 is valid)
+    pub fn from_u8(value: u8) -> Self {
+        Priority(value)
     }
 
     /// Convert to u8
-    pub fn to_u8(self) -> u8 {
-        self as u8
+    pub fn as_u8(&self) -> u8 {
+        self.0
+    }
+
+    /// Create background priority (default: 32)
+    pub fn background() -> Self {
+        Priority(32)
+    }
+
+    /// Create low priority (default: 96)
+    pub fn low() -> Self {
+        Priority(96)
+    }
+
+    /// Create normal priority (default: 160)
+    pub fn normal() -> Self {
+        Priority(160)
+    }
+
+    /// Create high priority (default: 208)
+    pub fn high() -> Self {
+        Priority(208)
+    }
+
+    /// Create emergency priority (default: 240)
+    pub fn emergency() -> Self {
+        Priority(240)
+    }
+
+    /// Check if priority is in background range
+    pub fn is_background(&self) -> bool {
+        self.0 >= Self::BACKGROUND_MIN && self.0 <= Self::BACKGROUND_MAX
+    }
+
+    /// Check if priority is in low range
+    pub fn is_low(&self) -> bool {
+        self.0 >= Self::LOW_MIN && self.0 <= Self::LOW_MAX
+    }
+
+    /// Check if priority is in normal range
+    pub fn is_normal(&self) -> bool {
+        self.0 >= Self::NORMAL_MIN && self.0 <= Self::NORMAL_MAX
+    }
+
+    /// Check if priority is in high range
+    pub fn is_high(&self) -> bool {
+        self.0 >= Self::HIGH_MIN && self.0 <= Self::HIGH_MAX
+    }
+
+    /// Check if priority is in emergency range
+    pub fn is_emergency(&self) -> bool {
+        self.0 >= Self::EMERGENCY_MIN && self.0 <= Self::EMERGENCY_MAX
+    }
+
+    /// Get human-readable priority level
+    pub fn level_name(&self) -> &'static str {
+        match self.0 {
+            Self::BACKGROUND_MIN..=Self::BACKGROUND_MAX => "BACKGROUND",
+            Self::LOW_MIN..=Self::LOW_MAX => "LOW",
+            Self::NORMAL_MIN..=Self::NORMAL_MAX => "NORMAL",
+            Self::HIGH_MIN..=Self::HIGH_MAX => "HIGH",
+            Self::EMERGENCY_MIN..=Self::EMERGENCY_MAX => "EMERGENCY",
+        }
+    }
+}
+
+impl Default for Priority {
+    fn default() -> Self {
+        Priority::normal()
+    }
+}
+
+impl fmt::Display for Priority {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({})", self.level_name(), self.0)
     }
 }
 
@@ -207,15 +294,72 @@ mod tests {
     }
 
     #[test]
-    fn test_priority_conversion() {
-        assert_eq!(Priority::from_u8(0), Some(Priority::Low));
-        assert_eq!(Priority::from_u8(1), Some(Priority::Normal));
-        assert_eq!(Priority::from_u8(2), Some(Priority::High));
-        assert_eq!(Priority::from_u8(3), Some(Priority::Urgent));
-        assert_eq!(Priority::from_u8(4), None);
+    fn test_priority_ranges() {
+        let bg = Priority::background();
+        assert!(bg.is_background());
+        assert_eq!(bg.level_name(), "BACKGROUND");
 
-        assert_eq!(Priority::Low.to_u8(), 0);
-        assert_eq!(Priority::Normal.to_u8(), 1);
+        let low = Priority::low();
+        assert!(low.is_low());
+        assert_eq!(low.level_name(), "LOW");
+
+        let normal = Priority::normal();
+        assert!(normal.is_normal());
+        assert_eq!(normal.level_name(), "NORMAL");
+
+        let high = Priority::high();
+        assert!(high.is_high());
+        assert_eq!(high.level_name(), "HIGH");
+
+        let emergency = Priority::emergency();
+        assert!(emergency.is_emergency());
+        assert_eq!(emergency.level_name(), "EMERGENCY");
+    }
+
+    #[test]
+    fn test_priority_conversion() {
+        assert_eq!(Priority::from_u8(0).as_u8(), 0);
+        assert_eq!(Priority::from_u8(128).as_u8(), 128);
+        assert_eq!(Priority::from_u8(255).as_u8(), 255);
+
+        assert_eq!(Priority::background().as_u8(), 32);
+        assert_eq!(Priority::normal().as_u8(), 160);
+    }
+
+    #[test]
+    fn test_priority_ordering() {
+        let bg = Priority::background();
+        let low = Priority::low();
+        let normal = Priority::normal();
+        let high = Priority::high();
+        let emergency = Priority::emergency();
+
+        assert!(bg < low);
+        assert!(low < normal);
+        assert!(normal < high);
+        assert!(high < emergency);
+    }
+
+    #[test]
+    fn test_priority_default() {
+        let default = Priority::default();
+        assert!(default.is_normal());
+        assert_eq!(default, Priority::normal());
+    }
+
+    #[test]
+    fn test_priority_boundary_cases() {
+        // Test boundaries
+        assert!(Priority::from_u8(0).is_background());
+        assert!(Priority::from_u8(63).is_background());
+        assert!(Priority::from_u8(64).is_low());
+        assert!(Priority::from_u8(127).is_low());
+        assert!(Priority::from_u8(128).is_normal());
+        assert!(Priority::from_u8(191).is_normal());
+        assert!(Priority::from_u8(192).is_high());
+        assert!(Priority::from_u8(223).is_high());
+        assert!(Priority::from_u8(224).is_emergency());
+        assert!(Priority::from_u8(255).is_emergency());
     }
 
     #[test]
