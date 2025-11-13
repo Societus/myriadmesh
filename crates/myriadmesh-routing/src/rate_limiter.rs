@@ -151,9 +151,10 @@ impl std::error::Error for RateLimitError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use myriadmesh_protocol::types::NODE_ID_SIZE;
 
     fn create_test_node_id(byte: u8) -> NodeId {
-        NodeId::from_bytes([byte; 32])
+        NodeId::from_bytes([byte; NODE_ID_SIZE])
     }
 
     #[test]

@@ -4,12 +4,16 @@
 //! - Unicast messaging
 //! - Multicast peer discovery
 //! - IPv4 and IPv6 support
+//! - SECURITY C3: Authenticated UDP frames with Ed25519 signatures
 
 use crate::adapter::{AdapterStatus, NetworkAdapter, PeerInfo, TestResults};
 use crate::error::{NetworkError, Result};
 use crate::types::{AdapterCapabilities, Address, PowerConsumption};
-use myriadmesh_protocol::types::AdapterType;
+use myriadmesh_crypto::identity::NodeIdentity;
+use myriadmesh_crypto::signing::{sign_message, verify_signature};
+use myriadmesh_protocol::types::{AdapterType, NODE_ID_SIZE};
 use myriadmesh_protocol::{Frame, Message, MessageType, NodeId};
+use sodiumoxide::crypto::sign::ed25519;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,6 +30,15 @@ pub const MULTICAST_PORT: u16 = 4002;
 
 /// Maximum UDP packet size (typical MTU minus headers)
 pub const MAX_UDP_SIZE: usize = 1400;
+
+/// SECURITY C3: Size of Ed25519 public key (32 bytes)
+const PUBLIC_KEY_SIZE: usize = 32;
+
+/// SECURITY C3: Size of Ed25519 signature (64 bytes)
+const SIGNATURE_SIZE: usize = 64;
+
+/// SECURITY C3: Overhead for authenticated UDP packet (public key + signature)
+const AUTH_OVERHEAD: usize = PUBLIC_KEY_SIZE + SIGNATURE_SIZE;
 
 /// Ethernet/UDP adapter configuration
 #[derive(Debug, Clone)]
@@ -73,6 +86,9 @@ pub struct EthernetAdapter {
     /// Local NodeId
     local_node_id: NodeId,
 
+    /// SECURITY C3: Node identity for signing UDP packets
+    identity: Arc<NodeIdentity>,
+
     /// UDP socket for messaging
     socket: Arc<Mutex<Option<TokioUdpSocket>>>,
 
@@ -90,11 +106,15 @@ pub struct EthernetAdapter {
 }
 
 impl EthernetAdapter {
-    /// Create new Ethernet adapter
-    pub fn new(local_node_id: NodeId, config: EthernetConfig) -> Self {
+    /// SECURITY C3: Create new Ethernet adapter with authenticated UDP
+    ///
+    /// Requires a NodeIdentity for signing outgoing frames and verifying incoming frames.
+    pub fn new(identity: Arc<NodeIdentity>, config: EthernetConfig) -> Self {
+        let local_node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
+
         let capabilities = AdapterCapabilities {
             adapter_type: AdapterType::Ethernet,
-            max_message_size: MAX_UDP_SIZE,
+            max_message_size: MAX_UDP_SIZE - AUTH_OVERHEAD, // Account for auth overhead
             typical_latency_ms: 5.0,
             typical_bandwidth_bps: 100_000_000, // 100 Mbps
             reliability: 0.99,
@@ -109,6 +129,7 @@ impl EthernetAdapter {
             status: Arc::new(RwLock::new(AdapterStatus::Uninitialized)),
             config,
             local_node_id,
+            identity,
             socket: Arc::new(Mutex::new(None)),
             multicast_socket: Arc::new(Mutex::new(None)),
             local_addr: Arc::new(RwLock::new(None)),
@@ -118,13 +139,77 @@ impl EthernetAdapter {
     }
 
     /// Create with default configuration
-    pub fn new_default(local_node_id: NodeId) -> Self {
-        Self::new(local_node_id, EthernetConfig::default())
+    pub fn new_default(identity: Arc<NodeIdentity>) -> Self {
+        Self::new(identity, EthernetConfig::default())
     }
 
     /// Get local socket address
     pub fn local_address(&self) -> Option<SocketAddr> {
         *self.local_addr.try_read().ok()?
+    }
+
+    /// SECURITY C3: Create authenticated UDP packet
+    ///
+    /// Format: [public_key: 32 bytes][frame_data][signature: 64 bytes]
+    fn create_authenticated_packet(&self, frame_data: &[u8]) -> Result<Vec<u8>> {
+        // Calculate total size
+        let total_size = PUBLIC_KEY_SIZE + frame_data.len() + SIGNATURE_SIZE;
+        let mut packet = Vec::with_capacity(total_size);
+
+        // Add public key
+        packet.extend_from_slice(self.identity.public_key.as_ref());
+
+        // Add frame data
+        packet.extend_from_slice(frame_data);
+
+        // Sign: public_key + frame_data
+        let signable_data = &packet[..PUBLIC_KEY_SIZE + frame_data.len()];
+        let signature = sign_message(&self.identity, signable_data)
+            .map_err(|e| NetworkError::SendFailed(format!("Failed to sign packet: {}", e)))?;
+
+        // Add signature
+        packet.extend_from_slice(signature.as_bytes());
+
+        Ok(packet)
+    }
+
+    /// SECURITY C3: Verify and extract frame from authenticated UDP packet
+    ///
+    /// Returns: (source_public_key, frame_data)
+    fn verify_authenticated_packet(&self, packet: &[u8]) -> Result<(ed25519::PublicKey, Vec<u8>)> {
+        // Check minimum size
+        if packet.len() < PUBLIC_KEY_SIZE + SIGNATURE_SIZE {
+            return Err(NetworkError::ReceiveFailed(
+                "Packet too small for authentication".to_string(),
+            ));
+        }
+
+        // Extract components
+        let public_key_bytes = &packet[..PUBLIC_KEY_SIZE];
+        let signature_offset = packet.len() - SIGNATURE_SIZE;
+        let frame_data = &packet[PUBLIC_KEY_SIZE..signature_offset];
+        let signature_bytes = &packet[signature_offset..];
+
+        // Parse public key
+        let public_key = ed25519::PublicKey::from_slice(public_key_bytes).ok_or_else(|| {
+            NetworkError::ReceiveFailed("Invalid public key in packet".to_string())
+        })?;
+
+        // Parse signature
+        let mut sig_array = [0u8; SIGNATURE_SIZE];
+        sig_array.copy_from_slice(signature_bytes);
+        let signature = myriadmesh_crypto::signing::Signature::from_bytes(sig_array);
+
+        // Verify signature over public_key + frame_data
+        let signable_data = &packet[..signature_offset];
+        verify_signature(&public_key, signable_data, &signature).map_err(|e| {
+            NetworkError::ReceiveFailed(format!("Signature verification failed: {}", e))
+        })?;
+
+        // Verify that public key matches claimed source NodeId in frame
+        // (This will be done after deserializing the frame)
+
+        Ok((public_key, frame_data.to_vec()))
     }
 
     /// Setup multicast socket for peer discovery
@@ -211,8 +296,8 @@ impl EthernetAdapter {
                     if let Ok(message) = std::str::from_utf8(&buf[..size]) {
                         if let Some(node_id_hex) = message.strip_prefix("MYRIADMESH_DISCOVER:") {
                             if let Ok(node_id_bytes) = hex::decode(node_id_hex) {
-                                if node_id_bytes.len() == 32 {
-                                    let mut bytes = [0u8; 32];
+                                if node_id_bytes.len() == NODE_ID_SIZE {
+                                    let mut bytes = [0u8; NODE_ID_SIZE];
                                     bytes.copy_from_slice(&node_id_bytes);
                                     let node_id = NodeId::from_bytes(bytes);
 
@@ -327,19 +412,22 @@ impl NetworkAdapter for EthernetAdapter {
         };
 
         // Serialize frame
-        let data = bincode::serialize(frame)
+        let frame_data = bincode::serialize(frame)
             .map_err(|e| NetworkError::SendFailed(format!("Failed to serialize frame: {}", e)))?;
 
-        if data.len() > MAX_UDP_SIZE {
+        // SECURITY C3: Create authenticated packet
+        let authenticated_packet = self.create_authenticated_packet(&frame_data)?;
+
+        if authenticated_packet.len() > MAX_UDP_SIZE {
             return Err(NetworkError::MessageTooLarge {
-                size: data.len(),
+                size: authenticated_packet.len(),
                 max: MAX_UDP_SIZE,
             });
         }
 
-        // Send UDP packet
+        // Send authenticated UDP packet
         socket
-            .send_to(&data, dest_addr)
+            .send_to(&authenticated_packet, dest_addr)
             .await
             .map_err(|e| NetworkError::SendFailed(format!("UDP send failed: {}", e)))?;
 
@@ -362,10 +450,22 @@ impl NetworkAdapter for EthernetAdapter {
         .map_err(|_| NetworkError::ReceiveFailed("Receive timeout".to_string()))?
         .map_err(|e| NetworkError::ReceiveFailed(format!("UDP receive failed: {}", e)))?;
 
+        // SECURITY C3: Verify authenticated packet
+        let (source_public_key, frame_data) = self.verify_authenticated_packet(&buf[..size])?;
+
         // Deserialize frame
-        let frame: Frame = bincode::deserialize(&buf[..size]).map_err(|e| {
+        let frame: Frame = bincode::deserialize(&frame_data).map_err(|e| {
             NetworkError::ReceiveFailed(format!("Failed to deserialize frame: {}", e))
         })?;
+
+        // SECURITY C3: Verify that public key matches frame's source NodeId
+        let claimed_node_id = NodeIdentity::derive_node_id(&source_public_key);
+        let frame_source_id_bytes = frame.header.source.as_bytes();
+        if claimed_node_id.as_bytes() != frame_source_id_bytes {
+            return Err(NetworkError::ReceiveFailed(
+                "Source public key does not match frame source NodeId".to_string(),
+            ));
+        }
 
         let source_address = Address::Ethernet(source_addr.to_string());
 
@@ -476,21 +576,27 @@ mod tests {
 
     #[test]
     fn test_ethernet_adapter_creation() {
-        let node_id = NodeId::from_bytes([1u8; 32]);
-        let adapter = EthernetAdapter::new_default(node_id);
+        myriadmesh_crypto::init().unwrap();
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        let adapter = EthernetAdapter::new_default(identity);
 
         assert_eq!(adapter.get_status(), AdapterStatus::Uninitialized);
         assert_eq!(
             adapter.get_capabilities().adapter_type,
             AdapterType::Ethernet
         );
-        assert_eq!(adapter.get_capabilities().max_message_size, MAX_UDP_SIZE);
+        // SECURITY C3: Max size reduced by authentication overhead
+        assert_eq!(
+            adapter.get_capabilities().max_message_size,
+            MAX_UDP_SIZE - AUTH_OVERHEAD
+        );
     }
 
     #[test]
     fn test_parse_address() {
-        let node_id = NodeId::from_bytes([1u8; 32]);
-        let adapter = EthernetAdapter::new_default(node_id);
+        myriadmesh_crypto::init().unwrap();
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        let adapter = EthernetAdapter::new_default(identity);
 
         let result = adapter.parse_address("192.168.1.1:4001");
         assert!(result.is_ok());
@@ -501,11 +607,78 @@ mod tests {
 
     #[test]
     fn test_supports_address() {
-        let node_id = NodeId::from_bytes([1u8; 32]);
-        let adapter = EthernetAdapter::new_default(node_id);
+        myriadmesh_crypto::init().unwrap();
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        let adapter = EthernetAdapter::new_default(identity);
 
         assert!(adapter.supports_address(&Address::Ethernet("192.168.1.1:4001".to_string())));
         assert!(!adapter.supports_address(&Address::Bluetooth("00:11:22:33:44:55".to_string())));
         assert!(!adapter.supports_address(&Address::I2P("test.i2p".to_string())));
+    }
+
+    // SECURITY C3: Test authenticated packet creation and verification
+    #[test]
+    fn test_authenticated_packet() {
+        myriadmesh_crypto::init().unwrap();
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        let adapter = EthernetAdapter::new_default(identity.clone());
+
+        let frame_data = b"test frame data";
+
+        // Create authenticated packet
+        let packet = adapter.create_authenticated_packet(frame_data).unwrap();
+
+        // Verify it has the correct size
+        assert_eq!(
+            packet.len(),
+            PUBLIC_KEY_SIZE + frame_data.len() + SIGNATURE_SIZE
+        );
+
+        // Verify the packet
+        let (recovered_public_key, recovered_data) =
+            adapter.verify_authenticated_packet(&packet).unwrap();
+
+        // Check that data matches
+        assert_eq!(recovered_data, frame_data);
+
+        // Check that public key matches
+        assert_eq!(recovered_public_key.as_ref(), identity.public_key.as_ref());
+    }
+
+    // SECURITY C3: Test that tampered packets are rejected
+    #[test]
+    fn test_reject_tampered_packet() {
+        myriadmesh_crypto::init().unwrap();
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        let adapter = EthernetAdapter::new_default(identity);
+
+        let frame_data = b"test frame data";
+        let mut packet = adapter.create_authenticated_packet(frame_data).unwrap();
+
+        // Tamper with the data
+        if packet.len() > PUBLIC_KEY_SIZE + 10 {
+            packet[PUBLIC_KEY_SIZE + 5] ^= 0xFF;
+        }
+
+        // Verification should fail
+        assert!(adapter.verify_authenticated_packet(&packet).is_err());
+    }
+
+    // SECURITY C3: Test that packets with wrong signature are rejected
+    #[test]
+    fn test_reject_wrong_signature() {
+        myriadmesh_crypto::init().unwrap();
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        let adapter = EthernetAdapter::new_default(identity);
+
+        let frame_data = b"test frame data";
+        let mut packet = adapter.create_authenticated_packet(frame_data).unwrap();
+
+        // Corrupt the signature (last 64 bytes)
+        let sig_start = packet.len() - SIGNATURE_SIZE;
+        packet[sig_start] ^= 0xFF;
+
+        // Verification should fail
+        assert!(adapter.verify_authenticated_packet(&packet).is_err());
     }
 }

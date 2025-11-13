@@ -6,7 +6,10 @@
 use crate::adapter::{AdapterStatus, NetworkAdapter, PeerInfo, TestResults};
 use crate::error::{NetworkError, Result};
 use crate::types::{AdapterCapabilities, Address, PowerConsumption};
-use myriadmesh_protocol::{types::AdapterType, Frame, NodeId};
+use myriadmesh_protocol::{
+    types::{AdapterType, NODE_ID_SIZE},
+    Frame, NodeId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -237,7 +240,7 @@ impl NetworkAdapter for BluetoothAdapter {
             .values()
             .filter(|p| now - p.last_seen < 300) // Only peers seen in last 5 minutes
             .map(|p| PeerInfo {
-                node_id: NodeId::from_bytes([0u8; 32]), // TODO: Get actual node ID
+                node_id: NodeId::from_bytes([0u8; NODE_ID_SIZE]), // TODO: Get actual node ID
                 address: Address::Bluetooth(p.address.clone()),
             })
             .collect())

@@ -26,5 +26,9 @@ rand.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 
+# Async runtime (SECURITY C5: For timing obfuscation)
+tokio.workspace = true
+async-trait = "0.1"
+
 # Time handling
 [dev-dependencies]

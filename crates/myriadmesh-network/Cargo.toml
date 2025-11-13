@@ -11,6 +11,9 @@ repository.workspace = true
 myriadmesh-protocol = { path = "../myriadmesh-protocol" }
 myriadmesh-crypto = { path = "../myriadmesh-crypto" }
 
+# Cryptography (SECURITY C3: For Ed25519 signature verification)
+sodiumoxide.workspace = true
+
 # Serialization
 serde.workspace = true
 bincode.workspace = true

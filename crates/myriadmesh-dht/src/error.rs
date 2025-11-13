@@ -35,6 +35,9 @@ pub enum DhtError {
     #[error("Bucket full")]
     BucketFull,
 
+    #[error("Invalid Proof-of-Work: {0}")]
+    InvalidProofOfWork(String),
+
     #[error("Protocol error: {0}")]
     Protocol(#[from] myriadmesh_protocol::ProtocolError),
 

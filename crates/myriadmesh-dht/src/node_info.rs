@@ -1,11 +1,18 @@
 //! Node information for DHT routing table
+//!
+//! SECURITY C2: Implements Proof-of-Work for Sybil resistance
 
-use myriadmesh_protocol::types::AdapterType;
+use blake2::{Blake2b512, Digest};
+use myriadmesh_protocol::types::{AdapterType, NODE_ID_SIZE};
 use myriadmesh_protocol::NodeId as ProtocolNodeId;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::reputation::NodeReputation;
+
+/// SECURITY C2: Required PoW difficulty (leading zero bits)
+/// 16 bits = ~65k hash attempts average, good balance of cost vs usability
+pub const REQUIRED_POW_DIFFICULTY: u32 = 16;
 
 /// Get current timestamp
 fn now() -> u64 {
@@ -13,6 +20,21 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs()
+}
+
+/// SECURITY C2: Count leading zero bits in a byte array
+fn count_leading_zero_bits(data: &[u8]) -> u32 {
+    let mut count = 0u32;
+    for &byte in data {
+        if byte == 0 {
+            count += 8;
+        } else {
+            // Count leading zeros in this byte and stop
+            count += byte.leading_zeros();
+            break;
+        }
+    }
+    count
 }
 
 /// Information about a network adapter
@@ -75,6 +97,10 @@ pub struct NodeInfo {
     /// Node identifier (32 bytes)
     pub node_id: ProtocolNodeId,
 
+    /// SECURITY C2: Proof-of-Work nonce for Sybil resistance
+    /// Must satisfy: hash(node_id || pow_nonce) has REQUIRED_POW_DIFFICULTY leading zero bits
+    pub pow_nonce: u64,
+
     /// Available network adapters
     pub adapters: Vec<AdapterInfo>,
 
@@ -101,11 +127,12 @@ pub struct NodeInfo {
 }
 
 impl NodeInfo {
-    /// Create new node info
+    /// Create new node info (requires valid PoW nonce)
     pub fn new(node_id: ProtocolNodeId) -> Self {
         let now = now();
         NodeInfo {
             node_id,
+            pow_nonce: 0, // SECURITY C2: Must be set with valid PoW before DHT admission
             adapters: Vec::new(),
             last_seen: now,
             rtt_ms: 0.0,
@@ -122,6 +149,41 @@ impl NodeInfo {
         let mut info = Self::new(node_id);
         info.adapters = adapters;
         info
+    }
+
+    /// SECURITY C2: Compute Proof-of-Work for this NodeId
+    ///
+    /// Finds a nonce such that hash(node_id || nonce) has required leading zero bits.
+    /// This is computationally expensive (~65k attempts average for 16-bit difficulty).
+    pub fn compute_pow(&mut self) -> u64 {
+        let mut nonce = 0u64;
+        loop {
+            if Self::verify_pow_internal(&self.node_id, nonce, REQUIRED_POW_DIFFICULTY) {
+                self.pow_nonce = nonce;
+                return nonce;
+            }
+            nonce += 1;
+        }
+    }
+
+    /// SECURITY C2: Verify Proof-of-Work for a NodeId + nonce
+    ///
+    /// Returns true if hash(node_id || nonce) has at least `difficulty` leading zero bits.
+    pub fn verify_pow(&self) -> bool {
+        Self::verify_pow_internal(&self.node_id, self.pow_nonce, REQUIRED_POW_DIFFICULTY)
+    }
+
+    /// Internal PoW verification
+    fn verify_pow_internal(node_id: &ProtocolNodeId, nonce: u64, difficulty: u32) -> bool {
+        // Compute hash(node_id || nonce)
+        let mut hasher = Blake2b512::new();
+        hasher.update(node_id.as_bytes());
+        hasher.update(nonce.to_le_bytes());
+        let hash = hasher.finalize();
+
+        // Count leading zero bits
+        let leading_zeros = count_leading_zero_bits(&hash);
+        leading_zeros >= difficulty
     }
 
     /// Record successful communication
@@ -156,7 +218,9 @@ impl NodeInfo {
     }
 
     /// Calculate XOR distance to another node
-    pub fn distance_to(&self, other: &ProtocolNodeId) -> [u8; 32] {
+    ///
+    /// SECURITY C6: Returns 64-byte XOR distance for enhanced collision resistance
+    pub fn distance_to(&self, other: &ProtocolNodeId) -> [u8; NODE_ID_SIZE] {
         self.node_id.distance(other)
     }
 
@@ -212,7 +276,9 @@ impl PublicNodeInfo {
     }
 
     /// Calculate XOR distance to another node
-    pub fn distance_to(&self, other: &ProtocolNodeId) -> [u8; 32] {
+    ///
+    /// SECURITY C6: Returns 64-byte XOR distance for enhanced collision resistance
+    pub fn distance_to(&self, other: &ProtocolNodeId) -> [u8; NODE_ID_SIZE] {
         self.node_id.distance(other)
     }
 
@@ -228,7 +294,7 @@ mod tests {
     use super::*;
 
     fn create_test_node() -> NodeInfo {
-        NodeInfo::new(ProtocolNodeId::from_bytes([1u8; 32]))
+        NodeInfo::new(ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]))
     }
 
     #[test]
@@ -236,7 +302,8 @@ mod tests {
         let node = create_test_node();
         assert_eq!(node.failures, 0);
         assert_eq!(node.total_successes, 0);
-        assert!(node.reputation.is_trustworthy());
+        // SECURITY C7: New nodes start with low reputation, must earn trust
+        assert!(!node.reputation.is_trustworthy());
     }
 
     #[test]
@@ -283,7 +350,7 @@ mod tests {
 
     #[test]
     fn test_with_adapters() {
-        let node_id = ProtocolNodeId::from_bytes([1u8; 32]);
+        let node_id = ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]);
         let adapters = vec![AdapterInfo {
             adapter_type: AdapterType::Ethernet,
             address: "192.168.1.1:4001".to_string(),
@@ -297,7 +364,7 @@ mod tests {
 
     #[test]
     fn test_to_public_removes_adapter_addresses() {
-        let node_id = ProtocolNodeId::from_bytes([1u8; 32]);
+        let node_id = ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]);
         let adapters = vec![
             AdapterInfo {
                 adapter_type: AdapterType::Ethernet,
@@ -326,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_public_node_info_creation() {
-        let node_id = ProtocolNodeId::from_bytes([1u8; 32]);
+        let node_id = ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]);
         let caps = NodeCapabilities {
             i2p_capable: true,
             tor_capable: false,
@@ -337,12 +404,13 @@ mod tests {
 
         assert_eq!(public.node_id, node_id);
         assert_eq!(public.capabilities, caps);
-        assert!(public.reputation.is_trustworthy());
+        // SECURITY C7: New nodes start with low reputation, must earn trust
+        assert!(!public.reputation.is_trustworthy());
     }
 
     #[test]
     fn test_public_node_info_is_stale() {
-        let node_id = ProtocolNodeId::from_bytes([1u8; 32]);
+        let node_id = ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]);
         let mut public = PublicNodeInfo::new(node_id, NodeCapabilities::default());
 
         // Fresh node is not stale
@@ -361,5 +429,98 @@ mod tests {
         assert!(!caps.store_and_forward);
         assert!(!caps.i2p_capable);
         assert!(!caps.tor_capable);
+    }
+
+    // SECURITY C2: Proof-of-Work tests
+
+    #[test]
+    fn test_count_leading_zero_bits() {
+        // All zeros
+        assert_eq!(count_leading_zero_bits(&[0u8; 8]), 64);
+
+        // First byte non-zero
+        assert_eq!(count_leading_zero_bits(&[0b00010000, 0, 0, 0]), 3);
+
+        // Multiple zero bytes then non-zero
+        assert_eq!(count_leading_zero_bits(&[0, 0, 0b00000001, 0]), 7 + 8 + 8);
+
+        // No leading zeros
+        assert_eq!(count_leading_zero_bits(&[0b10000000, 0, 0, 0]), 0);
+    }
+
+    #[test]
+    fn test_pow_compute_and_verify() {
+        // SECURITY C2: PoW computation and verification
+        let mut node = NodeInfo::new(ProtocolNodeId::from_bytes([42u8; NODE_ID_SIZE]));
+
+        // Initially has no valid PoW
+        assert!(!node.verify_pow());
+
+        // Compute PoW (this will take ~65k attempts on average for 16-bit difficulty)
+        let nonce = node.compute_pow();
+
+        // Now PoW should be valid
+        assert!(node.verify_pow());
+        assert_eq!(node.pow_nonce, nonce);
+    }
+
+    #[test]
+    fn test_pow_reject_invalid_nonce() {
+        // SECURITY C2: Verify that invalid nonces are rejected
+        let mut node = NodeInfo::new(ProtocolNodeId::from_bytes([123u8; NODE_ID_SIZE]));
+
+        // Set an arbitrary invalid nonce
+        node.pow_nonce = 12345;
+
+        // Should fail verification (extremely unlikely to be valid)
+        assert!(!node.verify_pow());
+    }
+
+    #[test]
+    fn test_pow_different_nodes_need_different_nonces() {
+        // SECURITY C2: Different NodeIDs need different PoW solutions
+        let node_id_1 = ProtocolNodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let node_id_2 = ProtocolNodeId::from_bytes([2u8; NODE_ID_SIZE]);
+
+        let mut node1 = NodeInfo::new(node_id_1);
+        let mut node2 = NodeInfo::new(node_id_2);
+
+        node1.compute_pow();
+        node2.compute_pow();
+
+        // Different NodeIDs should have different nonces
+        // (extremely unlikely to be the same)
+        assert_ne!(node1.pow_nonce, node2.pow_nonce);
+
+        // Each should verify correctly
+        assert!(node1.verify_pow());
+        assert!(node2.verify_pow());
+
+        // Swapping nonces should fail verification
+        let temp = node1.pow_nonce;
+        node1.pow_nonce = node2.pow_nonce;
+        node2.pow_nonce = temp;
+
+        assert!(!node1.verify_pow());
+        assert!(!node2.verify_pow());
+    }
+
+    #[test]
+    fn test_pow_low_difficulty() {
+        // Test with very low difficulty for speed
+        let node_id = ProtocolNodeId::from_bytes([99u8; NODE_ID_SIZE]);
+
+        // Test with difficulty 4 (should be fast: ~16 attempts)
+        let mut nonce = 0u64;
+        loop {
+            if NodeInfo::verify_pow_internal(&node_id, nonce, 4) {
+                break;
+            }
+            nonce += 1;
+            assert!(nonce < 1000, "Took too many attempts for difficulty 4");
+        }
+
+        // Verify the nonce works
+        assert!(NodeInfo::verify_pow_internal(&node_id, nonce, 4));
     }
 }

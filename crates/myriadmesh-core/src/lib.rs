@@ -26,6 +26,7 @@ pub fn init() -> Result<(), CryptoError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use myriadmesh_protocol::types::NODE_ID_SIZE;
 
     #[test]
     fn test_init() {
@@ -38,8 +39,9 @@ mod tests {
         let _ = crypto::init();
 
         // Protocol types
-        let node_id = protocol::NodeId::from_bytes([1u8; 32]);
-        assert_eq!(node_id.as_bytes().len(), 32);
+        // SECURITY C6: NodeID is now 64 bytes for collision resistance
+        let node_id = protocol::NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        assert_eq!(node_id.as_bytes().len(), NODE_ID_SIZE);
 
         // DHT types are accessible
         let capabilities = dht::NodeCapabilities::default();

@@ -7,7 +7,10 @@
 use crate::adapter::{AdapterStatus, NetworkAdapter, PeerInfo, TestResults};
 use crate::error::{NetworkError, Result};
 use crate::types::{AdapterCapabilities, Address, PowerConsumption};
-use myriadmesh_protocol::{types::AdapterType, Frame, NodeId};
+use myriadmesh_protocol::{
+    types::{AdapterType, NODE_ID_SIZE},
+    Frame, NodeId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -195,7 +198,7 @@ impl NetworkAdapter for BleAdapter {
             .values()
             .filter(|p| now - p.last_seen < 60)
             .map(|p| PeerInfo {
-                node_id: NodeId::from_bytes([0u8; 32]),
+                node_id: NodeId::from_bytes([0u8; NODE_ID_SIZE]),
                 address: Address::BluetoothLE(p.address.clone()),
             })
             .collect())
