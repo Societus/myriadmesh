@@ -31,12 +31,13 @@
 //! assert_eq!(plaintext, &decrypted[..]);
 //! ```
 
-use crate::encryption::{decrypt, encrypt, EncryptedMessage, SymmetricKey};
+use crate::encryption::{decrypt, encrypt, encrypt_with_nonce, EncryptedMessage, Nonce, SymmetricKey};
 use crate::error::{CryptoError, Result};
 use crate::keyexchange::{
     client_session_keys, server_session_keys, KeyExchangeKeypair, X25519PublicKey,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Key exchange request message
