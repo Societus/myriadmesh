@@ -19,12 +19,12 @@ This file tracks all issues identified in the security audit and code review, wi
 - **Test:** Add test for forged token rejection
 
 ### C2: Sybil Attack on DHT
-- [ ] **Fixed**
-- **File:** `crates/myriadmesh-dht/src/routing_table.rs:78-96`
+- [x] **Fixed** ✅
+- **File:** `crates/myriadmesh-dht/src/routing_table.rs`, `node_info.rs`
 - **Issue:** No cost to create NodeIDs, attacker can flood DHT
 - **Impact:** DHT takeover, eclipse attacks
-- **Fix:** Implement Proof-of-Work or stake-based admission
-- **Test:** Verify rate limiting on node joins
+- **Fix:** Proof-of-Work with 16-bit difficulty (~65k hashes per NodeID)
+- **Test:** 8 comprehensive PoW tests verify computation and enforcement
 
 ### C3: No UDP Authentication
 - [x] **Fixed** ✅
@@ -248,20 +248,20 @@ This file tracks all issues identified in the security audit and code review, wi
 ## 📊 Progress Tracking
 
 ### Overall Status
-- **CRITICAL Issues:** 4/7 fixed (57%)
+- **CRITICAL Issues:** 5/7 fixed (71%)
 - **HIGH Issues:** 0/12 fixed (0%)
 - **MEDIUM Issues:** 0/9 fixed (0%)
 - **Code TODOs:** 0/29 fixed (0%)
-- **Total:** 4/57 items fixed (7%)
+- **Total:** 5/57 items fixed (9%)
 
 ### By Category
 | Category | Total | Fixed | Remaining | % Complete |
 |----------|-------|-------|-----------|------------|
-| CRITICAL Security | 7 | 4 | 3 | 57% |
+| CRITICAL Security | 7 | 5 | 2 | 71% |
 | HIGH Security | 12 | 0 | 12 | 0% |
 | MEDIUM Security | 9 | 0 | 9 | 0% |
 | Code TODOs | 29 | 0 | 29 | 0% |
-| **TOTAL** | **57** | **4** | **53** | **7%** |
+| **TOTAL** | **57** | **5** | **52** | **9%** |
 
 ### Priority Order
 
@@ -378,10 +378,43 @@ This file tracks all issues identified in the security audit and code review, wi
   - `test_reject_wrong_signature()` - Signature corruption detection ✅
 - **Commit:** dab56fe
 
+**C2: Sybil Resistance with Proof-of-Work** ✅
+- **Files:** `node_info.rs`, `routing_table.rs`, `error.rs`, `Cargo.toml`
+- **Fix:** Hash-based Proof-of-Work for DHT admission control
+- **Details:**
+  - Added pow_nonce field to NodeInfo (u64)
+  - Requires hash(node_id || nonce) to have 16 leading zero bits
+  - Average ~65,536 hash attempts per NodeID (tunable difficulty)
+  - Uses BLAKE2b-512 for hashing
+  - Routing table verifies PoW before admitting nodes
+  - InvalidProofOfWork error for rejections
+- **Security:**
+  - Makes Sybil attacks computationally expensive
+  - Attacker needs ~65k hashes per fake identity
+  - Creating 1000 fake nodes requires ~65M hashes
+  - Prevents DHT flooding and eclipse attacks
+  - Rate-limits malicious node generation
+  - Configurable difficulty for cost vs usability tuning
+- **Performance:**
+  - PoW computation: ~65k attempts average (ms-second range)
+  - Verification: Single hash operation (microseconds)
+  - One-time cost per NodeID
+  - Minimal overhead on legitimate nodes
+- **Tests:**
+  - `test_count_leading_zero_bits()` - Bit counting accuracy ✅
+  - `test_pow_compute_and_verify()` - PoW computation ✅
+  - `test_pow_reject_invalid_nonce()` - Invalid nonce rejection ✅
+  - `test_pow_different_nodes_need_different_nonces()` - Uniqueness ✅
+  - `test_pow_low_difficulty()` - Low difficulty verification ✅
+  - `test_reject_node_without_valid_pow()` - DHT rejection ✅
+  - `test_accept_node_with_valid_pow()` - DHT acceptance ✅
+  - `test_pow_prevents_sybil_flooding()` - Flood prevention ✅
+- **Commit:** e8bd945
+
 **Session Summary:**
-- **Completed:** 4/7 CRITICAL issues (57%)
-- **Time:** ~4.5 hours total
-- **All Tests:** 281 passing ✅
+- **Completed:** 5/7 CRITICAL issues (71%)
+- **Time:** ~6 hours total
+- **All Tests:** 289 passing ✅
 
 ---
 
