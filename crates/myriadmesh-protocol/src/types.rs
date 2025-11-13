@@ -134,7 +134,7 @@ impl Priority {
 
     /// Check if priority is in background range
     pub fn is_background(&self) -> bool {
-        self.0 >= Self::BACKGROUND_MIN && self.0 <= Self::BACKGROUND_MAX
+        self.0 <= Self::BACKGROUND_MAX
     }
 
     /// Check if priority is in low range
@@ -154,7 +154,7 @@ impl Priority {
 
     /// Check if priority is in emergency range
     pub fn is_emergency(&self) -> bool {
-        self.0 >= Self::EMERGENCY_MIN && self.0 <= Self::EMERGENCY_MAX
+        self.0 >= Self::EMERGENCY_MIN
     }
 
     /// Get human-readable priority level
