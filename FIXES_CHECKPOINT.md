@@ -11,7 +11,7 @@ This file tracks all issues identified in the security audit and code review, wi
 ## 🔴 CRITICAL Security Issues (Must Fix - 7 total)
 
 ### C1: Token Signature Verification Bypass
-- [ ] **Fixed**
+- [x] **Fixed** ✅
 - **File:** `crates/myriadmesh-i2p/src/capability_token.rs:114-135`
 - **Issue:** Token validation doesn't verify Ed25519 signature
 - **Impact:** Attacker can forge i2p access tokens
@@ -35,7 +35,7 @@ This file tracks all issues identified in the security audit and code review, wi
 - **Test:** Verify spoofed frames are rejected
 
 ### C4: Nonce Reuse Vulnerability
-- [ ] **Fixed**
+- [x] **Fixed** ✅
 - **File:** `crates/myriadmesh-crypto/src/channel.rs:274-280`
 - **Issue:** Nonce counter not atomic, can reuse with same key
 - **Impact:** Catastrophic encryption failure, plaintext recovery
@@ -248,20 +248,20 @@ This file tracks all issues identified in the security audit and code review, wi
 ## 📊 Progress Tracking
 
 ### Overall Status
-- **CRITICAL Issues:** 0/7 fixed (0%)
+- **CRITICAL Issues:** 2/7 fixed (29%)
 - **HIGH Issues:** 0/12 fixed (0%)
 - **MEDIUM Issues:** 0/9 fixed (0%)
 - **Code TODOs:** 0/29 fixed (0%)
-- **Total:** 0/57 items fixed (0%)
+- **Total:** 2/57 items fixed (4%)
 
 ### By Category
 | Category | Total | Fixed | Remaining | % Complete |
 |----------|-------|-------|-----------|------------|
-| CRITICAL Security | 7 | 0 | 7 | 0% |
+| CRITICAL Security | 7 | 2 | 5 | 29% |
 | HIGH Security | 12 | 0 | 12 | 0% |
 | MEDIUM Security | 9 | 0 | 9 | 0% |
 | Code TODOs | 29 | 0 | 29 | 0% |
-| **TOTAL** | **57** | **0** | **57** | **0%** |
+| **TOTAL** | **57** | **2** | **55** | **4%** |
 
 ### Priority Order
 
@@ -305,8 +305,31 @@ This file tracks all issues identified in the security audit and code review, wi
 ## 📝 Fix Log
 
 ### 2025-11-13
-- Created checkpoint file
-- Starting CRITICAL fixes
+
+#### Session 1 Progress
+**Time:** ~2 hours
+**Completed:** 2/7 CRITICAL issues
+
+**C1: Token Signature Verification Bypass** ✅
+- **File:** `crates/myriadmesh-i2p/src/capability_token.rs`
+- **Fix:** Added NodeID derivation check in `is_valid()`
+- **Details:** Verify provided public key derives to claimed issuer_node_id
+- **Test:** `test_token_forgery_prevention()` - Passes ✅
+- **Commit:** 1ba37e3
+
+**C4: Nonce Reuse Vulnerability** ✅
+- **File:** `crates/myriadmesh-crypto/src/channel.rs`
+- **Fix:** Implemented atomic counter-based nonce generation
+- **Details:**
+  - Added AtomicU64 counter to EncryptedChannel
+  - 24-byte nonce = counter(8) + node_id(8) + timestamp(8)
+  - Guarantees uniqueness even with RNG/clock failures
+- **Tests:**
+  - `test_nonce_uniqueness_sequential()` - 1000 messages ✅
+  - `test_nonce_uniqueness_multithreaded()` - 10 threads × 100 msgs ✅
+- **Commit:** 21be80a
+
+**Status:** All 249 workspace tests passing ✅
 
 ---
 
