@@ -135,12 +135,25 @@ Phase 6: Production Ready   [18-24 months] ░░░░░░░░░░░░�
 - [ ] Connection management
 - [ ] Adapter testing framework
 
+### 2.5 Component Version Tracking
+
+- [x] Semantic versioning for adapter libraries
+- [x] Component manifest structure
+- [x] CVE tracking and severity levels
+- [x] Reputation penalty calculation
+  - Time-based escalation for outdated components
+  - CVE-aware penalties
+  - Integration with reputation system
+- [ ] Automated CVE scanning integration
+- [ ] Version update notifications
+
 ### Deliverables
 
 - Functional DHT for node discovery
 - Message routing between nodes
 - Working Ethernet adapter
 - Ability to send messages between nodes on same LAN
+- Component version tracking system with reputation impact
 
 ### Technologies
 
@@ -191,24 +204,45 @@ Phase 6: Production Ready   [18-24 months] ░░░░░░░░░░░░�
 ### 3.3 Additional Network Adapters
 
 **Bluetooth Classic:**
-- [ ] Bluetooth adapter implementation
-- [ ] Service discovery (SDP)
-- [ ] RFCOMM connections
-- [ ] Pairing management
+- [x] Bluetooth adapter implementation
+- [x] Channel-based RFCOMM transport
+- [ ] Service discovery (SDP) - Platform integration
+- [x] RFCOMM connection management
+- [x] Pairing infrastructure
 
 **Bluetooth Low Energy:**
-- [ ] BLE adapter implementation
-- [ ] GATT service/characteristic
-- [ ] Advertisement scanning
-- [ ] Connection management
+- [x] BLE adapter implementation
+- [x] GATT connection management with MTU handling
+- [x] Advertisement scanning infrastructure
+- [x] Connection pooling and state management
 
 **Cellular (4G/5G):**
-- [ ] Cellular adapter implementation
-- [ ] Connection management
-- [ ] Data usage tracking
-- [ ] Cost monitoring
+- [x] Cellular adapter implementation
+- [x] TCP/IP connection management
+- [x] Data usage tracking
+- [x] Cost monitoring with quota enforcement
+- [ ] ModemManager integration (Linux)
 
-### 3.4 Performance Monitoring
+### 3.4 Hot-Reloadable Adapter System
+
+- [x] Adapter registry architecture
+- [x] Adapter metadata tracking
+  - Version information
+  - Load time and reload count
+  - Connection state
+- [x] Zero-downtime adapter updates
+  - Graceful connection draining
+  - Atomic adapter swapping
+  - Automatic initialization
+- [x] Connection tracking for draining
+- [ ] Health monitoring post-update
+  - Success rate tracking
+  - Latency monitoring
+  - Error rate detection
+- [ ] Automatic rollback on degradation
+- [ ] Rollback history management
+
+### 3.5 Performance Monitoring
 
 - [ ] Network adapter testing framework
 - [ ] Metrics collection
@@ -221,9 +255,12 @@ Phase 6: Production Ready   [18-24 months] ░░░░░░░░░░░░�
 ### Deliverables
 
 - MyriadNode application with web UI
-- Functional Ethernet, Bluetooth, Cellular adapters
+- Functional Ethernet, Bluetooth Classic, Bluetooth LE, Cellular adapters
+- Channel-based transport architecture for all adapters
+- Hot-reloadable adapter system for zero-downtime updates
 - Ability to route messages across multiple network types
 - Performance-based adapter selection
+- Component version tracking with reputation penalties
 
 ### Technologies
 
@@ -298,6 +335,55 @@ Phase 6: Production Ready   [18-24 months] ░░░░░░░░░░░░�
 - [ ] i2p addressing
 - [ ] Privacy-preserving routing
 
+### 4.6 Coordinated Update Scheduling
+
+- [ ] Update schedule protocol
+  - Neighbor notification messages
+  - Acknowledgment/reschedule responses
+  - Signature verification
+- [ ] Optimal update window selection
+  - Off-peak hour preference
+  - Network load analysis
+  - Conflict avoidance
+  - Fallback adapter verification
+- [ ] Update execution coordination
+  - Pre-update notifications
+  - Fallback path establishment
+  - Post-update verification
+- [ ] Update scheduling UI
+  - Manual scheduling interface
+  - Automatic scheduling with user approval
+  - Maintenance window configuration
+
+### 4.7 Peer-Assisted Update Distribution
+
+- [ ] Update package structure
+  - Payload with hash verification
+  - Multi-signature support
+  - CVE fix metadata
+  - Changelog and compatibility info
+- [ ] Multi-signature verification
+  - Require 3+ trusted peer signatures
+  - Reputation-based trust filtering
+  - Signature chain tracking
+- [ ] Verification period implementation
+  - 6-hour verification window for peer updates
+  - Critical CVE priority override
+  - Manual approval option
+- [ ] Update forwarding protocol
+  - Automatic forwarding to trusted neighbors
+  - Signature chain extension
+  - Propagation tracking
+- [ ] Health monitoring post-update
+  - Baseline metric capture
+  - Continuous health checks
+  - Degradation detection (success rate, latency, errors)
+- [ ] Automatic rollback system
+  - Rollback trigger conditions
+  - Previous version restoration
+  - Rollback notification to peers
+  - Problem version blacklisting
+
 ### Deliverables
 
 - Functional blockchain ledger
@@ -305,6 +391,9 @@ Phase 6: Production Ready   [18-24 months] ░░░░░░░░░░░░�
 - Terminal UI for server management
 - Android application
 - i2p network integration
+- Coordinated update scheduling system
+- Peer-assisted secure update distribution
+- Automatic health monitoring and rollback
 
 ### Technologies
 
@@ -483,7 +572,10 @@ Throughout all phases:
 - Continuous integration testing
 - Code review for all changes
 - Regular security updates
-- Dependency auditing
+- Dependency auditing (cargo-audit, cargo-deny)
+- CVE scanning and tracking
+- Component version monitoring
+- Automated security advisory checks
 
 ### Documentation
 - Keep documentation up to date
@@ -504,9 +596,13 @@ Throughout all phases:
 - [ ] Crypto operations meet performance targets
 
 ### Phase 3-4
-- [ ] Support 3+ network adapter types
+- [x] Support 4+ network adapter types (Ethernet, BT Classic, BLE, Cellular)
+- [x] Channel-based transport architecture
+- [x] Hot-reloadable adapters with zero downtime
 - [ ] Message delivery success rate >95%
 - [ ] Web UI usable on mobile devices
+- [x] Component version tracking operational
+- [ ] <95% of nodes with current adapter versions
 
 ### Phase 5-6
 - [ ] Support 10+ network adapter types
@@ -515,6 +611,9 @@ Throughout all phases:
 - [ ] Handle 1000+ messages per second per node
 - [ ] <100ms latency for direct connections
 - [ ] Active user community with 100+ deployments
+- [ ] Coordinated updates with <5 minute network-wide propagation
+- [ ] <1% failed updates (with automatic rollback)
+- [ ] >90% of nodes automatically update within 7 days of security release
 
 ## Risk Mitigation
 
@@ -531,6 +630,23 @@ Throughout all phases:
 
 **Risk:** Complex multi-threading bugs
 - **Mitigation:** Extensive testing, use safe concurrency primitives (Rust)
+
+**Risk:** Outdated or vulnerable dependencies
+- **Mitigation:**
+  - Adaptive security system with version tracking
+  - Reputation penalties for outdated components
+  - Hot-reloadable adapters for zero-downtime updates
+  - Peer-assisted update distribution
+  - Automated CVE scanning (cargo-audit)
+  - Health monitoring and automatic rollback
+
+**Risk:** Supply chain attacks on dependencies
+- **Mitigation:**
+  - Multi-signature verification for peer-distributed updates
+  - 6-hour verification period before auto-installation
+  - Reputation-based trust filtering
+  - Component version manifest signing
+  - Dependency vendoring option
 
 ### Schedule Risks
 
@@ -604,6 +720,40 @@ We welcome contributions at any phase! See specific phase documentation for:
 - **Containers:** Docker
 - **Orchestration:** Kubernetes
 - **Monitoring:** Prometheus + Grafana
+- **Security Auditing:** cargo-audit, cargo-deny
+- **Dependency Management:** cargo-vendor, Dependabot
+
+### Adaptive Security
+- **Version Tracking:** Custom implementation
+- **CVE Database:** RustSec Advisory Database
+- **Update Distribution:** Multi-signature verification
+- **Health Monitoring:** Metric-based rollback detection
+
+## Design Documentation References
+
+For detailed technical specifications, see:
+
+- **Adaptive Security & Updates:** `docs/design/adaptive-security-updates.md`
+  - Component version tracking with reputation impact
+  - Hot-reloadable adapter architecture
+  - Coordinated update scheduling protocol
+  - Peer-assisted secure update distribution
+  - Health monitoring and automatic rollback
+
+- **Protocol Specification:** `docs/protocol/specification.md`
+  - Message frame structure
+  - Encryption and signing
+  - Message types and routing
+
+- **Network Adapters:** `docs/protocol/network-adapters.md`
+  - Adapter specifications and capabilities
+  - Selection strategies
+  - Platform integration guides
+
+- **Security Review:** `SECURITY_README.md`
+  - Security audit findings
+  - Mitigation strategies
+  - Production roadmap
 
 ## Next Steps
 
