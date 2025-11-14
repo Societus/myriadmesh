@@ -144,8 +144,8 @@ Phase 6: Production Ready   [18-24 months] ░░░░░░░░░░░░�
   - Time-based escalation for outdated components
   - CVE-aware penalties
   - Integration with reputation system
-- [ ] Automated CVE scanning integration
-- [ ] Version update notifications
+- [x] Automated CVE scanning integration
+- [x] Version update notifications
 
 ### Deliverables
 
@@ -235,12 +235,20 @@ Phase 6: Production Ready   [18-24 months] ░░░░░░░░░░░░�
   - Atomic adapter swapping
   - Automatic initialization
 - [x] Connection tracking for draining
-- [ ] Health monitoring post-update
+- [x] Health monitoring post-update
   - Success rate tracking
   - Latency monitoring
   - Error rate detection
-- [ ] Automatic rollback on degradation
-- [ ] Rollback history management
+  - Crash tracking
+  - Configurable degradation thresholds
+- [x] Automatic rollback on degradation
+  - Per-adapter auto-rollback enablement
+  - Multi-metric degradation detection
+  - Rollback loop prevention
+- [x] Rollback history management
+  - N-version history preservation (configurable)
+  - Nth-most-recent version retrieval
+  - Automatic cleanup of old versions
 
 ### 3.5 Performance Monitoring
 
@@ -374,15 +382,15 @@ Phase 6: Production Ready   [18-24 months] ░░░░░░░░░░░░�
   - Automatic forwarding to trusted neighbors
   - Signature chain extension
   - Propagation tracking
-- [ ] Health monitoring post-update
+- [x] Health monitoring post-update (Implemented in Phase 3.4)
   - Baseline metric capture
   - Continuous health checks
-  - Degradation detection (success rate, latency, errors)
-- [ ] Automatic rollback system
+  - Degradation detection (success rate, latency, errors, crashes)
+- [x] Automatic rollback system (Core implemented in Phase 3.4)
   - Rollback trigger conditions
   - Previous version restoration
-  - Rollback notification to peers
-  - Problem version blacklisting
+  - [ ] Rollback notification to peers (Phase 4)
+  - [ ] Problem version blacklisting (Phase 4)
 
 ### Deliverables
 
@@ -599,9 +607,13 @@ Throughout all phases:
 - [x] Support 4+ network adapter types (Ethernet, BT Classic, BLE, Cellular)
 - [x] Channel-based transport architecture
 - [x] Hot-reloadable adapters with zero downtime
+- [x] Health monitoring and automatic rollback operational
+- [x] Rollback history management implemented
 - [ ] Message delivery success rate >95%
 - [ ] Web UI usable on mobile devices
 - [x] Component version tracking operational
+- [x] Automated CVE scanning with daily checks
+- [x] Version update notification system
 - [ ] <95% of nodes with current adapter versions
 
 ### Phase 5-6

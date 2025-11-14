@@ -8,6 +8,8 @@ use myriadmesh_crypto::signing::Signature;
 use myriadmesh_protocol::{types::AdapterType, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Semantic version
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -289,6 +291,208 @@ impl ComponentManifest {
     }
 }
 
+/// Update notification type
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UpdateNotification {
+    /// New version available
+    NewVersion {
+        adapter_type: AdapterType,
+        current: SemanticVersion,
+        available: SemanticVersion,
+        urgency: UpdateUrgency,
+    },
+
+    /// Security update required
+    SecurityUpdate {
+        adapter_type: AdapterType,
+        current: SemanticVersion,
+        patched: SemanticVersion,
+        cves: Vec<String>,
+        urgency: UpdateUrgency,
+    },
+
+    /// Component deprecated
+    Deprecated {
+        adapter_type: AdapterType,
+        current: SemanticVersion,
+        replacement: Option<String>,
+    },
+
+    /// Component unsupported
+    Unsupported {
+        adapter_type: AdapterType,
+        current: SemanticVersion,
+    },
+}
+
+/// Update urgency level
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UpdateUrgency {
+    /// Informational - update when convenient
+    Info,
+
+    /// Minor update recommended
+    Low,
+
+    /// Security update recommended
+    Medium,
+
+    /// Critical security update - apply ASAP
+    High,
+
+    /// Emergency update - immediate action required
+    Critical,
+}
+
+/// Version update notification manager
+pub struct UpdateNotificationManager {
+    /// Pending notifications
+    notifications: Arc<RwLock<Vec<UpdateNotification>>>,
+
+    /// Last manifest checked
+    last_manifest: Arc<RwLock<Option<ComponentManifest>>>,
+}
+
+impl UpdateNotificationManager {
+    /// Create a new notification manager
+    pub fn new() -> Self {
+        Self {
+            notifications: Arc::new(RwLock::new(Vec::new())),
+            last_manifest: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Check manifest for updates and generate notifications
+    pub async fn check_for_updates(&self, manifest: &ComponentManifest) -> Vec<UpdateNotification> {
+        let mut notifications = Vec::new();
+
+        for (_adapter_type, info) in &manifest.adapters {
+            // Check for version updates
+            if let Some(latest) = &info.latest_version {
+                if &info.version < latest {
+                    let urgency = self.determine_update_urgency(info);
+
+                    // Check if this is a security update
+                    if !info.known_cves.is_empty() {
+                        notifications.push(UpdateNotification::SecurityUpdate {
+                            adapter_type: info.adapter_type,
+                            current: info.version.clone(),
+                            patched: latest.clone(),
+                            cves: info.known_cves.iter().map(|c| c.cve_id.clone()).collect(),
+                            urgency,
+                        });
+                    } else {
+                        notifications.push(UpdateNotification::NewVersion {
+                            adapter_type: info.adapter_type,
+                            current: info.version.clone(),
+                            available: latest.clone(),
+                            urgency,
+                        });
+                    }
+                }
+            }
+
+            // Check for deprecated/unsupported
+            match info.status {
+                AdapterComponentStatus::Deprecated => {
+                    notifications.push(UpdateNotification::Deprecated {
+                        adapter_type: info.adapter_type,
+                        current: info.version.clone(),
+                        replacement: None, // Could be enhanced with replacement info
+                    });
+                }
+                AdapterComponentStatus::Unsupported => {
+                    notifications.push(UpdateNotification::Unsupported {
+                        adapter_type: info.adapter_type,
+                        current: info.version.clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        // Store new notifications
+        let mut stored = self.notifications.write().await;
+        stored.clear();
+        stored.extend(notifications.clone());
+
+        // Update last manifest
+        *self.last_manifest.write().await = Some(manifest.clone());
+
+        notifications
+    }
+
+    /// Determine urgency based on component status
+    fn determine_update_urgency(&self, info: &AdapterVersionInfo) -> UpdateUrgency {
+        // Critical CVEs = Critical urgency
+        if info.known_cves.iter().any(|c| c.severity == CveSeverity::Critical) {
+            return UpdateUrgency::Critical;
+        }
+
+        // High CVEs = High urgency
+        if info.known_cves.iter().any(|c| c.severity == CveSeverity::High) {
+            return UpdateUrgency::High;
+        }
+
+        // Medium CVEs or security update status
+        if !info.known_cves.is_empty() || info.status == AdapterComponentStatus::SecurityUpdate {
+            return UpdateUrgency::Medium;
+        }
+
+        // Critical update status
+        if info.status == AdapterComponentStatus::CriticalUpdate {
+            return UpdateUrgency::High;
+        }
+
+        // Old version = low urgency
+        if info.days_since_update > 90 {
+            return UpdateUrgency::Medium;
+        }
+
+        if info.days_since_update > 30 {
+            return UpdateUrgency::Low;
+        }
+
+        UpdateUrgency::Info
+    }
+
+    /// Get all pending notifications
+    pub async fn get_notifications(&self) -> Vec<UpdateNotification> {
+        self.notifications.read().await.clone()
+    }
+
+    /// Get notifications by urgency
+    pub async fn get_notifications_by_urgency(&self, min_urgency: UpdateUrgency) -> Vec<UpdateNotification> {
+        let notifications = self.notifications.read().await;
+
+        notifications
+            .iter()
+            .filter(|n| {
+                let urgency = match n {
+                    UpdateNotification::NewVersion { urgency, .. } => *urgency,
+                    UpdateNotification::SecurityUpdate { urgency, .. } => *urgency,
+                    UpdateNotification::Deprecated { .. } => UpdateUrgency::Medium,
+                    UpdateNotification::Unsupported { .. } => UpdateUrgency::High,
+                };
+
+                urgency as u8 >= min_urgency as u8
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Clear all notifications
+    pub async fn clear_notifications(&self) {
+        self.notifications.write().await.clear();
+    }
+}
+
+impl Default for UpdateNotificationManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,5 +630,122 @@ mod tests {
         });
 
         assert!(manifest.has_critical_updates());
+    }
+
+    #[tokio::test]
+    async fn test_update_notifications() {
+        let manager = UpdateNotificationManager::new();
+
+        let mut manifest = ComponentManifest::new(
+            NodeId::from_bytes([0u8; 64]),
+            SemanticVersion::new(1, 0, 0),
+        );
+
+        // Add outdated adapter
+        manifest.add_adapter(AdapterVersionInfo {
+            adapter_type: AdapterType::Ethernet,
+            library: "tokio".to_string(),
+            version: SemanticVersion::new(1, 0, 0),
+            latest_version: Some(SemanticVersion::new(1, 1, 0)),
+            days_since_update: 30,
+            known_cves: vec![],
+            status: AdapterComponentStatus::MinorUpdate,
+        });
+
+        let notifications = manager.check_for_updates(&manifest).await;
+
+        assert_eq!(notifications.len(), 1);
+        match &notifications[0] {
+            UpdateNotification::NewVersion { adapter_type, .. } => {
+                assert_eq!(*adapter_type, AdapterType::Ethernet);
+            }
+            _ => panic!("Expected NewVersion notification"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_security_update_notification() {
+        let manager = UpdateNotificationManager::new();
+
+        let mut manifest = ComponentManifest::new(
+            NodeId::from_bytes([0u8; 64]),
+            SemanticVersion::new(1, 0, 0),
+        );
+
+        // Add adapter with CVE
+        manifest.add_adapter(AdapterVersionInfo {
+            adapter_type: AdapterType::Bluetooth,
+            library: "btleplug".to_string(),
+            version: SemanticVersion::new(0, 10, 0),
+            latest_version: Some(SemanticVersion::new(0, 11, 0)),
+            days_since_update: 14,
+            known_cves: vec![CveInfo {
+                cve_id: "CVE-2024-1234".to_string(),
+                severity: CveSeverity::High,
+                cvss_score: 8.5,
+                patched_in: SemanticVersion::new(0, 11, 0),
+                description: "High severity issue".to_string(),
+            }],
+            status: AdapterComponentStatus::CriticalUpdate,
+        });
+
+        let notifications = manager.check_for_updates(&manifest).await;
+
+        assert_eq!(notifications.len(), 1);
+        match &notifications[0] {
+            UpdateNotification::SecurityUpdate { urgency, cves, .. } => {
+                assert_eq!(*urgency, UpdateUrgency::High);
+                assert_eq!(cves.len(), 1);
+                assert_eq!(cves[0], "CVE-2024-1234");
+            }
+            _ => panic!("Expected SecurityUpdate notification"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_notification_filtering_by_urgency() {
+        let manager = UpdateNotificationManager::new();
+
+        let mut manifest = ComponentManifest::new(
+            NodeId::from_bytes([0u8; 64]),
+            SemanticVersion::new(1, 0, 0),
+        );
+
+        // Add multiple adapters with different urgencies
+        manifest.add_adapter(AdapterVersionInfo {
+            adapter_type: AdapterType::Ethernet,
+            library: "tokio".to_string(),
+            version: SemanticVersion::new(1, 0, 0),
+            latest_version: Some(SemanticVersion::new(1, 0, 1)),
+            days_since_update: 7,
+            known_cves: vec![],
+            status: AdapterComponentStatus::MinorUpdate,
+        });
+
+        manifest.add_adapter(AdapterVersionInfo {
+            adapter_type: AdapterType::Bluetooth,
+            library: "btleplug".to_string(),
+            version: SemanticVersion::new(0, 10, 0),
+            latest_version: Some(SemanticVersion::new(0, 11, 0)),
+            days_since_update: 14,
+            known_cves: vec![CveInfo {
+                cve_id: "CVE-2024-5678".to_string(),
+                severity: CveSeverity::Critical,
+                cvss_score: 9.8,
+                patched_in: SemanticVersion::new(0, 11, 0),
+                description: "Critical issue".to_string(),
+            }],
+            status: AdapterComponentStatus::CriticalUpdate,
+        });
+
+        manager.check_for_updates(&manifest).await;
+
+        // Get only critical notifications
+        let critical = manager.get_notifications_by_urgency(UpdateUrgency::Critical).await;
+        assert_eq!(critical.len(), 1);
+
+        // Get medium and above
+        let medium_plus = manager.get_notifications_by_urgency(UpdateUrgency::Medium).await;
+        assert!(medium_plus.len() >= 1);
     }
 }

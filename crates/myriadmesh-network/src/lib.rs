@@ -35,7 +35,11 @@ pub use error::{NetworkError, Result};
 pub use i2p::{I2pAdapter, I2pRouterConfig};
 pub use manager::AdapterManager;
 pub use metrics::AdapterMetrics;
-pub use reload::{AdapterLoadStatus, AdapterMetadata, AdapterRegistry};
+pub use reload::{
+    AdapterHealthMonitor, AdapterLoadStatus, AdapterMetadata, AdapterRegistry,
+    DegradationThresholds, HealthMetrics, HistoricalVersion, RollbackHistory,
+    RollbackHistoryConfig,
+};
 pub use types::{AdapterCapabilities, Address, PowerConsumption};
 pub use version_tracking::{
     AdapterComponentStatus, AdapterVersionInfo, ComponentManifest, CveInfo, CveSeverity,

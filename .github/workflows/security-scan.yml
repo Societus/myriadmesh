@@ -1,0 +1,164 @@
+name: Daily Security Scan
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Allow manual triggering
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cve-scan:
+    name: CVE Scanning
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write # Allow creating issues
+      contents: read
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
+      - name: Run cargo audit (JSON output)
+        id: audit
+        continue-on-error: true
+        run: |
+          cargo audit --json > audit-results.json
+          cat audit-results.json
+
+      - name: Run cargo deny (JSON output)
+        id: deny
+        continue-on-error: true
+        run: |
+          cargo deny check advisories --format json > deny-results.json || true
+          cat deny-results.json
+
+      - name: Parse CVE results
+        id: parse
+        run: |
+          # Count vulnerabilities
+          if [ -f audit-results.json ]; then
+            VULN_COUNT=$(jq '.vulnerabilities.count' audit-results.json || echo "0")
+            echo "vuln_count=$VULN_COUNT" >> $GITHUB_OUTPUT
+
+            # Extract CVE IDs
+            CVES=$(jq -r '.vulnerabilities.list[].advisory.id' audit-results.json | tr '\n' ',' || echo "")
+            echo "cves=$CVES" >> $GITHUB_OUTPUT
+          else
+            echo "vuln_count=0" >> $GITHUB_OUTPUT
+            echo "cves=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create issue if vulnerabilities found
+        if: steps.parse.outputs.vuln_count > 0
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const vulnCount = '${{ steps.parse.outputs.vuln_count }}';
+            const cves = '${{ steps.parse.outputs.cves }}'.split(',').filter(c => c);
+
+            const issueTitle = `🔒 Security Alert: ${vulnCount} CVE(s) detected in dependencies`;
+            const issueBody = `## Security Vulnerabilities Detected
+
+            The daily security scan has detected **${vulnCount}** vulnerabilities in project dependencies.
+
+            ### CVEs Found:
+            ${cves.map(cve => `- ${cve}`).join('\n')}
+
+            ### Action Required:
+            1. Review the vulnerabilities using \`cargo audit\`
+            2. Update affected dependencies
+            3. Test for compatibility
+            4. Deploy updates to nodes
+
+            ### Automatic Actions:
+            - Nodes running outdated versions will receive reputation penalties
+            - Update packages can be distributed via peer network
+
+            ### Related Files:
+            - \`crates/myriadmesh-network/src/version_tracking.rs\`
+            - \`.github/workflows/security-scan.yml\`
+
+            Run \`cargo audit --json\` for detailed information.
+
+            ---
+            *This issue was automatically created by the daily security scan*
+            `;
+
+            // Check if similar issue already exists
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: ['security', 'cve']
+            });
+
+            const similarIssue = existingIssues.data.find(issue =>
+              issue.title.includes('Security Alert')
+            );
+
+            if (!similarIssue) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body: issueBody,
+                labels: ['security', 'cve', 'automated']
+              });
+            } else {
+              // Update existing issue
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: similarIssue.number,
+                body: `## Updated Scan Results\n\n${issueBody}`
+              });
+            }
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-results
+          path: |
+            audit-results.json
+            deny-results.json
+          retention-days: 90
+
+  dependency-updates:
+    name: Check for Dependency Updates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-outdated
+        run: cargo install cargo-outdated --locked
+
+      - name: Check for outdated dependencies
+        id: outdated
+        run: |
+          cargo outdated --format json > outdated.json
+          cat outdated.json
+
+      - name: Upload outdated results
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-updates
+          path: outdated.json
+          retention-days: 30
