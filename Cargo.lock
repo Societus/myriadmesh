@@ -1657,6 +1657,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "myriadmesh-ledger"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "blake2",
+ "chrono",
+ "criterion",
+ "hex",
+ "myriadmesh-core",
+ "myriadmesh-crypto",
+ "rand",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "myriadmesh-network"
 version = "0.1.0"
 dependencies = [
@@ -1671,6 +1691,7 @@ dependencies = [
  "log",
  "myriadmesh-crypto",
  "myriadmesh-protocol",
+ "myriadmesh-routing",
  "rand",
  "serde",
  "serde-big-array",

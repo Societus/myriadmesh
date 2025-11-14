@@ -2,6 +2,7 @@
 
 pub mod dashboard;
 pub mod help;
+pub mod i2p;
 pub mod logs;
 pub mod messages;
 
@@ -32,7 +33,7 @@ pub fn render(f: &mut Frame, app: &App) {
     match app.current_view {
         View::Dashboard => dashboard::render(f, app, chunks[1]),
         View::Messages => messages::render(f, app, chunks[1]),
-        View::Config => render_config(f, app, chunks[1]),
+        View::I2p => i2p::render(f, app, chunks[1]),
         View::Logs => logs::render(f, app, chunks[1]),
         View::Help => help::render(f, app, chunks[1]),
     }
@@ -46,14 +47,14 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let titles = vec![
         View::Dashboard.title(),
         View::Messages.title(),
-        View::Config.title(),
+        View::I2p.title(),
         View::Logs.title(),
     ];
 
     let selected = match app.current_view {
         View::Dashboard => 0,
         View::Messages => 1,
-        View::Config => 2,
+        View::I2p => 2,
         View::Logs => 3,
         View::Help => 0,
     };
@@ -109,17 +110,4 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().bg(Color::DarkGray).fg(Color::White));
 
     f.render_widget(footer_widget, area);
-}
-
-/// Render configuration view (placeholder)
-fn render_config(f: &mut Frame, _app: &App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title("Configuration");
-
-    let text = ratatui::widgets::Paragraph::new("Configuration editor coming soon...")
-        .block(block)
-        .style(Style::default().fg(Color::Gray));
-
-    f.render_widget(text, area);
 }
