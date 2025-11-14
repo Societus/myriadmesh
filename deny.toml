@@ -10,7 +10,11 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "workspace"
 # Ignore specific advisories (use sparingly and document why)
 ignore = [
-    # Example: "RUSTSEC-2020-0001",  # Reason for ignoring
+    # RUSTSEC-2021-0137: sodiumoxide is deprecated but still functional and secure
+    # The maintainer recommends migrating to sodiumoxide successor crates, but
+    # sodiumoxide itself has no known security vulnerabilities. This is just an
+    # "unmaintained" advisory. We accept this risk for now.
+    "RUSTSEC-2021-0137",
 ]
 
 [licenses]
