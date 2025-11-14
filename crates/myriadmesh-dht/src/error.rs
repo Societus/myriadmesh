@@ -21,7 +21,9 @@ pub enum DhtError {
     TooManyKeys(usize),
 
     // SECURITY M2: Per-node quota exceeded
-    #[error("Node quota exceeded: {current_keys}/{max_keys} keys, {current_bytes}/{max_bytes} bytes")]
+    #[error(
+        "Node quota exceeded: {current_keys}/{max_keys} keys, {current_bytes}/{max_bytes} bytes"
+    )]
     NodeQuotaExceeded {
         publisher: [u8; 32],
         current_keys: usize,

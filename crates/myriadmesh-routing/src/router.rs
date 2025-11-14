@@ -108,14 +108,8 @@ impl Router {
         Router {
             node_id,
             outbound_queue: Arc::new(RwLock::new(PriorityQueue::new(queue_capacity))),
-            dedup_cache: Arc::new(RwLock::new(DeduplicationCache::new(
-                10_000,
-                DEDUP_TTL_SECS,
-            ))),
-            rate_limiter: Arc::new(RwLock::new(RateLimiter::new(
-                per_node_limit,
-                global_limit,
-            ))),
+            dedup_cache: Arc::new(RwLock::new(DeduplicationCache::new(10_000, DEDUP_TTL_SECS))),
+            rate_limiter: Arc::new(RwLock::new(RateLimiter::new(per_node_limit, global_limit))),
             burst_tracker: Arc::new(RwLock::new(HashMap::new())),
             spam_tracker: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(RouterStats::default())),
@@ -246,13 +240,11 @@ impl Router {
         {
             let mut spam_tracker = self.spam_tracker.write().await;
             let now = Instant::now();
-            let tracker = spam_tracker
-                .entry(message.source)
-                .or_insert(SpamTracker {
-                    message_count: 0,
-                    window_start: now,
-                    penalty_until: None,
-                });
+            let tracker = spam_tracker.entry(message.source).or_insert(SpamTracker {
+                message_count: 0,
+                window_start: now,
+                penalty_until: None,
+            });
 
             // Reset window if expired
             if now.duration_since(tracker.window_start) >= Duration::from_secs(60) {
@@ -369,7 +361,7 @@ impl Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use myriadmesh_protocol::{message::MessageType, types::NODE_ID_SIZE, types::Priority};
+    use myriadmesh_protocol::{message::MessageType, types::Priority, types::NODE_ID_SIZE};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn create_test_node_id(byte: u8) -> NodeId {
@@ -390,11 +382,7 @@ mod tests {
 
         Message {
             id: myriadmesh_protocol::MessageId::generate(
-                &source,
-                &dest,
-                &payload,
-                timestamp,
-                sequence,
+                &source, &dest, &payload, timestamp, sequence,
             ),
             source,
             destination: dest,
@@ -551,14 +539,20 @@ mod tests {
         let stats = router.get_stats().await;
 
         // Verify that DOS protection kicked in (either burst, rate, or spam)
-        assert!(reject_count > 0, "DOS protection should have rejected some messages");
+        assert!(
+            reject_count > 0,
+            "DOS protection should have rejected some messages"
+        );
         assert!(
             stats.rate_limit_hits > 0 || stats.burst_limit_hits > 0 || stats.spam_detections > 0,
             "At least one DOS protection mechanism should have triggered"
         );
 
         // Verify statistics are being tracked
-        assert_eq!(stats.messages_routed + stats.messages_dropped, success_count + reject_count);
+        assert_eq!(
+            stats.messages_routed + stats.messages_dropped,
+            success_count + reject_count
+        );
     }
 
     #[tokio::test]

@@ -142,6 +142,7 @@ impl NodeReputation {
     /// - Penalty for suspicious behavior
     /// - Minimum activity threshold
     /// - Slower reputation growth for new nodes
+    ///
     /// SECURITY M4: Faster decay for suspicious/penalized nodes
     fn update_score(&mut self) {
         let current_time = now();

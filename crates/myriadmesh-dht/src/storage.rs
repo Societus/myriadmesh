@@ -147,7 +147,7 @@ impl DhtStorage {
             max_size,
             max_keys,
             node_quotas: HashMap::new(),
-            max_keys_per_node: max_keys / 10, // 10% per node
+            max_keys_per_node: max_keys / 10,  // 10% per node
             max_bytes_per_node: max_size / 10, // 10% per node
         }
     }
@@ -690,7 +690,7 @@ mod tests {
         // SECURITY TEST M2: Verify per-node key quota enforcement
         let mut storage = DhtStorage::with_quotas(10_000, 100, 5, 5000); // Max 5 keys per node
 
-        let publisher = [1u8; 32];
+        let _publisher = [1u8; 32];
         let value = b"test".to_vec();
 
         sodiumoxide::init().unwrap();
@@ -703,7 +703,9 @@ mod tests {
             let mut key = [0u8; 32];
             key[0] = i as u8;
             let signature = sign_value(&key, &value, now() + 3600, &sk);
-            assert!(storage.store(key, value.clone(), 3600, pk_bytes, signature).is_ok());
+            assert!(storage
+                .store(key, value.clone(), 3600, pk_bytes, signature)
+                .is_ok());
         }
 
         // Verify quota tracking
@@ -717,7 +719,10 @@ mod tests {
         let signature6 = sign_value(&key6, &value, now() + 3600, &sk);
         let result = storage.store(key6, value.clone(), 3600, pk_bytes, signature6);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), DhtError::NodeQuotaExceeded { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            DhtError::NodeQuotaExceeded { .. }
+        ));
     }
 
     #[test]
@@ -725,7 +730,7 @@ mod tests {
         // SECURITY TEST M2: Verify per-node byte quota enforcement
         let mut storage = DhtStorage::with_quotas(10_000, 100, 100, 1000); // Max 1000 bytes per node
 
-        let publisher = [1u8; 32];
+        let _publisher = [1u8; 32];
 
         sodiumoxide::init().unwrap();
         let (pk, sk) = ed25519::gen_keypair();
@@ -754,7 +759,10 @@ mod tests {
         let sig3 = sign_value(&key3, &value3, now() + 3600, &sk);
         let result = storage.store(key3, value3, 3600, pk_bytes, sig3);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), DhtError::NodeQuotaExceeded { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            DhtError::NodeQuotaExceeded { .. }
+        ));
     }
 
     #[test]
@@ -767,7 +775,9 @@ mod tests {
         let (publisher, signature) = create_signed_value(key, value.clone(), 3600);
 
         // Store a value
-        storage.store(key, value.clone(), 3600, publisher, signature).unwrap();
+        storage
+            .store(key, value.clone(), 3600, publisher, signature)
+            .unwrap();
 
         // Check quota
         let (keys, bytes) = storage.get_node_usage(&publisher);
@@ -793,10 +803,12 @@ mod tests {
         let (publisher, signature) = create_signed_value(key, value.clone(), 0); // Immediate expiration
 
         // Store with 0 TTL
-        storage.store(key, value.clone(), 0, publisher, signature).unwrap();
+        storage
+            .store(key, value.clone(), 0, publisher, signature)
+            .unwrap();
 
         // Check quota before cleanup
-        let (keys, bytes) = storage.get_node_usage(&publisher);
+        let (keys, _bytes) = storage.get_node_usage(&publisher);
         assert_eq!(keys, 1);
 
         // Cleanup expired entries
@@ -832,7 +844,9 @@ mod tests {
             let mut key = [1u8; 32];
             key[0] = i as u8;
             let signature = sign_value(&key, &value, now() + 3600, &sk1);
-            assert!(storage.store(key, value.clone(), 3600, publisher1, signature).is_ok());
+            assert!(storage
+                .store(key, value.clone(), 3600, publisher1, signature)
+                .is_ok());
         }
 
         // Store 5 keys for publisher 2 (should also succeed)
@@ -840,14 +854,16 @@ mod tests {
             let mut key = [2u8; 32];
             key[0] = i as u8;
             let signature = sign_value(&key, &value, now() + 3600, &sk2);
-            assert!(storage.store(key, value.clone(), 3600, publisher2, signature).is_ok());
+            assert!(storage
+                .store(key, value.clone(), 3600, publisher2, signature)
+                .is_ok());
         }
 
         // Verify independent quotas
-        let (keys1, bytes1) = storage.get_node_usage(&publisher1);
+        let (keys1, _bytes1) = storage.get_node_usage(&publisher1);
         assert_eq!(keys1, 5);
 
-        let (keys2, bytes2) = storage.get_node_usage(&publisher2);
+        let (keys2, _bytes2) = storage.get_node_usage(&publisher2);
         assert_eq!(keys2, 5);
 
         // Publisher 1 cannot store more
@@ -878,7 +894,9 @@ mod tests {
         // Update with different value (should succeed even though quota is 1 key)
         let value2 = b"second value".to_vec();
         let sig2 = sign_value(&key, &value2, now() + 3600, &sk);
-        assert!(storage.store(key, value2.clone(), 3600, publisher, sig2).is_ok());
+        assert!(storage
+            .store(key, value2.clone(), 3600, publisher, sig2)
+            .is_ok());
 
         // Verify still only 1 key in quota
         let (keys, bytes) = storage.get_node_usage(&publisher);
