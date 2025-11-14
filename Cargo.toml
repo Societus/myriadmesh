@@ -9,7 +9,7 @@ members = [
     "crates/myriadmesh-i2p",
     "crates/myriadmesh-ledger",
     "crates/myriadnode",
-    "crates/myriadmesh-tui",
+    "crates/myriadmesh-tui", "crates/myriadmesh-appliance",
 ]
 resolver = "2"
 

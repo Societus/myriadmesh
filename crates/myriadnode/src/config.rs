@@ -16,6 +16,7 @@ pub struct Config {
     pub routing: RoutingConfig,
     pub logging: LoggingConfig,
     pub heartbeat: HeartbeatConfig,
+    pub appliance: ApplianceConfig,
 
     #[serde(skip)]
     config_file_path: PathBuf,
@@ -166,6 +167,50 @@ impl Default for HeartbeatConfig {
             include_geolocation: false,
             store_remote_geolocation: false,
             max_nodes: 1000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApplianceConfig {
+    /// Enable appliance mode (gateway/caching for mobile devices)
+    pub enabled: bool,
+    /// Maximum number of devices that can pair with this appliance
+    pub max_paired_devices: usize,
+    /// Enable message caching for paired devices
+    pub message_caching: bool,
+    /// Maximum number of messages to cache per device
+    pub max_cache_messages_per_device: usize,
+    /// Maximum total cached messages across all devices
+    pub max_total_cache_messages: usize,
+    /// Enable relay/proxy functionality for paired devices
+    pub enable_relay: bool,
+    /// Enable bridge functionality (connect different network segments)
+    pub enable_bridge: bool,
+    /// Require manual approval for pairing requests
+    pub require_pairing_approval: bool,
+    /// Pairing methods supported: "qr_code", "pin"
+    pub pairing_methods: Vec<String>,
+    /// mDNS service advertisement for local discovery
+    pub mdns_enabled: bool,
+    /// Publish appliance availability to DHT
+    pub dht_advertisement: bool,
+}
+
+impl Default for ApplianceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_paired_devices: 10,
+            message_caching: true,
+            max_cache_messages_per_device: 1000,
+            max_total_cache_messages: 10000,
+            enable_relay: true,
+            enable_bridge: true,
+            require_pairing_approval: true,
+            pairing_methods: vec!["qr_code".to_string(), "pin".to_string()],
+            mdns_enabled: true,
+            dht_advertisement: true,
         }
     }
 }
@@ -324,6 +369,7 @@ impl Config {
                 store_remote_geolocation: false,
                 max_nodes: 1000,
             },
+            appliance: ApplianceConfig::default(),
             config_file_path: config_path.clone(),
             data_directory: data_dir,
         };
