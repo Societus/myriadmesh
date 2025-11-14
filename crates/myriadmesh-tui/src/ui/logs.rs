@@ -20,9 +20,11 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default().borders(Borders::ALL).title(title);
 
     if app.logs.is_empty() {
-        let text = ratatui::widgets::Paragraph::new("No logs available\n\nPress 'f' to toggle follow mode, 'c' to clear")
-            .block(block)
-            .style(Style::default().fg(Color::Gray));
+        let text = ratatui::widgets::Paragraph::new(
+            "No logs available\n\nPress 'f' to toggle follow mode, 'c' to clear",
+        )
+        .block(block)
+        .style(Style::default().fg(Color::Gray));
         f.render_widget(text, area);
         return;
     }

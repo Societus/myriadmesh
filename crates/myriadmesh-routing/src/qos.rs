@@ -41,33 +41,33 @@ impl QosClass {
     /// Get minimum bandwidth guarantee (bytes per second)
     pub fn min_bandwidth(&self) -> u64 {
         match self {
-            QosClass::RealTime => 64_000,      // 64 KB/s for VoIP
-            QosClass::Interactive => 32_000,   // 32 KB/s for interactive
-            QosClass::Streaming => 128_000,    // 128 KB/s for streaming
-            QosClass::BulkData => 0,           // No guarantee
-            QosClass::BestEffort => 0,         // No guarantee
+            QosClass::RealTime => 64_000,    // 64 KB/s for VoIP
+            QosClass::Interactive => 32_000, // 32 KB/s for interactive
+            QosClass::Streaming => 128_000,  // 128 KB/s for streaming
+            QosClass::BulkData => 0,         // No guarantee
+            QosClass::BestEffort => 0,       // No guarantee
         }
     }
 
     /// Get maximum latency tolerance (milliseconds)
     pub fn max_latency_ms(&self) -> u64 {
         match self {
-            QosClass::RealTime => 50,          // 50ms for real-time
-            QosClass::Interactive => 100,      // 100ms for interactive
-            QosClass::Streaming => 500,        // 500ms for streaming
-            QosClass::BulkData => 5000,        // 5s for bulk
-            QosClass::BestEffort => 10000,     // 10s for best effort
+            QosClass::RealTime => 50,      // 50ms for real-time
+            QosClass::Interactive => 100,  // 100ms for interactive
+            QosClass::Streaming => 500,    // 500ms for streaming
+            QosClass::BulkData => 5000,    // 5s for bulk
+            QosClass::BestEffort => 10000, // 10s for best effort
         }
     }
 
     /// Get jitter tolerance (milliseconds)
     pub fn max_jitter_ms(&self) -> u64 {
         match self {
-            QosClass::RealTime => 10,          // Low jitter for real-time
-            QosClass::Interactive => 50,       // Moderate jitter acceptable
-            QosClass::Streaming => 100,        // Higher jitter acceptable
-            QosClass::BulkData => 1000,        // Jitter not critical
-            QosClass::BestEffort => 1000,      // Jitter not critical
+            QosClass::RealTime => 10,     // Low jitter for real-time
+            QosClass::Interactive => 50,  // Moderate jitter acceptable
+            QosClass::Streaming => 100,   // Higher jitter acceptable
+            QosClass::BulkData => 1000,   // Jitter not critical
+            QosClass::BestEffort => 1000, // Jitter not critical
         }
     }
 }
@@ -342,10 +342,7 @@ pub struct QosStats {
 #[derive(Debug, thiserror::Error)]
 pub enum QosError {
     #[error("Insufficient bandwidth: requested {requested} bps, available {available} bps")]
-    InsufficientBandwidth {
-        requested: u64,
-        available: u64,
-    },
+    InsufficientBandwidth { requested: u64, available: u64 },
 
     #[error("Reservation not found")]
     ReservationNotFound,

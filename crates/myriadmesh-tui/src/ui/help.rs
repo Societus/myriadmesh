@@ -17,9 +17,12 @@ pub fn render(f: &mut Frame, _app: &App, area: Rect) {
 
     let help_text = vec![
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Global Shortcuts", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Global Shortcuts",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![
             Span::styled("  Tab / Shift+Tab  ", Style::default().fg(Color::Yellow)),
@@ -38,18 +41,24 @@ pub fn render(f: &mut Frame, _app: &App, area: Rect) {
             Span::raw("Quit application"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Dashboard View", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Dashboard View",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![
             Span::styled("  ↑ / ↓             ", Style::default().fg(Color::Yellow)),
             Span::raw("Navigate adapters"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Messages View", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Messages View",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![
             Span::styled("  ↑ / ↓             ", Style::default().fg(Color::Yellow)),
@@ -60,9 +69,12 @@ pub fn render(f: &mut Frame, _app: &App, area: Rect) {
             Span::raw("Send new message (coming soon)"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Logs View", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Logs View",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![
             Span::styled("  f                 ", Style::default().fg(Color::Yellow)),
@@ -74,12 +86,16 @@ pub fn render(f: &mut Frame, _app: &App, area: Rect) {
         ]),
         Line::from(""),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("MyriadMesh TUI v0.1.0", Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC)),
-        ]),
-        Line::from(vec![
-            Span::styled("Press any key to return to dashboard", Style::default().fg(Color::Gray)),
-        ]),
+        Line::from(vec![Span::styled(
+            "MyriadMesh TUI v0.1.0",
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::ITALIC),
+        )]),
+        Line::from(vec![Span::styled(
+            "Press any key to return to dashboard",
+            Style::default().fg(Color::Gray),
+        )]),
     ];
 
     let paragraph = Paragraph::new(help_text).block(block);

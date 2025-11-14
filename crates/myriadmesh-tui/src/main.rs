@@ -147,36 +147,33 @@ async fn run_app<B: ratatui::backend::Backend>(
 
 async fn handle_view_input(app: &mut App, key: crossterm::event::KeyEvent) {
     match app.current_view {
-        View::Dashboard => {
-            match key.code {
-                KeyCode::Up => app.previous_adapter(),
-                KeyCode::Down => app.next_adapter(),
-                _ => {}
+        View::Dashboard => match key.code {
+            KeyCode::Up => app.previous_adapter(),
+            KeyCode::Down => app.next_adapter(),
+            _ => {}
+        },
+        View::Messages => match key.code {
+            KeyCode::Up => app.previous_message(),
+            KeyCode::Down => app.next_message(),
+            _ => {}
+        },
+        View::Logs => match key.code {
+            KeyCode::Char('f') => {
+                app.toggle_log_follow();
+                app.add_log(
+                    "INFO".to_string(),
+                    format!(
+                        "Log follow mode: {}",
+                        if app.log_follow { "ON" } else { "OFF" }
+                    ),
+                );
             }
-        }
-        View::Messages => {
-            match key.code {
-                KeyCode::Up => app.previous_message(),
-                KeyCode::Down => app.next_message(),
-                _ => {}
+            KeyCode::Char('c') => {
+                app.clear_logs();
+                app.add_log("INFO".to_string(), "Logs cleared".to_string());
             }
-        }
-        View::Logs => {
-            match key.code {
-                KeyCode::Char('f') => {
-                    app.toggle_log_follow();
-                    app.add_log(
-                        "INFO".to_string(),
-                        format!("Log follow mode: {}", if app.log_follow { "ON" } else { "OFF" }),
-                    );
-                }
-                KeyCode::Char('c') => {
-                    app.clear_logs();
-                    app.add_log("INFO".to_string(), "Logs cleared".to_string());
-                }
-                _ => {}
-            }
-        }
+            _ => {}
+        },
         View::Help => {
             // Any key returns to dashboard
             app.current_view = View::Dashboard;

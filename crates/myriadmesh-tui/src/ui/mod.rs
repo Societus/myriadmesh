@@ -18,7 +18,11 @@ use ratatui::{
 pub fn render(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
         .split(f.area());
 
     // Render header with tabs
@@ -55,7 +59,11 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title("MyriadMesh TUI"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("MyriadMesh TUI"),
+        )
         .select(selected)
         .style(Style::default().fg(Color::White))
         .highlight_style(
@@ -78,7 +86,10 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
 
     // Add status indicator
     if app.is_loading {
-        footer_text.insert(0, Span::styled(" LOADING ", Style::default().fg(Color::Yellow)));
+        footer_text.insert(
+            0,
+            Span::styled(" LOADING ", Style::default().fg(Color::Yellow)),
+        );
         footer_text.insert(1, Span::raw(" | "));
     }
 

@@ -14,9 +14,9 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(7),  // Node info
-            Constraint::Length(8),  // Statistics
-            Constraint::Min(10),    // Adapters
+            Constraint::Length(7), // Node info
+            Constraint::Length(8), // Statistics
+            Constraint::Min(10),   // Adapters
         ])
         .split(area);
 
@@ -112,10 +112,7 @@ fn render_statistics(f: &mut Frame, app: &App, area: Rect) {
             Line::from(vec![
                 Span::styled("Primary Adapter: ", Style::default().fg(Color::Gray)),
                 Span::styled(
-                    status
-                        .primary_adapter
-                        .as_deref()
-                        .unwrap_or("None"),
+                    status.primary_adapter.as_deref().unwrap_or("None"),
                     Style::default().fg(Color::Magenta),
                 ),
             ]),
@@ -173,7 +170,11 @@ fn render_adapters(f: &mut Frame, app: &App, area: Rect) {
             };
 
             let primary_marker = if adapter.is_primary { " [PRIMARY]" } else { "" };
-            let backhaul_marker = if adapter.is_backhaul { " [BACKHAUL]" } else { "" };
+            let backhaul_marker = if adapter.is_backhaul {
+                " [BACKHAUL]"
+            } else {
+                ""
+            };
 
             let health_symbol = match adapter.health_status.as_str() {
                 "Healthy" => "●",
@@ -223,13 +224,11 @@ fn render_adapters(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        );
+    let list = List::new(items).block(block).highlight_style(
+        Style::default()
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    );
 
     f.render_widget(list, area);
 }

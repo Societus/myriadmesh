@@ -14,8 +14,8 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(10),    // Message list
-            Constraint::Length(5),  // Send message form
+            Constraint::Min(10),   // Message list
+            Constraint::Length(5), // Send message form
         ])
         .split(area);
 
@@ -30,7 +30,9 @@ fn render_message_list(f: &mut Frame, app: &App, area: Rect) {
         .title(format!("Messages ({})", app.messages.len()));
 
     if app.messages.is_empty() {
-        let text = Paragraph::new("No messages").block(block).style(Style::default().fg(Color::Gray));
+        let text = Paragraph::new("No messages")
+            .block(block)
+            .style(Style::default().fg(Color::Gray));
         f.render_widget(text, area);
         return;
     }
@@ -60,25 +62,13 @@ fn render_message_list(f: &mut Frame, app: &App, area: Rect) {
             };
 
             let line = Line::from(vec![
-                Span::styled(
-                    timestamp,
-                    Style::default().fg(Color::Gray),
-                ),
+                Span::styled(timestamp, Style::default().fg(Color::Gray)),
                 Span::raw(" "),
-                Span::styled(
-                    msg.status.clone(),
-                    Style::default().fg(status_color),
-                ),
+                Span::styled(msg.status.clone(), Style::default().fg(status_color)),
                 Span::raw(" "),
-                Span::styled(
-                    from_preview,
-                    Style::default().fg(Color::Cyan),
-                ),
+                Span::styled(from_preview, Style::default().fg(Color::Cyan)),
                 Span::raw(" → "),
-                Span::styled(
-                    to_preview,
-                    Style::default().fg(Color::Magenta),
-                ),
+                Span::styled(to_preview, Style::default().fg(Color::Magenta)),
                 Span::raw(": "),
                 Span::styled(
                     msg.content.clone(),
@@ -96,13 +86,11 @@ fn render_message_list(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        );
+    let list = List::new(items).block(block).highlight_style(
+        Style::default()
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    );
 
     f.render_widget(list, area);
 }
@@ -125,7 +113,9 @@ fn render_send_form(f: &mut Frame, app: &App, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             "Press 's' to compose a new message",
-            Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::ITALIC),
         )),
     ];
 

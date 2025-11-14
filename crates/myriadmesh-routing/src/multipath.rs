@@ -54,7 +54,7 @@ impl NetworkPath {
 
     /// Get path length (number of hops)
     pub fn length(&self) -> usize {
-        if self.hops.len() > 0 {
+        if !self.hops.is_empty() {
             self.hops.len() - 1 // Hops = edges = nodes - 1
         } else {
             0
@@ -128,7 +128,7 @@ impl MultiPathRouter {
 
     /// Add a path to a destination
     pub fn add_path(&mut self, destination: NodeId, path: NetworkPath) {
-        let paths = self.paths.entry(destination).or_insert_with(Vec::new);
+        let paths = self.paths.entry(destination).or_default();
 
         // Add path if not already present
         if !paths.contains(&path) {
@@ -170,9 +170,7 @@ impl MultiPathRouter {
         match self.strategy {
             MultiPathStrategy::AllPaths => available_paths.clone(),
 
-            MultiPathStrategy::BestN(n) => {
-                available_paths.iter().take(n).cloned().collect()
-            }
+            MultiPathStrategy::BestN(n) => available_paths.iter().take(n).cloned().collect(),
 
             MultiPathStrategy::QualityThreshold(threshold) => {
                 let threshold_f32 = threshold as f32 / 100.0;
@@ -183,9 +181,7 @@ impl MultiPathRouter {
                     .collect()
             }
 
-            MultiPathStrategy::DisjointOnly => {
-                self.select_disjoint_paths(available_paths)
-            }
+            MultiPathStrategy::DisjointOnly => self.select_disjoint_paths(available_paths),
 
             MultiPathStrategy::Adaptive => {
                 // Adaptive: more paths for higher priority
@@ -219,7 +215,11 @@ impl MultiPathRouter {
     }
 
     /// Select up to N node-disjoint paths
-    fn select_disjoint_paths_n(&self, available_paths: &[NetworkPath], n: usize) -> Vec<NetworkPath> {
+    fn select_disjoint_paths_n(
+        &self,
+        available_paths: &[NetworkPath],
+        n: usize,
+    ) -> Vec<NetworkPath> {
         if available_paths.is_empty() || n == 0 {
             return Vec::new();
         }
@@ -242,12 +242,7 @@ impl MultiPathRouter {
     }
 
     /// Update path quality based on feedback
-    pub fn update_path_quality(
-        &mut self,
-        destination: &NodeId,
-        path: &NetworkPath,
-        success: bool,
-    ) {
+    pub fn update_path_quality(&mut self, destination: &NodeId, path: &NetworkPath, success: bool) {
         if let Some(paths) = self.paths.get_mut(destination) {
             if let Some(stored_path) = paths.iter_mut().find(|p| p.hops == path.hops) {
                 if success {
@@ -331,8 +326,14 @@ mod tests {
         ]);
 
         assert_eq!(path.length(), 2);
-        assert_eq!(path.next_hop(&create_test_node_id(1)), Some(create_test_node_id(2)));
-        assert_eq!(path.next_hop(&create_test_node_id(2)), Some(create_test_node_id(3)));
+        assert_eq!(
+            path.next_hop(&create_test_node_id(1)),
+            Some(create_test_node_id(2))
+        );
+        assert_eq!(
+            path.next_hop(&create_test_node_id(2)),
+            Some(create_test_node_id(3))
+        );
         assert_eq!(path.next_hop(&create_test_node_id(3)), None);
     }
 

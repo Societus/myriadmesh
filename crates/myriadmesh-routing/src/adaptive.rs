@@ -42,13 +42,7 @@ impl LinkMetrics {
     }
 
     /// Update metrics with new measurement
-    pub fn update(
-        &mut self,
-        latency_ms: f64,
-        loss: bool,
-        bandwidth_bps: u64,
-        utilization: f64,
-    ) {
+    pub fn update(&mut self, latency_ms: f64, loss: bool, bandwidth_bps: u64, utilization: f64) {
         let alpha = 0.125; // Exponential moving average factor (1/8)
 
         // Update latency with EMA
@@ -229,7 +223,7 @@ impl AdaptiveRoutingTable {
         bandwidth_bps: u64,
         utilization: f64,
     ) {
-        let metrics = self.metrics.entry((from, to)).or_insert_with(LinkMetrics::new);
+        let metrics = self.metrics.entry((from, to)).or_default();
         metrics.update(latency_ms, loss, bandwidth_bps, utilization);
     }
 
@@ -275,7 +269,8 @@ impl AdaptiveRoutingTable {
 
     /// Cleanup stale metrics
     pub fn cleanup_stale(&mut self) {
-        self.metrics.retain(|_, metrics| !metrics.is_stale(self.metrics_ttl));
+        self.metrics
+            .retain(|_, metrics| !metrics.is_stale(self.metrics_ttl));
     }
 
     /// Get total number of tracked links
@@ -305,7 +300,11 @@ impl AdaptiveRoutingTable {
         };
 
         let avg_quality = if total_links > 0 {
-            self.metrics.values().map(|m| m.quality_score()).sum::<f64>() / total_links as f64
+            self.metrics
+                .values()
+                .map(|m| m.quality_score())
+                .sum::<f64>()
+                / total_links as f64
         } else {
             0.0
         };
@@ -378,10 +377,7 @@ mod tests {
 
     #[test]
     fn test_adaptive_routing_table() {
-        let mut table = AdaptiveRoutingTable::new(
-            RoutingPolicy::Balanced,
-            Duration::from_secs(60),
-        );
+        let mut table = AdaptiveRoutingTable::new(RoutingPolicy::Balanced, Duration::from_secs(60));
 
         let node1 = NodeId::from_bytes([0u8; 64]);
         let node2 = NodeId::from_bytes([1u8; 64]);
@@ -401,10 +397,8 @@ mod tests {
 
     #[test]
     fn test_select_best_neighbor() {
-        let mut table = AdaptiveRoutingTable::new(
-            RoutingPolicy::LowLatency,
-            Duration::from_secs(60),
-        );
+        let mut table =
+            AdaptiveRoutingTable::new(RoutingPolicy::LowLatency, Duration::from_secs(60));
 
         let current = create_test_node_id(1);
         let neighbor1 = create_test_node_id(2);
