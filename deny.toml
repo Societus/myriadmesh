@@ -1,0 +1,59 @@
+# cargo-deny configuration for MyriadMesh
+# https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+# Security vulnerability database
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Unmaintained crates - set to workspace to warn about unmaintained workspace crates
+unmaintained = "workspace"
+# Ignore specific advisories (use sparingly and document why)
+ignore = [
+    # RUSTSEC-2021-0137: sodiumoxide is deprecated but still functional and secure
+    # The maintainer recommends migrating to sodiumoxide successor crates, but
+    # sodiumoxide itself has no known security vulnerabilities. This is just an
+    # "unmaintained" advisory. We accept this risk for now.
+    "RUSTSEC-2021-0137",
+]
+
+[licenses]
+# Allow these licenses
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "CC0-1.0",
+    "Zlib",
+    "Unicode-3.0",
+    "GPL-3.0-only",  # For our workspace crates
+    "MPL-2.0",  # Mozilla Public License 2.0
+    "CDLA-Permissive-2.0",  # Community Data License Agreement
+]
+
+# Allow specific crates with problematic licenses
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [
+    { path = "LICENSE", hash = 0xbd0eed23 }
+]
+
+[bans]
+# Multiple versions of the same crate
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+# Crates.io is the only allowed source
+unknown-registry = "deny"
+unknown-git = "deny"
+
+# Allow git sources for development
+allow-git = [
+    "https://github.com/Societus",
+]

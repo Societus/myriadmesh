@@ -1,0 +1,15 @@
+# cargo-audit configuration for MyriadMesh
+# https://docs.rs/cargo-audit/latest/cargo_audit/
+
+[advisories]
+# Ignore list for known advisories that we accept
+ignore = [
+    "RUSTSEC-2021-0137",  # sodiumoxide deprecated - no security vulnerability
+]
+
+# Treat unmaintained crates as warnings, not errors
+unmaintained = "warn"
+
+[database]
+# Use the RustSec Advisory Database
+url = "https://github.com/RustSec/advisory-db.git"

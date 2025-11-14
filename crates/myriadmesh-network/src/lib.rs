@@ -7,6 +7,14 @@
 //! - LoRaWAN
 //! - Radio (APRS, CB, Shortwave, FRS/GMRS)
 //! - Overlay networks (i2p)
+//!
+//! ## Adaptive Security
+//!
+//! The network layer includes adaptive security features:
+//! - Component version tracking with reputation impact
+//! - Hot-reloadable adapters for zero-downtime updates
+//! - Coordinated update scheduling with network neighbors
+//! - Health monitoring and automatic rollback
 
 pub mod adapter;
 pub mod adapters;
@@ -14,7 +22,9 @@ pub mod error;
 pub mod i2p;
 pub mod manager;
 pub mod metrics;
+pub mod reload;
 pub mod types;
+pub mod version_tracking;
 
 pub use adapter::{AdapterStatus, NetworkAdapter};
 pub use adapters::{
@@ -25,7 +35,16 @@ pub use error::{NetworkError, Result};
 pub use i2p::{I2pAdapter, I2pRouterConfig};
 pub use manager::AdapterManager;
 pub use metrics::AdapterMetrics;
+pub use reload::{
+    AdapterHealthMonitor, AdapterLoadStatus, AdapterMetadata, AdapterRegistry,
+    DegradationThresholds, HealthMetrics, HistoricalVersion, RollbackHistory,
+    RollbackHistoryConfig,
+};
 pub use types::{AdapterCapabilities, Address, PowerConsumption};
+pub use version_tracking::{
+    calculate_version_penalty, AdapterComponentStatus, AdapterVersionInfo, ComponentManifest,
+    CveInfo, CveSeverity, SemanticVersion,
+};
 
 #[cfg(test)]
 mod tests {
