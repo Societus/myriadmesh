@@ -7,6 +7,7 @@ members = [
     "crates/myriadmesh-routing",
     "crates/myriadmesh-network",
     "crates/myriadmesh-i2p",
+    "crates/myriadmesh-ledger",
     "crates/myriadnode",
     "crates/myriadmesh-tui",
 ]
@@ -36,11 +37,13 @@ anyhow = "1.0"
 
 # Testing
 criterion = "0.5"
+tempfile = "3.8"
 
 # Utilities
 hex = "0.4"
 blake2 = "0.10"
 rand = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
 
 [profile.release]
 opt-level = 3
