@@ -42,8 +42,8 @@ pub use reload::{
 };
 pub use types::{AdapterCapabilities, Address, PowerConsumption};
 pub use version_tracking::{
-    AdapterComponentStatus, AdapterVersionInfo, ComponentManifest, CveInfo, CveSeverity,
-    SemanticVersion, calculate_version_penalty,
+    calculate_version_penalty, AdapterComponentStatus, AdapterVersionInfo, ComponentManifest,
+    CveInfo, CveSeverity, SemanticVersion,
 };
 
 #[cfg(test)]

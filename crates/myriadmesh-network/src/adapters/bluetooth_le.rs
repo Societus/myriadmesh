@@ -24,6 +24,9 @@ use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
 
+/// Type alias for incoming frame receiver
+type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+
 /// BLE adapter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BleConfig {
@@ -58,17 +61,22 @@ impl Default for BleConfig {
 #[derive(Debug, Clone)]
 struct BlePeer {
     address: String,
+    #[allow(dead_code)]
     name: Option<String>,
     node_id: Option<NodeId>,
+    #[allow(dead_code)]
     rssi: i8,
     last_seen: u64,
+    #[allow(dead_code)]
     connected: bool,
 }
 
 /// GATT connection state
 struct GattConnection {
+    #[allow(dead_code)]
     remote_address: String,
     tx: mpsc::UnboundedSender<Vec<u8>>,
+    #[allow(dead_code)]
     connected_at: u64,
     mtu: usize,
 }
@@ -82,7 +90,7 @@ pub struct BleAdapter {
     connections: Arc<RwLock<HashMap<String, GattConnection>>>,
     local_address: Option<String>,
     /// Receive channel for incoming frames
-    rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>,
+    rx: FrameReceiver,
     /// Send channel for incoming frames
     incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
     /// Advertising state
@@ -307,9 +315,8 @@ impl NetworkAdapter for BleAdapter {
         self.ensure_connection(ble_address).await?;
 
         // Serialize frame
-        let frame_data = bincode::serialize(frame).map_err(|e| {
-            NetworkError::SendFailed(format!("Failed to serialize frame: {}", e))
-        })?;
+        let frame_data = bincode::serialize(frame)
+            .map_err(|e| NetworkError::SendFailed(format!("Failed to serialize frame: {}", e)))?;
 
         // Check size against BLE MTU
         let connections = self.connections.read().await;

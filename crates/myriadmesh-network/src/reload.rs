@@ -4,7 +4,7 @@
 //! the entire node. Coordinates graceful connection draining and
 //! atomic adapter swapping.
 
-use crate::adapter::{AdapterStatus, NetworkAdapter};
+use crate::adapter::NetworkAdapter;
 use crate::error::{NetworkError, Result};
 use crate::version_tracking::SemanticVersion;
 use myriadmesh_protocol::types::AdapterType;
@@ -128,11 +128,11 @@ pub struct DegradationThresholds {
 impl Default for DegradationThresholds {
     fn default() -> Self {
         Self {
-            max_success_rate_drop: 0.10,      // 10% drop triggers rollback
-            max_latency_increase: 0.50,       // 50% increase triggers rollback
-            max_error_rate_multiplier: 2.0,   // 2x errors triggers rollback
-            crash_triggers_rollback: true,    // Any crash triggers rollback
-            min_operations: 10,               // Need at least 10 ops to evaluate
+            max_success_rate_drop: 0.10,    // 10% drop triggers rollback
+            max_latency_increase: 0.50,     // 50% increase triggers rollback
+            max_error_rate_multiplier: 2.0, // 2x errors triggers rollback
+            crash_triggers_rollback: true,  // Any crash triggers rollback
+            min_operations: 10,             // Need at least 10 ops to evaluate
         }
     }
 }
@@ -253,10 +253,7 @@ impl AdapterHealthMonitor {
         if self.thresholds.crash_triggers_rollback && current_metrics.crash_count > 0 {
             return (
                 true,
-                format!(
-                    "Crashes detected: {} crashes",
-                    current_metrics.crash_count
-                ),
+                format!("Crashes detected: {} crashes", current_metrics.crash_count),
             );
         }
 
@@ -415,8 +412,8 @@ impl Default for RollbackHistoryConfig {
     fn default() -> Self {
         Self {
             max_history_depth: 5,      // Keep last 5 versions
-            preserve_binaries: false,   // Disabled by default (requires disk space)
-            binary_storage_path: None,  // No storage path by default
+            preserve_binaries: false,  // Disabled by default (requires disk space)
+            binary_storage_path: None, // No storage path by default
         }
     }
 }
@@ -862,10 +859,9 @@ impl AdapterRegistry {
     pub async fn rollback_adapter(&self, adapter_type: AdapterType) -> Result<()> {
         let previous_version = {
             let previous = self.previous_versions.read().await;
-            previous
-                .get(&adapter_type)
-                .cloned()
-                .ok_or_else(|| NetworkError::InitializationFailed("No previous version".to_string()))?
+            previous.get(&adapter_type).cloned().ok_or_else(|| {
+                NetworkError::InitializationFailed("No previous version".to_string())
+            })?
         };
 
         log::warn!(
@@ -981,7 +977,7 @@ impl AdapterRegistry {
     /// Get adapter reference
     pub async fn get_adapter(
         &self,
-        adapter_type: AdapterType,
+        _adapter_type: AdapterType,
     ) -> Option<Arc<RwLock<Box<dyn NetworkAdapter>>>> {
         // This would need adjustment to the actual implementation
         // For now, returning None as we can't easily clone trait objects
@@ -1236,14 +1232,21 @@ mod tests {
 
         // Should not be degraded yet (insufficient data)
         let (degraded, _) = monitor.is_degraded(AdapterType::Ethernet).await;
-        assert!(!degraded, "Should not evaluate with insufficient operations");
+        assert!(
+            !degraded,
+            "Should not evaluate with insufficient operations"
+        );
     }
 
     #[tokio::test]
     async fn test_auto_rollback_disabled_by_default() {
         let registry = AdapterRegistry::new();
 
-        assert!(!registry.is_auto_rollback_enabled(AdapterType::Ethernet).await);
+        assert!(
+            !registry
+                .is_auto_rollback_enabled(AdapterType::Ethernet)
+                .await
+        );
     }
 
     #[tokio::test]
@@ -1251,10 +1254,18 @@ mod tests {
         let registry = AdapterRegistry::new();
 
         registry.enable_auto_rollback(AdapterType::Ethernet).await;
-        assert!(registry.is_auto_rollback_enabled(AdapterType::Ethernet).await);
+        assert!(
+            registry
+                .is_auto_rollback_enabled(AdapterType::Ethernet)
+                .await
+        );
 
         registry.disable_auto_rollback(AdapterType::Ethernet).await;
-        assert!(!registry.is_auto_rollback_enabled(AdapterType::Ethernet).await);
+        assert!(
+            !registry
+                .is_auto_rollback_enabled(AdapterType::Ethernet)
+                .await
+        );
     }
 
     #[tokio::test]
@@ -1434,10 +1445,7 @@ mod tests {
         let most_recent = history
             .get_nth_previous_version(AdapterType::Ethernet, 0)
             .await;
-        assert_eq!(
-            most_recent.unwrap().version,
-            SemanticVersion::new(1, 2, 0)
-        );
+        assert_eq!(most_recent.unwrap().version, SemanticVersion::new(1, 2, 0));
 
         // Get second most recent (n=1) should be v1.1.0
         let second = history

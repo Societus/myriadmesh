@@ -23,6 +23,9 @@ use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
 
+/// Type alias for incoming frame receiver
+type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+
 /// Bluetooth Classic adapter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BluetoothConfig {
@@ -54,17 +57,22 @@ impl Default for BluetoothConfig {
 #[derive(Debug, Clone)]
 struct BluetoothPeer {
     address: String,
+    #[allow(dead_code)]
     name: Option<String>,
     node_id: Option<NodeId>,
     last_seen: u64,
+    #[allow(dead_code)]
     paired: bool,
+    #[allow(dead_code)]
     rssi: Option<i8>,
 }
 
 /// RFCOMM connection state
 struct RfcommConnection {
+    #[allow(dead_code)]
     remote_address: String,
     tx: mpsc::UnboundedSender<Vec<u8>>,
+    #[allow(dead_code)]
     connected_at: u64,
 }
 
@@ -77,7 +85,7 @@ pub struct BluetoothAdapter {
     connections: Arc<RwLock<HashMap<String, RfcommConnection>>>,
     local_address: Option<String>,
     /// Receive channel for incoming frames
-    rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>,
+    rx: FrameReceiver,
     /// Send channel for incoming frames (cloned for connection handlers)
     incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
 }
@@ -337,9 +345,8 @@ impl NetworkAdapter for BluetoothAdapter {
         self.ensure_connection(bt_address).await?;
 
         // Serialize frame to bytes
-        let frame_data = bincode::serialize(frame).map_err(|e| {
-            NetworkError::SendFailed(format!("Failed to serialize frame: {}", e))
-        })?;
+        let frame_data = bincode::serialize(frame)
+            .map_err(|e| NetworkError::SendFailed(format!("Failed to serialize frame: {}", e)))?;
 
         // Check size limit
         if frame_data.len() > self.capabilities.max_message_size {

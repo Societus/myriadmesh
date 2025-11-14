@@ -3,7 +3,6 @@
 //! Tracks adapter library versions and applies reputation penalties
 //! for outdated or vulnerable components.
 
-use crate::types::AdapterCapabilities;
 use myriadmesh_crypto::signing::Signature;
 use myriadmesh_protocol::{types::AdapterType, NodeId};
 use serde::{Deserialize, Serialize};
@@ -169,7 +168,7 @@ pub struct AdvisoryCompliance {
 pub fn calculate_version_penalty(manifest: &ComponentManifest) -> f64 {
     let mut penalty = 0.0;
 
-    for (_adapter_type, info) in &manifest.adapters {
+    for info in manifest.adapters.values() {
         // Base penalty by status
         let status_penalty = match info.status {
             AdapterComponentStatus::Current => 0.0,
@@ -366,7 +365,7 @@ impl UpdateNotificationManager {
     pub async fn check_for_updates(&self, manifest: &ComponentManifest) -> Vec<UpdateNotification> {
         let mut notifications = Vec::new();
 
-        for (_adapter_type, info) in &manifest.adapters {
+        for info in manifest.adapters.values() {
             // Check for version updates
             if let Some(latest) = &info.latest_version {
                 if &info.version < latest {
@@ -425,12 +424,20 @@ impl UpdateNotificationManager {
     /// Determine urgency based on component status
     fn determine_update_urgency(&self, info: &AdapterVersionInfo) -> UpdateUrgency {
         // Critical CVEs = Critical urgency
-        if info.known_cves.iter().any(|c| c.severity == CveSeverity::Critical) {
+        if info
+            .known_cves
+            .iter()
+            .any(|c| c.severity == CveSeverity::Critical)
+        {
             return UpdateUrgency::Critical;
         }
 
         // High CVEs = High urgency
-        if info.known_cves.iter().any(|c| c.severity == CveSeverity::High) {
+        if info
+            .known_cves
+            .iter()
+            .any(|c| c.severity == CveSeverity::High)
+        {
             return UpdateUrgency::High;
         }
 
@@ -462,7 +469,10 @@ impl UpdateNotificationManager {
     }
 
     /// Get notifications by urgency
-    pub async fn get_notifications_by_urgency(&self, min_urgency: UpdateUrgency) -> Vec<UpdateNotification> {
+    pub async fn get_notifications_by_urgency(
+        &self,
+        min_urgency: UpdateUrgency,
+    ) -> Vec<UpdateNotification> {
         let notifications = self.notifications.read().await;
 
         notifications
@@ -521,10 +531,8 @@ mod tests {
 
     #[test]
     fn test_penalty_current_version() {
-        let mut manifest = ComponentManifest::new(
-            NodeId::from_bytes([0u8; 64]),
-            SemanticVersion::new(1, 0, 0),
-        );
+        let mut manifest =
+            ComponentManifest::new(NodeId::from_bytes([0u8; 64]), SemanticVersion::new(1, 0, 0));
 
         manifest.add_adapter(AdapterVersionInfo {
             adapter_type: AdapterType::Ethernet,
@@ -542,10 +550,8 @@ mod tests {
 
     #[test]
     fn test_penalty_minor_update() {
-        let mut manifest = ComponentManifest::new(
-            NodeId::from_bytes([0u8; 64]),
-            SemanticVersion::new(1, 0, 0),
-        );
+        let mut manifest =
+            ComponentManifest::new(NodeId::from_bytes([0u8; 64]), SemanticVersion::new(1, 0, 0));
 
         manifest.add_adapter(AdapterVersionInfo {
             adapter_type: AdapterType::Ethernet,
@@ -563,10 +569,8 @@ mod tests {
 
     #[test]
     fn test_penalty_critical_cve() {
-        let mut manifest = ComponentManifest::new(
-            NodeId::from_bytes([0u8; 64]),
-            SemanticVersion::new(1, 0, 0),
-        );
+        let mut manifest =
+            ComponentManifest::new(NodeId::from_bytes([0u8; 64]), SemanticVersion::new(1, 0, 0));
 
         manifest.add_adapter(AdapterVersionInfo {
             adapter_type: AdapterType::Bluetooth,
@@ -591,10 +595,8 @@ mod tests {
 
     #[test]
     fn test_penalty_unsupported() {
-        let mut manifest = ComponentManifest::new(
-            NodeId::from_bytes([0u8; 64]),
-            SemanticVersion::new(1, 0, 0),
-        );
+        let mut manifest =
+            ComponentManifest::new(NodeId::from_bytes([0u8; 64]), SemanticVersion::new(1, 0, 0));
 
         manifest.add_adapter(AdapterVersionInfo {
             adapter_type: AdapterType::Cellular,
@@ -612,10 +614,8 @@ mod tests {
 
     #[test]
     fn test_has_critical_updates() {
-        let mut manifest = ComponentManifest::new(
-            NodeId::from_bytes([0u8; 64]),
-            SemanticVersion::new(1, 0, 0),
-        );
+        let mut manifest =
+            ComponentManifest::new(NodeId::from_bytes([0u8; 64]), SemanticVersion::new(1, 0, 0));
 
         assert!(!manifest.has_critical_updates());
 
@@ -636,10 +636,8 @@ mod tests {
     async fn test_update_notifications() {
         let manager = UpdateNotificationManager::new();
 
-        let mut manifest = ComponentManifest::new(
-            NodeId::from_bytes([0u8; 64]),
-            SemanticVersion::new(1, 0, 0),
-        );
+        let mut manifest =
+            ComponentManifest::new(NodeId::from_bytes([0u8; 64]), SemanticVersion::new(1, 0, 0));
 
         // Add outdated adapter
         manifest.add_adapter(AdapterVersionInfo {
@@ -667,10 +665,8 @@ mod tests {
     async fn test_security_update_notification() {
         let manager = UpdateNotificationManager::new();
 
-        let mut manifest = ComponentManifest::new(
-            NodeId::from_bytes([0u8; 64]),
-            SemanticVersion::new(1, 0, 0),
-        );
+        let mut manifest =
+            ComponentManifest::new(NodeId::from_bytes([0u8; 64]), SemanticVersion::new(1, 0, 0));
 
         // Add adapter with CVE
         manifest.add_adapter(AdapterVersionInfo {
@@ -706,10 +702,8 @@ mod tests {
     async fn test_notification_filtering_by_urgency() {
         let manager = UpdateNotificationManager::new();
 
-        let mut manifest = ComponentManifest::new(
-            NodeId::from_bytes([0u8; 64]),
-            SemanticVersion::new(1, 0, 0),
-        );
+        let mut manifest =
+            ComponentManifest::new(NodeId::from_bytes([0u8; 64]), SemanticVersion::new(1, 0, 0));
 
         // Add multiple adapters with different urgencies
         manifest.add_adapter(AdapterVersionInfo {
@@ -741,11 +735,15 @@ mod tests {
         manager.check_for_updates(&manifest).await;
 
         // Get only critical notifications
-        let critical = manager.get_notifications_by_urgency(UpdateUrgency::Critical).await;
+        let critical = manager
+            .get_notifications_by_urgency(UpdateUrgency::Critical)
+            .await;
         assert_eq!(critical.len(), 1);
 
         // Get medium and above
-        let medium_plus = manager.get_notifications_by_urgency(UpdateUrgency::Medium).await;
-        assert!(medium_plus.len() >= 1);
+        let medium_plus = manager
+            .get_notifications_by_urgency(UpdateUrgency::Medium)
+            .await;
+        assert!(!medium_plus.is_empty());
     }
 }

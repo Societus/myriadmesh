@@ -22,6 +22,9 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
 
+/// Type alias for incoming frame receiver
+type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+
 /// Cellular adapter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CellularConfig {
@@ -68,8 +71,10 @@ struct ConnectionState {
 
 /// TCP connection over cellular
 struct TcpConnection {
+    #[allow(dead_code)]
     remote_address: String,
     tx: mpsc::UnboundedSender<Vec<u8>>,
+    #[allow(dead_code)]
     connected_at: u64,
 }
 
@@ -81,7 +86,7 @@ pub struct CellularAdapter {
     connections: Arc<RwLock<HashMap<String, TcpConnection>>>,
     local_ip: Option<String>,
     /// Receive channel for incoming frames
-    rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>,
+    rx: FrameReceiver,
     /// Send channel for incoming frames
     incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
 }
@@ -90,8 +95,8 @@ impl CellularAdapter {
     pub fn new(config: CellularConfig) -> Self {
         let capabilities = AdapterCapabilities {
             adapter_type: AdapterType::Cellular,
-            max_message_size: 1024 * 1024, // 1MB for cellular
-            typical_latency_ms: 40.0,       // 5G latency
+            max_message_size: 1024 * 1024,     // 1MB for cellular
+            typical_latency_ms: 40.0,          // 5G latency
             typical_bandwidth_bps: 50_000_000, // 50 Mbps typical
             reliability: 0.98,
             range_meters: 0.0, // Wide area (not local range)
@@ -303,9 +308,8 @@ impl NetworkAdapter for CellularAdapter {
         self.ensure_connection(ip_addr).await?;
 
         // Serialize frame
-        let frame_data = bincode::serialize(frame).map_err(|e| {
-            NetworkError::SendFailed(format!("Failed to serialize frame: {}", e))
-        })?;
+        let frame_data = bincode::serialize(frame)
+            .map_err(|e| NetworkError::SendFailed(format!("Failed to serialize frame: {}", e)))?;
 
         // Check size limit
         if frame_data.len() > self.capabilities.max_message_size {
