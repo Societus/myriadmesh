@@ -39,3 +39,4 @@ log = "0.4"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
+myriadmesh-routing = { path = "../myriadmesh-routing" }

@@ -143,6 +143,51 @@ impl ApiClient {
             .context("Failed to parse heartbeat stats")?;
         Ok(response)
     }
+
+    /// Get i2p router status
+    pub async fn i2p_status(&self) -> Result<I2pStatus> {
+        let url = format!("{}/api/i2p/status", self.base_url);
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to get i2p status")?
+            .json()
+            .await
+            .context("Failed to parse i2p status")?;
+        Ok(response)
+    }
+
+    /// Get i2p destination
+    pub async fn i2p_destination(&self) -> Result<I2pDestination> {
+        let url = format!("{}/api/i2p/destination", self.base_url);
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to get i2p destination")?
+            .json()
+            .await
+            .context("Failed to parse i2p destination")?;
+        Ok(response)
+    }
+
+    /// Get i2p tunnels
+    pub async fn i2p_tunnels(&self) -> Result<I2pTunnels> {
+        let url = format!("{}/api/i2p/tunnels", self.base_url);
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to get i2p tunnels")?
+            .json()
+            .await
+            .context("Failed to parse i2p tunnels")?;
+        Ok(response)
+    }
 }
 
 // Response types
@@ -240,4 +285,36 @@ pub struct HeartbeatStats {
     pub total_nodes: usize,
     pub nodes_with_location: usize,
     pub adapter_counts: HashMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct I2pStatus {
+    pub router_status: String,
+    pub adapter_status: String,
+    pub router_version: String,
+    pub tunnels_active: usize,
+    pub peers_connected: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct I2pDestination {
+    pub destination: String,
+    pub created_at: u64,
+    pub node_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct I2pTunnels {
+    pub inbound_tunnels: Vec<I2pTunnelInfo>,
+    pub outbound_tunnels: Vec<I2pTunnelInfo>,
+    pub total_bandwidth_bps: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct I2pTunnelInfo {
+    pub tunnel_id: String,
+    pub peers: Vec<String>,
+    pub latency_ms: f64,
+    pub bandwidth_bps: u64,
+    pub status: String,
 }

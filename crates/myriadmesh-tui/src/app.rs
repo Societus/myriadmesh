@@ -1,7 +1,8 @@
 //! Application state and navigation
 
 use crate::api_client::{
-    AdapterInfo, ApiClient, DhtNode, HeartbeatStats, Message, NodeInfo, NodeStatus,
+    AdapterInfo, ApiClient, DhtNode, HeartbeatStats, I2pDestination, I2pStatus, I2pTunnels,
+    Message, NodeInfo, NodeStatus,
 };
 use anyhow::Result;
 
@@ -10,7 +11,7 @@ use anyhow::Result;
 pub enum View {
     Dashboard,
     Messages,
-    Config,
+    I2p,
     Logs,
     Help,
 }
@@ -20,8 +21,8 @@ impl View {
     pub fn next(&self) -> Self {
         match self {
             View::Dashboard => View::Messages,
-            View::Messages => View::Config,
-            View::Config => View::Logs,
+            View::Messages => View::I2p,
+            View::I2p => View::Logs,
             View::Logs => View::Dashboard,
             View::Help => View::Dashboard,
         }
@@ -32,8 +33,8 @@ impl View {
         match self {
             View::Dashboard => View::Logs,
             View::Messages => View::Dashboard,
-            View::Config => View::Messages,
-            View::Logs => View::Config,
+            View::I2p => View::Messages,
+            View::Logs => View::I2p,
             View::Help => View::Dashboard,
         }
     }
@@ -43,7 +44,7 @@ impl View {
         match self {
             View::Dashboard => "Dashboard",
             View::Messages => "Messages",
-            View::Config => "Configuration",
+            View::I2p => "I2P Network",
             View::Logs => "Logs",
             View::Help => "Help",
         }
@@ -70,6 +71,12 @@ pub struct App {
     pub dht_nodes: Vec<DhtNode>,
     /// Heartbeat statistics
     pub heartbeat_stats: Option<HeartbeatStats>,
+    /// I2P router status
+    pub i2p_status: Option<I2pStatus>,
+    /// I2P destination
+    pub i2p_destination: Option<I2pDestination>,
+    /// I2P tunnels
+    pub i2p_tunnels: Option<I2pTunnels>,
     /// Error message
     pub error: Option<String>,
     /// Loading state
@@ -108,6 +115,9 @@ impl App {
             messages: Vec::new(),
             dht_nodes: Vec::new(),
             heartbeat_stats: None,
+            i2p_status: None,
+            i2p_destination: None,
+            i2p_tunnels: None,
             error: None,
             is_loading: false,
             message_input: String::new(),
@@ -125,13 +135,26 @@ impl App {
         self.error = None;
 
         // Fetch all data in parallel
-        let (node_info, node_status, adapters, messages, dht_nodes, heartbeat_stats) = tokio::join!(
+        let (
+            node_info,
+            node_status,
+            adapters,
+            messages,
+            dht_nodes,
+            heartbeat_stats,
+            i2p_status,
+            i2p_destination,
+            i2p_tunnels,
+        ) = tokio::join!(
             self.api_client.node_info(),
             self.api_client.node_status(),
             self.api_client.adapters(),
             self.api_client.messages(),
             self.api_client.dht_nodes(),
             self.api_client.heartbeat_stats(),
+            self.api_client.i2p_status(),
+            self.api_client.i2p_destination(),
+            self.api_client.i2p_tunnels(),
         );
 
         // Update state
@@ -141,6 +164,9 @@ impl App {
         self.messages = messages.unwrap_or_default();
         self.dht_nodes = dht_nodes.unwrap_or_default();
         self.heartbeat_stats = heartbeat_stats.ok();
+        self.i2p_status = i2p_status.ok();
+        self.i2p_destination = i2p_destination.ok();
+        self.i2p_tunnels = i2p_tunnels.ok();
 
         self.is_loading = false;
         Ok(())

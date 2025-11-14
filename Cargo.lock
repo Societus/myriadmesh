@@ -1691,6 +1691,7 @@ dependencies = [
  "log",
  "myriadmesh-crypto",
  "myriadmesh-protocol",
+ "myriadmesh-routing",
  "rand",
  "serde",
  "serde-big-array",
