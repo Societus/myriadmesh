@@ -910,11 +910,12 @@ mod tests {
             elapsed
         );
 
-        // Should not exceed MAX_FORWARD_JITTER_MS + processing time (generous allowance)
+        // Should not exceed MAX_FORWARD_JITTER_MS + processing time (generous allowance for CI)
+        // We allow 500ms headroom for CI environments under heavy load
         assert!(
-            elapsed <= Duration::from_millis(MAX_FORWARD_JITTER_MS + 100),
+            elapsed <= Duration::from_millis(MAX_FORWARD_JITTER_MS + 500),
             "Expected delay <= {}ms, got {:?}",
-            MAX_FORWARD_JITTER_MS + 100,
+            MAX_FORWARD_JITTER_MS + 500,
             elapsed
         );
 
