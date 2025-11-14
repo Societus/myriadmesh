@@ -22,6 +22,7 @@ impl ApiClient {
     }
 
     /// Check node health
+    #[allow(dead_code)]
     pub async fn health(&self) -> Result<HealthResponse> {
         let url = format!("{}/health", self.base_url);
         let response = self
@@ -97,6 +98,7 @@ impl ApiClient {
     }
 
     /// Send a message
+    #[allow(dead_code)]
     pub async fn send_message(&self, request: SendMessageRequest) -> Result<SendMessageResponse> {
         let url = format!("{}/api/v1/messages/send", self.base_url);
         let response = self
@@ -145,6 +147,7 @@ impl ApiClient {
 
 // Response types
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HealthResponse {
     pub status: String,
@@ -209,6 +212,7 @@ pub struct Message {
     pub status: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SendMessageRequest {
     pub destination: String,
@@ -216,6 +220,7 @@ pub struct SendMessageRequest {
     pub priority: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SendMessageResponse {
     pub message_id: String,

@@ -10,6 +10,7 @@ pub enum Event {
     /// Key press
     Key(KeyEvent),
     /// Terminal resize
+    #[allow(dead_code)]
     Resize(u16, u16),
     /// Tick for periodic updates
     Tick,
@@ -19,6 +20,7 @@ pub enum Event {
 
 /// Event handler
 pub struct EventHandler {
+    #[allow(dead_code)]
     tx: mpsc::UnboundedSender<Event>,
     rx: mpsc::UnboundedReceiver<Event>,
 }
