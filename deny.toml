@@ -3,21 +3,11 @@
 
 [advisories]
 # Security vulnerability database
+version = 2
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-
-# Severity threshold - fail on any vulnerability
-vulnerability = "deny"
-
-# Unmaintained crates
-unmaintained = "warn"
-
-# Yanked crates
-yanked = "deny"
-
-# Crates with notices (informational advisories)
-notice = "warn"
-
+# Unmaintained crates - set to workspace to warn about unmaintained workspace crates
+unmaintained = "workspace"
 # Ignore specific advisories (use sparingly and document why)
 ignore = [
     # Example: "RUSTSEC-2020-0001",  # Reason for ignoring
@@ -25,7 +15,7 @@ ignore = [
 
 [licenses]
 # Allow these licenses
-unlicensed = "deny"
+version = 2
 allow = [
     "MIT",
     "Apache-2.0",
@@ -35,17 +25,11 @@ allow = [
     "ISC",
     "CC0-1.0",
     "Zlib",
-    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "GPL-3.0-only",  # For our workspace crates
+    "MPL-2.0",  # Mozilla Public License 2.0
+    "CDLA-Permissive-2.0",  # Community Data License Agreement
 ]
-
-# Deny copyleft licenses that could cause issues
-deny = [
-    "GPL-2.0",
-    "GPL-3.0",
-    "AGPL-3.0",
-]
-
-copyleft = "deny"
 
 # Allow specific crates with problematic licenses
 [[licenses.clarify]]
@@ -59,30 +43,13 @@ license-files = [
 # Multiple versions of the same crate
 multiple-versions = "warn"
 wildcards = "allow"
-highlight = "all"
-
-# Deny specific crates
-deny = [
-    # Example banned crates (none currently)
-]
-
-# Skip certain crates from duplicate version check
-skip = [
-    # Some crates commonly have multiple versions in tree
-]
-
-skip-tree = [
-    # Skip entire dependency trees if needed
-]
 
 [sources]
 # Crates.io is the only allowed source
 unknown-registry = "deny"
 unknown-git = "deny"
 
-# Allow git sources for development (comment out for production)
-[sources.allow-git]
-# github.com organizations we trust
-github = [
-    "Societus",
+# Allow git sources for development
+allow-git = [
+    "https://github.com/Societus",
 ]
