@@ -11,11 +11,13 @@ pub mod deduplication;
 pub mod error;
 pub mod priority_queue;
 pub mod rate_limiter;
+pub mod router;
 
 pub use deduplication::DeduplicationCache;
 pub use error::{Result, RoutingError};
 pub use priority_queue::{PriorityLevel, PriorityQueue};
 pub use rate_limiter::RateLimiter;
+pub use router::{Router, RouterStats};
 
 /// Maximum cached messages per destination
 pub const MAX_CACHED_MESSAGES_PER_DEST: usize = 100;
