@@ -1,0 +1,46 @@
+[package]
+name = "myriadmesh-tui"
+version = "0.1.0"
+edition = "2021"
+authors = ["MyriadMesh Contributors"]
+description = "Terminal User Interface for MyriadMesh node management"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "myriadmesh-tui"
+path = "src/main.rs"
+
+[dependencies]
+# Terminal UI framework
+ratatui = "0.28"
+crossterm = "0.28"
+
+# Async runtime
+tokio = { version = "1.48", features = ["full"] }
+
+# HTTP client for API
+reqwest = { version = "0.12", features = ["json"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Utilities
+unicode-width = "0.2"
+
+# CLI argument parsing
+clap = { version = "4.5", features = ["derive"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
