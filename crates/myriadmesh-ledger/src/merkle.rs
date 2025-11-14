@@ -47,14 +47,14 @@ pub fn calculate_merkle_root(entries: &[Vec<u8>]) -> MerkleRoot {
             let combined_hash = if chunk.len() == 2 {
                 // Combine two hashes
                 let mut hasher = Blake2b512::new();
-                hasher.update(&chunk[0]);
-                hasher.update(&chunk[1]);
+                hasher.update(chunk[0]);
+                hasher.update(chunk[1]);
                 hasher.finalize()
             } else {
                 // Odd number - hash with itself
                 let mut hasher = Blake2b512::new();
-                hasher.update(&chunk[0]);
-                hasher.update(&chunk[0]);
+                hasher.update(chunk[0]);
+                hasher.update(chunk[0]);
                 hasher.finalize()
             };
 
@@ -147,11 +147,7 @@ mod tests {
 
     #[test]
     fn test_deterministic() {
-        let entries = vec![
-            b"entry1".to_vec(),
-            b"entry2".to_vec(),
-            b"entry3".to_vec(),
-        ];
+        let entries = vec![b"entry1".to_vec(), b"entry2".to_vec(), b"entry3".to_vec()];
 
         let root1 = calculate_merkle_root(&entries);
         let root2 = calculate_merkle_root(&entries);
@@ -160,11 +156,7 @@ mod tests {
 
     #[test]
     fn test_verify_inclusion() {
-        let entries = vec![
-            b"entry1".to_vec(),
-            b"entry2".to_vec(),
-            b"entry3".to_vec(),
-        ];
+        let entries = vec![b"entry1".to_vec(), b"entry2".to_vec(), b"entry3".to_vec()];
         let root = calculate_merkle_root(&entries);
 
         // Valid entry
@@ -177,7 +169,7 @@ mod tests {
     #[test]
     fn test_verify_with_wrong_root() {
         let entries = vec![b"entry1".to_vec(), b"entry2".to_vec()];
-        let root = calculate_merkle_root(&entries);
+        let _root = calculate_merkle_root(&entries);
 
         let wrong_root = [0u8; 32];
         assert!(!verify_entry_inclusion(&entries, b"entry1", &wrong_root));

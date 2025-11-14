@@ -100,7 +100,13 @@ impl Block {
 
     /// Create the genesis block (height 0, no previous hash)
     pub fn genesis(creator: NodeId, creator_signature: Signature) -> Result<Self> {
-        Self::new(0, [0u8; BLOCK_HASH_SIZE], creator, creator_signature, vec![])
+        Self::new(
+            0,
+            [0u8; BLOCK_HASH_SIZE],
+            creator,
+            creator_signature,
+            vec![],
+        )
     }
 
     /// Calculate the hash of this block
@@ -192,7 +198,7 @@ impl Block {
     /// Check if this block has sufficient validator signatures for consensus
     pub fn has_consensus(&self, total_known_nodes: usize) -> bool {
         // Need ceiling of 2/3 (e.g., 10 nodes needs 7, not 6)
-        let required = (total_known_nodes * 2 + 2) / 3; // Ceiling division
+        let required = (total_known_nodes * 2).div_ceil(3);
         self.validator_signatures.len() >= required
     }
 

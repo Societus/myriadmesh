@@ -210,14 +210,7 @@ mod tests {
         let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
         let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
 
-        let entry = TestEntry::new(
-            source,
-            dest,
-            AdapterType::Ethernet,
-            10.5,
-            1_000_000,
-            true,
-        );
+        let entry = TestEntry::new(source, dest, AdapterType::Ethernet, 10.5, 1_000_000, true);
 
         assert_eq!(entry.source_node, source);
         assert_eq!(entry.dest_node, dest);

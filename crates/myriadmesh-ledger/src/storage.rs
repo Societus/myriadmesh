@@ -204,7 +204,9 @@ impl LedgerStorage {
         }
 
         // Determine which blocks to delete
-        let keep_from_height = self.chain_height.saturating_sub(self.config.keep_blocks - 1);
+        let keep_from_height = self
+            .chain_height
+            .saturating_sub(self.config.keep_blocks - 1);
 
         let heights_to_delete: Vec<u64> = self
             .index
@@ -270,7 +272,7 @@ impl LedgerStorage {
             let entry = entry?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "bin") {
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "bin") {
                 // Load block
                 let block_bytes = fs::read(&path)?;
                 if let Ok(block) = Block::from_bytes(&block_bytes) {

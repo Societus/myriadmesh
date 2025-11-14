@@ -16,9 +16,10 @@ use crate::error::{LedgerError, Result};
 use crate::storage::LedgerStorage;
 
 /// Synchronization state
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SyncState {
     /// Not synchronizing
+    #[default]
     Idle,
     /// Discovering blocks
     Discovering,
@@ -45,12 +46,6 @@ pub struct SyncStats {
     pub validation_errors: u64,
     /// Current sync state
     pub state: SyncState,
-}
-
-impl Default for SyncState {
-    fn default() -> Self {
-        SyncState::Idle
-    }
 }
 
 /// Chain synchronization manager

@@ -14,9 +14,9 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(9),  // Router status
-            Constraint::Length(7),  // Destination info
-            Constraint::Min(10),    // Tunnels
+            Constraint::Length(9), // Router status
+            Constraint::Length(7), // Destination info
+            Constraint::Min(10),   // Tunnels
         ])
         .split(area);
 
@@ -94,20 +94,18 @@ fn render_router_status(f: &mut Frame, app: &App, area: Rect) {
                 ),
             ]),
             Line::from(""),
-            Line::from(vec![
-                Span::styled(
-                    if status.router_status == "running" {
-                        "✓ I2P network is operational"
-                    } else {
-                        "⚠ I2P network is not fully operational"
-                    },
-                    Style::default().fg(if status.router_status == "running" {
-                        Color::Green
-                    } else {
-                        Color::Yellow
-                    }),
-                ),
-            ]),
+            Line::from(vec![Span::styled(
+                if status.router_status == "running" {
+                    "✓ I2P network is operational"
+                } else {
+                    "⚠ I2P network is not fully operational"
+                },
+                Style::default().fg(if status.router_status == "running" {
+                    Color::Green
+                } else {
+                    Color::Yellow
+                }),
+            )]),
         ]
     } else {
         vec![Line::from(Span::styled(
@@ -177,9 +175,7 @@ fn render_destination_info(f: &mut Frame, app: &App, area: Rect) {
 
 /// Render tunnels list
 fn render_tunnels(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title("I2P Tunnels");
+    let block = Block::default().borders(Borders::ALL).title("I2P Tunnels");
 
     if let Some(tunnels) = &app.i2p_tunnels {
         let total_tunnels = tunnels.inbound_tunnels.len() + tunnels.outbound_tunnels.len();
@@ -271,7 +267,10 @@ fn render_tunnels(f: &mut Frame, app: &App, area: Rect) {
         items.push(ListItem::new(Line::from(vec![
             Span::styled("Total Bandwidth: ", Style::default().fg(Color::Gray)),
             Span::styled(
-                format!("{:.2} Mbps", tunnels.total_bandwidth_bps as f64 / 1_000_000.0),
+                format!(
+                    "{:.2} Mbps",
+                    tunnels.total_bandwidth_bps as f64 / 1_000_000.0
+                ),
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),

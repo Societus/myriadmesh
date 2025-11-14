@@ -247,7 +247,7 @@ impl ConsensusManager {
         }
 
         if !block.has_consensus(total_nodes) {
-            let required = (total_nodes * 2 + 2) / 3; // Ceiling division
+            let required = (total_nodes * 2).div_ceil(3);
             return Err(LedgerError::InsufficientSignatures {
                 needed: required,
                 actual: block.signature_count(),

@@ -253,10 +253,7 @@ async fn stop_adapter(
 }
 
 // Helper function to get adapter status
-async fn get_adapter_status_internal(
-    manager: &AdapterManager,
-    id: &str,
-) -> Option<AdapterStatus> {
+async fn get_adapter_status_internal(manager: &AdapterManager, id: &str) -> Option<AdapterStatus> {
     // Get adapter
     let adapter_arc = manager.get_adapter(id)?;
     let adapter = adapter_arc.read().await;
@@ -346,7 +343,7 @@ async fn get_heartbeat_nodes(State(state): State<Arc<ApiState>>) -> Json<Vec<Hea
             status: "alive".to_string(), // TODO: Determine actual status
             last_seen: 0,                // TODO: Get actual last_seen
             rtt_ms: 0.0,                 // TODO: Get actual RTT
-            consecutive_failures: 0,      // TODO: Track failures
+            consecutive_failures: 0,     // TODO: Track failures
         });
     }
 
@@ -452,29 +449,30 @@ async fn get_i2p_status(State(state): State<Arc<ApiState>>) -> Json<I2pStatusRes
     // Try to find the i2p adapter
     let i2p_adapter_id = "i2p"; // Standard ID for i2p adapter
 
-    let (router_status, adapter_status, version) = if let Some(adapter_arc) = manager.get_adapter(i2p_adapter_id) {
-        let adapter = adapter_arc.read().await;
-        let status = adapter.get_status();
+    let (router_status, adapter_status, version) =
+        if let Some(adapter_arc) = manager.get_adapter(i2p_adapter_id) {
+            let adapter = adapter_arc.read().await;
+            let status = adapter.get_status();
 
-        let (rs, as_str) = match status {
-            NetworkAdapterStatus::Ready => ("running", "ready"),
-            NetworkAdapterStatus::Initializing => ("starting", "initializing"),
-            NetworkAdapterStatus::Unavailable => ("stopped", "unavailable"),
-            NetworkAdapterStatus::Error => ("error", "error"),
-            NetworkAdapterStatus::ShuttingDown => ("stopping", "shutting_down"),
-            NetworkAdapterStatus::Uninitialized => ("unknown", "uninitialized"),
+            let (rs, as_str) = match status {
+                NetworkAdapterStatus::Ready => ("running", "ready"),
+                NetworkAdapterStatus::Initializing => ("starting", "initializing"),
+                NetworkAdapterStatus::Unavailable => ("stopped", "unavailable"),
+                NetworkAdapterStatus::Error => ("error", "error"),
+                NetworkAdapterStatus::ShuttingDown => ("stopping", "shutting_down"),
+                NetworkAdapterStatus::Uninitialized => ("unknown", "uninitialized"),
+            };
+
+            (rs, as_str, "1.0.0")
+        } else {
+            ("unknown", "uninitialized", "unknown")
         };
-
-        (rs, as_str, "1.0.0")
-    } else {
-        ("unknown", "uninitialized", "unknown")
-    };
 
     Json(I2pStatusResponse {
         router_status: router_status.to_string(),
         adapter_status: adapter_status.to_string(),
         router_version: version.to_string(),
-        tunnels_active: 0, // TODO: Get actual tunnel count
+        tunnels_active: 0,  // TODO: Get actual tunnel count
         peers_connected: 0, // TODO: Get actual peer count
     })
 }

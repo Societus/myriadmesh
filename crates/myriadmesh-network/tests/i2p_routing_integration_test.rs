@@ -51,33 +51,30 @@ async fn test_i2p_adapter_in_routing_context() {
 /// Test cost calculation for I2P routes vs clearnet routes
 #[test]
 fn test_i2p_route_cost_calculation() {
-    use myriadmesh_protocol::types::NODE_ID_SIZE;
-    use myriadmesh_protocol::NodeId;
-
     // Create cost weights for link evaluation
     let weights = CostWeights {
-        latency: 1.0,      // Latency is important
-        loss: 1.0,         // Packet loss is important
-        jitter: 0.5,       // Jitter less important
-        utilization: 0.5,  // Utilization less important
+        latency: 1.0,     // Latency is important
+        loss: 1.0,        // Packet loss is important
+        jitter: 0.5,      // Jitter less important
+        utilization: 0.5, // Utilization less important
     };
 
     // Ethernet link metrics (fast, low loss)
     let mut ethernet_metrics = LinkMetrics::new();
     ethernet_metrics.update(
-        50.0,       // 50ms latency
-        false,      // No packet loss
-        1_000_000,  // 1 Mbps bandwidth
-        0.2,        // 20% utilization
+        50.0,      // 50ms latency
+        false,     // No packet loss
+        1_000_000, // 1 Mbps bandwidth
+        0.2,       // 20% utilization
     );
 
     // I2P link metrics (slow, but reliable and free)
     let mut i2p_metrics = LinkMetrics::new();
     i2p_metrics.update(
-        2000.0,     // 2000ms latency
-        false,      // No packet loss (I2P is reliable)
-        100_000,    // 100 Kbps bandwidth
-        0.8,        // 80% utilization (busy)
+        2000.0,  // 2000ms latency
+        false,   // No packet loss (I2P is reliable)
+        100_000, // 100 Kbps bandwidth
+        0.8,     // 80% utilization (busy)
     );
 
     // Calculate costs
@@ -316,5 +313,4 @@ fn test_i2p_dht_routing_concept() {
     //   6. Fall back to alternative paths if needed
 
     // This test verifies the concept is sound
-    assert!(true);
 }
