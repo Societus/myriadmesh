@@ -1864,6 +1864,7 @@ dependencies = [
  "config",
  "dirs",
  "hex",
+ "myriadmesh-appliance",
  "myriadmesh-core",
  "myriadmesh-crypto",
  "myriadmesh-dht",

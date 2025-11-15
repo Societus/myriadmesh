@@ -16,6 +16,9 @@ use tracing::info;
 use crate::config::ApiConfig;
 use crate::failover::FailoverManager;
 use crate::heartbeat::HeartbeatService;
+use myriadmesh_appliance::{
+    types::DevicePreferences, ApplianceManager, CachedMessage, PairingRequest, PairingResponse,
+};
 use myriadmesh_network::{AdapterManager, AdapterStatus as NetworkAdapterStatus};
 
 /// API server state
@@ -26,6 +29,7 @@ pub struct ApiState {
     adapter_manager: Arc<RwLock<AdapterManager>>,
     heartbeat_service: Arc<HeartbeatService>,
     failover_manager: Arc<FailoverManager>,
+    appliance_manager: Option<Arc<ApplianceManager>>,
     node_id: String,
     node_name: String,
     start_time: SystemTime,
@@ -43,6 +47,7 @@ impl ApiServer {
         adapter_manager: Arc<RwLock<AdapterManager>>,
         heartbeat_service: Arc<HeartbeatService>,
         failover_manager: Arc<FailoverManager>,
+        appliance_manager: Option<Arc<ApplianceManager>>,
         node_id: String,
         node_name: String,
     ) -> Result<Self> {
@@ -51,6 +56,7 @@ impl ApiServer {
             adapter_manager,
             heartbeat_service,
             failover_manager,
+            appliance_manager,
             node_id,
             node_name,
             start_time: SystemTime::now(),
@@ -101,6 +107,21 @@ impl ApiServer {
             .route("/api/i2p/status", get(get_i2p_status))
             .route("/api/i2p/destination", get(get_i2p_destination))
             .route("/api/i2p/tunnels", get(get_i2p_tunnels))
+            // Appliance endpoints
+            .route("/api/appliance/info", get(get_appliance_info))
+            .route("/api/appliance/stats", get(get_appliance_stats))
+            .route("/api/appliance/pair/request", post(initiate_pairing))
+            .route("/api/appliance/pair/approve/:token", post(approve_pairing))
+            .route("/api/appliance/pair/reject/:token", post(reject_pairing))
+            .route("/api/appliance/pair/complete", post(complete_pairing))
+            .route("/api/appliance/devices", get(list_paired_devices))
+            .route("/api/appliance/devices/:device_id", get(get_paired_device))
+            .route("/api/appliance/devices/:device_id/unpair", post(unpair_device))
+            .route("/api/appliance/devices/:device_id/preferences", post(update_device_preferences))
+            .route("/api/appliance/cache/store", post(store_cached_message))
+            .route("/api/appliance/cache/retrieve", get(retrieve_cached_messages))
+            .route("/api/appliance/cache/delivered", post(mark_messages_delivered))
+            .route("/api/appliance/cache/stats/:device_id", get(get_cache_stats))
             // Legacy v1 endpoints (for backwards compatibility)
             .route("/api/v1/node/status", get(get_node_status))
             .route("/api/v1/node/info", get(get_node_info))
@@ -535,4 +556,236 @@ struct I2pTunnelInfo {
     latency_ms: f64,
     bandwidth_bps: u64,
     status: String,
+}
+
+// === Appliance Endpoints ===
+
+/// Get appliance information and capabilities
+async fn get_appliance_info(State(state): State<Arc<ApiState>>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    
+    match appliance_manager.get_capabilities().await {
+        Ok(capabilities) => Ok(Json(serde_json::json!(capabilities))),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+/// Get appliance statistics
+async fn get_appliance_stats(State(state): State<Arc<ApiState>>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    
+    let uptime_secs = state.start_time.elapsed().unwrap_or_default().as_secs();
+    let adapters_count = state.adapter_manager.read().await.adapter_ids().len();
+    
+    match appliance_manager.get_stats(uptime_secs, adapters_count).await {
+        Ok(stats) => Ok(Json(serde_json::json!(stats))),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+/// Initiate device pairing
+async fn initiate_pairing(
+    State(state): State<Arc<ApiState>>,
+    Json(request): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    
+    // Parse request
+    let pairing_request: PairingRequest =
+        serde_json::from_value(request).map_err(|_| StatusCode::BAD_REQUEST)?;
+    
+    match appliance_manager.initiate_pairing(pairing_request).await {
+        Ok(token) => Ok(Json(serde_json::json!(token))),
+        Err(e) => {
+            tracing::error!("Pairing initiation failed: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Approve a pending pairing (manual approval flow)
+async fn approve_pairing(
+    State(state): State<Arc<ApiState>>,
+    Path(token): Path<String>,
+) -> Result<StatusCode, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    
+    match appliance_manager.approve_pairing(&token).await {
+        Ok(_) => Ok(StatusCode::OK),
+        Err(_) => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+/// Reject a pending pairing
+async fn reject_pairing(
+    State(state): State<Arc<ApiState>>,
+    Path(token): Path<String>,
+) -> Result<StatusCode, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    
+    match appliance_manager.reject_pairing(&token).await {
+        Ok(_) => Ok(StatusCode::OK),
+        Err(_) => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+/// Complete device pairing
+async fn complete_pairing(
+    State(state): State<Arc<ApiState>>,
+    Json(request): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    
+    // Extract fields from request
+    let pairing_response: PairingResponse =
+        serde_json::from_value(request.get("response").cloned().ok_or(StatusCode::BAD_REQUEST)?)
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+    
+    let device_id: String = request.get("device_id")
+        .and_then(|v| v.as_str())
+        .ok_or(StatusCode::BAD_REQUEST)?
+        .to_string();
+    
+    let node_id_hex: String = request.get("node_id")
+        .and_then(|v| v.as_str())
+        .ok_or(StatusCode::BAD_REQUEST)?
+        .to_string();
+    
+    let public_key_hex: String = request.get("public_key")
+        .and_then(|v| v.as_str())
+        .ok_or(StatusCode::BAD_REQUEST)?
+        .to_string();
+    
+    // Parse node_id and public_key
+    let node_id = myriadmesh_crypto::identity::NodeId::from_hex(&node_id_hex)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let public_key = hex::decode(&public_key_hex)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    
+    match appliance_manager.complete_pairing(pairing_response, device_id, node_id, public_key).await {
+        Ok(result) => Ok(Json(serde_json::json!(result))),
+        Err(e) => {
+            tracing::error!("Pairing completion failed: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// List all paired devices
+async fn list_paired_devices(State(state): State<Arc<ApiState>>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    
+    match appliance_manager.list_paired_devices().await {
+        Ok(devices) => Ok(Json(serde_json::json!(devices))),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+/// Get information about a specific paired device
+async fn get_paired_device(
+    State(state): State<Arc<ApiState>>,
+    Path(device_id): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    
+    match appliance_manager.get_paired_device(&device_id).await {
+        Ok(Some(device)) => Ok(Json(serde_json::json!(device))),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+/// Unpair a device
+async fn unpair_device(
+    State(state): State<Arc<ApiState>>,
+    Path(device_id): Path<String>,
+) -> Result<StatusCode, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    
+    match appliance_manager.unpair_device(&device_id).await {
+        Ok(_) => Ok(StatusCode::OK),
+        Err(_) => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+/// Update device preferences
+async fn update_device_preferences(
+    State(state): State<Arc<ApiState>>,
+    Path(device_id): Path<String>,
+    Json(preferences): Json<serde_json::Value>,
+) -> Result<StatusCode, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+
+    let device_preferences: DevicePreferences =
+        serde_json::from_value(preferences).map_err(|_| StatusCode::BAD_REQUEST)?;
+    
+    match appliance_manager.update_device_preferences(&device_id, device_preferences).await {
+        Ok(_) => Ok(StatusCode::OK),
+        Err(_) => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+/// Store a message in the cache
+async fn store_cached_message(
+    State(state): State<Arc<ApiState>>,
+    Json(request): Json<serde_json::Value>,
+) -> Result<StatusCode, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+
+    let cached_message: CachedMessage =
+        serde_json::from_value(request).map_err(|_| StatusCode::BAD_REQUEST)?;
+    
+    match appliance_manager.cache_message(cached_message).await {
+        Ok(_) => Ok(StatusCode::CREATED),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+/// Retrieve cached messages for a device
+async fn retrieve_cached_messages(
+    State(state): State<Arc<ApiState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    
+    let device_id = params.get("device_id").ok_or(StatusCode::BAD_REQUEST)?;
+    let limit = params.get("limit").and_then(|l| l.parse::<usize>().ok());
+    let only_undelivered = params.get("only_undelivered")
+        .and_then(|v| v.parse::<bool>().ok())
+        .unwrap_or(false);
+    
+    match appliance_manager.retrieve_messages(device_id, limit, only_undelivered).await {
+        Ok(messages) => Ok(Json(serde_json::json!(messages))),
+        Err(_) => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+/// Mark messages as delivered
+async fn mark_messages_delivered(
+    State(state): State<Arc<ApiState>>,
+    Json(request): Json<serde_json::Value>,
+) -> Result<StatusCode, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    
+    let message_ids: Vec<String> = request.get("message_ids")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .ok_or(StatusCode::BAD_REQUEST)?;
+    
+    match appliance_manager.mark_messages_delivered(message_ids).await {
+        Ok(_) => Ok(StatusCode::OK),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+/// Get cache statistics for a device
+async fn get_cache_stats(
+    State(state): State<Arc<ApiState>>,
+    Path(device_id): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let appliance_manager = state.appliance_manager.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    
+    match appliance_manager.get_cache_stats(&device_id).await {
+        Ok(stats) => Ok(Json(serde_json::json!(stats))),
+        Err(_) => Err(StatusCode::NOT_FOUND),
+    }
 }

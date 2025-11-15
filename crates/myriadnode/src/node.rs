@@ -168,6 +168,7 @@ impl Node {
                 Arc::clone(&adapter_manager),
                 Arc::clone(&heartbeat_service),
                 Arc::clone(&failover_manager),
+                None, // TODO: Initialize ApplianceManager if appliance mode is enabled
                 hex::encode(&config.node.id),
                 config.node.name.clone(),
             )
