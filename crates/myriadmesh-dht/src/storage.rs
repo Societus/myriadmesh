@@ -423,6 +423,16 @@ impl Default for DhtStorage {
 mod tests {
     use super::*;
     use sodiumoxide::crypto::sign::ed25519;
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+
+    /// Ensure sodiumoxide is initialized once for all tests
+    fn init_sodiumoxide() {
+        INIT.call_once(|| {
+            sodiumoxide::init().expect("Failed to initialize sodiumoxide");
+        });
+    }
 
     /// Helper to sign a DHT value for testing
     /// Returns signature bytes
@@ -445,7 +455,7 @@ mod tests {
 
     /// Helper to create a keypair and sign a value
     fn create_signed_value(key: [u8; 32], value: Vec<u8>, ttl_secs: u64) -> ([u8; 32], [u8; 64]) {
-        sodiumoxide::init().unwrap();
+        init_sodiumoxide();
         let (pk, sk) = ed25519::gen_keypair();
         let expires_at = now() + ttl_secs;
         let signature = sign_value(&key, &value, expires_at, &sk);
@@ -602,7 +612,7 @@ mod tests {
 
     #[test]
     fn test_ttl_remaining() {
-        sodiumoxide::init().unwrap();
+        init_sodiumoxide();
         let (pk, _sk) = ed25519::gen_keypair();
         let mut pk_bytes = [0u8; 32];
         pk_bytes.copy_from_slice(&pk[..]);
@@ -627,7 +637,7 @@ mod tests {
         let key = [1u8; 32];
         let value = b"test value".to_vec();
 
-        sodiumoxide::init().unwrap();
+        init_sodiumoxide();
         let (pk, _sk) = ed25519::gen_keypair();
         let mut pk_bytes = [0u8; 32];
         pk_bytes.copy_from_slice(&pk[..]);
@@ -693,7 +703,7 @@ mod tests {
         let _publisher = [1u8; 32];
         let value = b"test".to_vec();
 
-        sodiumoxide::init().unwrap();
+        init_sodiumoxide();
         let (pk, sk) = ed25519::gen_keypair();
         let mut pk_bytes = [0u8; 32];
         pk_bytes.copy_from_slice(&pk[..]);
@@ -732,7 +742,7 @@ mod tests {
 
         let _publisher = [1u8; 32];
 
-        sodiumoxide::init().unwrap();
+        init_sodiumoxide();
         let (pk, sk) = ed25519::gen_keypair();
         let mut pk_bytes = [0u8; 32];
         pk_bytes.copy_from_slice(&pk[..]);
@@ -825,7 +835,7 @@ mod tests {
         // SECURITY TEST M2: Verify each publisher has independent quotas
         let mut storage = DhtStorage::with_quotas(10_000, 100, 5, 5000);
 
-        sodiumoxide::init().unwrap();
+        init_sodiumoxide();
 
         // Publisher 1
         let (pk1, sk1) = ed25519::gen_keypair();
@@ -879,7 +889,7 @@ mod tests {
         // SECURITY TEST M2: Verify updating existing value doesn't exceed key quota
         let mut storage = DhtStorage::with_quotas(10_000, 100, 1, 5000); // Only 1 key per node
 
-        sodiumoxide::init().unwrap();
+        init_sodiumoxide();
         let (pk, sk) = ed25519::gen_keypair();
         let mut publisher = [0u8; 32];
         publisher.copy_from_slice(&pk[..]);

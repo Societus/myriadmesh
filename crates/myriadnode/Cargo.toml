@@ -19,6 +19,7 @@ myriadmesh-dht = { path = "../myriadmesh-dht" }
 myriadmesh-routing = { path = "../myriadmesh-routing" }
 myriadmesh-network = { path = "../myriadmesh-network" }
 myriadmesh-i2p = { path = "../myriadmesh-i2p" }
+myriadmesh-appliance = { path = "../myriadmesh-appliance" }
 
 # Async runtime
 tokio.workspace = true
@@ -60,6 +61,7 @@ hex.workspace = true
 # Crypto (for heartbeat verification)
 blake2.workspace = true  # SECURITY H3: For NodeID derivation verification
 sodiumoxide.workspace = true  # SECURITY H3: For Ed25519 signature verification
+ed25519-dalek = "2.1"  # For appliance manager key conversion
 
 [dev-dependencies]
 tempfile = "3.8"
