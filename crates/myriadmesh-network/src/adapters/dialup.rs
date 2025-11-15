@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
+type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+
 /// Dial-up adapter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DialupConfig {
@@ -85,7 +87,7 @@ pub struct DialupAdapter {
     status: Arc<RwLock<AdapterStatus>>,
     capabilities: AdapterCapabilities,
     state: Arc<RwLock<DialupState>>,
-    rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>,
+    rx: FrameReceiver,
     incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
 }
 

@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
+type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+
 /// WiFi HaLoW adapter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WifiHalowConfig {
@@ -63,7 +65,7 @@ pub struct WifiHalowAdapter {
     status: Arc<RwLock<AdapterStatus>>,
     capabilities: AdapterCapabilities,
     state: Arc<RwLock<WifiHalowState>>,
-    rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>,
+    rx: FrameReceiver,
     incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
 }
 

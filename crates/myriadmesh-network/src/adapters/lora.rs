@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
+type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+
 /// LoRaWAN/Meshtastic adapter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoRaConfig {
@@ -71,7 +73,7 @@ pub struct LoRaAdapter {
     status: Arc<RwLock<AdapterStatus>>,
     capabilities: AdapterCapabilities,
     state: Arc<RwLock<LoRaState>>,
-    rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>,
+    rx: FrameReceiver,
     incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
 }
 

@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
+type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+
 /// FRS/GMRS radio configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrsGmrsConfig {
@@ -75,7 +77,7 @@ pub struct FrsGmrsAdapter {
     status: Arc<RwLock<AdapterStatus>>,
     capabilities: AdapterCapabilities,
     state: Arc<RwLock<FrsGmrsState>>,
-    rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>,
+    rx: FrameReceiver,
     incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
 }
 
