@@ -248,6 +248,7 @@ impl Node {
                 Arc::clone(&adapter_manager),
                 Arc::clone(&heartbeat_service),
                 Arc::clone(&failover_manager),
+                Arc::clone(&ledger),
                 appliance_manager.clone(),
                 update_coordinator.clone(),
                 Some(Arc::clone(&storage)),

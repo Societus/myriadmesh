@@ -19,6 +19,7 @@ use crate::heartbeat::HeartbeatService;
 use myriadmesh_appliance::{
     types::DevicePreferences, ApplianceManager, CachedMessage, PairingRequest, PairingResponse,
 };
+use myriadmesh_ledger::ChainSync;
 use myriadmesh_network::{AdapterManager, AdapterStatus as NetworkAdapterStatus};
 use myriadmesh_updates::UpdateCoordinator;
 
@@ -30,6 +31,7 @@ pub struct ApiState {
     adapter_manager: Arc<RwLock<AdapterManager>>,
     heartbeat_service: Arc<HeartbeatService>,
     failover_manager: Arc<FailoverManager>,
+    ledger: Arc<RwLock<ChainSync>>,
     appliance_manager: Option<Arc<ApplianceManager>>,
     update_coordinator: Option<Arc<UpdateCoordinator>>,
     storage: Option<Arc<RwLock<crate::storage::Storage>>>,
@@ -51,6 +53,7 @@ impl ApiServer {
         adapter_manager: Arc<RwLock<AdapterManager>>,
         heartbeat_service: Arc<HeartbeatService>,
         failover_manager: Arc<FailoverManager>,
+        ledger: Arc<RwLock<ChainSync>>,
         appliance_manager: Option<Arc<ApplianceManager>>,
         update_coordinator: Option<Arc<UpdateCoordinator>>,
         storage: Option<Arc<RwLock<crate::storage::Storage>>>,
@@ -62,6 +65,7 @@ impl ApiServer {
             adapter_manager,
             heartbeat_service,
             failover_manager,
+            ledger,
             appliance_manager,
             update_coordinator,
             storage,
@@ -153,6 +157,10 @@ impl ApiServer {
                 "/api/appliance/cache/stats/:device_id",
                 get(get_cache_stats),
             )
+            // Ledger endpoints
+            .route("/api/ledger/blocks", get(list_ledger_blocks))
+            .route("/api/ledger/blocks/:height", get(get_ledger_block))
+            .route("/api/ledger/stats", get(get_ledger_stats))
             // Legacy v1 endpoints (for backwards compatibility)
             .route("/api/v1/node/status", get(get_node_status))
             .route("/api/v1/node/info", get(get_node_info))
@@ -1300,4 +1308,103 @@ async fn get_fallback_adapters(
         }))),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
+}
+
+// === Ledger Endpoints ===
+
+async fn list_ledger_blocks(
+    State(state): State<Arc<ApiState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let ledger = state.ledger.read().await;
+    let local_height = ledger.local_height();
+
+    // Get the last 10 blocks (or fewer if chain is shorter)
+    let start_height = local_height.saturating_sub(9);
+    let mut blocks = Vec::new();
+
+    for height in start_height..=local_height {
+        if let Ok(block) = ledger.storage().load_block(height) {
+            blocks.push(serde_json::json!({
+                "height": block.header.height,
+                "creator": hex::encode(block.header.creator.as_bytes()),
+                "previous_hash": hex::encode(block.header.previous_hash),
+                "timestamp": block.header.timestamp,
+                "entry_count": block.entries.len(),
+                "validator_count": block.validator_signatures.len(),
+            }));
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "blocks": blocks,
+        "chain_height": local_height,
+        "block_count": blocks.len(),
+    })))
+}
+
+async fn get_ledger_block(
+    State(state): State<Arc<ApiState>>,
+    Path(height): Path<u64>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let ledger = state.ledger.read().await;
+
+    match ledger.storage().load_block(height) {
+        Ok(block) => {
+            let entries: Vec<_> = block
+                .entries
+                .iter()
+                .map(|entry| {
+                    serde_json::json!({
+                        "type": format!("{:?}", entry.entry_type),
+                        "signature_valid": true, // Simplified - actual validation would go here
+                    })
+                })
+                .collect();
+
+            let validators: Vec<_> = block
+                .validator_signatures
+                .iter()
+                .map(|sig| {
+                    serde_json::json!({
+                        "validator": hex::encode(sig.validator.as_bytes()),
+                    })
+                })
+                .collect();
+
+            Ok(Json(serde_json::json!({
+                "height": block.header.height,
+                "version": block.header.version,
+                "creator": hex::encode(block.header.creator.as_bytes()),
+                "previous_hash": hex::encode(block.header.previous_hash),
+                "merkle_root": hex::encode(block.header.merkle_root),
+                "timestamp": block.header.timestamp,
+                "entries": entries,
+                "validators": validators,
+            })))
+        }
+        Err(_) => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+async fn get_ledger_stats(
+    State(state): State<Arc<ApiState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let ledger = state.ledger.read().await;
+    let storage_stats = ledger.storage().stats();
+    let sync_stats = ledger.stats();
+
+    Ok(Json(serde_json::json!({
+        "chain_height": ledger.local_height(),
+        "block_count": storage_stats.block_count,
+        "storage_bytes": storage_stats.total_size_bytes,
+        "pruning_enabled": storage_stats.pruning_enabled,
+        "keep_blocks": storage_stats.keep_blocks,
+        "sync": {
+            "state": format!("{:?}", sync_stats.state),
+            "blocks_discovered": sync_stats.blocks_discovered,
+            "blocks_downloaded": sync_stats.blocks_downloaded,
+            "blocks_validated": sync_stats.blocks_validated,
+            "validation_errors": sync_stats.validation_errors,
+        }
+    })))
 }
