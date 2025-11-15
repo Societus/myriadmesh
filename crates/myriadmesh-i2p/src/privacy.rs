@@ -196,8 +196,10 @@ impl PrivacyLayer {
         // So padding_length tells us how many random bytes follow the u16
 
         // Read the last portion to find padding_length
-        // We iterate backwards to find a reasonable padding length
-        for potential_padding_len in 0..=MAX_PADDING_SIZE.min(total_len.saturating_sub(2)) {
+        // We iterate from largest to smallest to find the actual padding before any spurious matches
+        // in the random padding bytes
+        let max_potential = MAX_PADDING_SIZE.min(total_len.saturating_sub(2));
+        for potential_padding_len in (0..=max_potential).rev() {
             if total_len < potential_padding_len + 2 {
                 continue;
             }
