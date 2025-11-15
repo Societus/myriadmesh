@@ -15,7 +15,7 @@
 use crate::adapter::{AdapterStatus, NetworkAdapter, PeerInfo, TestResults};
 use crate::error::{NetworkError, Result};
 use crate::types::{AdapterCapabilities, Address, PowerConsumption};
-use myriadmesh_protocol::{types::AdapterType, Frame, MessageType, NodeId};
+use myriadmesh_protocol::{types::{AdapterType, NODE_ID_SIZE}, Frame, MessageId, MessageType, NodeId};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -552,7 +552,7 @@ impl NetworkAdapter for LoRaAdapter {
             modem.sleep()?;
         }
 
-        *status = AdapterStatus::Stopped;
+        *status = AdapterStatus::ShuttingDown;
         log::info!("LoRa adapter stopped");
         Ok(())
     }
@@ -612,12 +612,19 @@ impl NetworkAdapter for LoRaAdapter {
 
     async fn discover_peers(&self) -> Result<Vec<PeerInfo>> {
         // Send broadcast discovery frame
+        let source = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([0xFFu8; NODE_ID_SIZE]);
+        let timestamp = now_ms();
+        let payload = vec![];
+        let msg_id = MessageId::generate(&source, &dest, &payload, timestamp, 0);
+
         let discovery_frame = Frame::new(
             MessageType::Discovery,
-            NodeId::zero(),
-            NodeId::broadcast(),
-            vec![],
-            now_ms(),
+            source,
+            dest,
+            payload,
+            msg_id,
+            timestamp,
         ).map_err(|e| NetworkError::DiscoveryFailed(e.to_string()))?;
 
         self.send(&Address::LoRa("broadcast".to_string()), &discovery_frame).await?;
@@ -644,27 +651,30 @@ impl NetworkAdapter for LoRaAdapter {
         let start = std::time::Instant::now();
 
         // Send ping frame
+        let source = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let timestamp = now_ms();
+        let payload = vec![];
+        let msg_id = MessageId::generate(&source, &dest, &payload, timestamp, 0);
+
         let ping_frame = Frame::new(
             MessageType::Ping,
-            NodeId::zero(),
-            NodeId::zero(),
-            vec![],
-            now_ms(),
+            source,
+            dest,
+            payload,
+            msg_id,
+            timestamp,
         ).map_err(|e| NetworkError::Other(e.to_string()))?;
 
         self.send(destination, &ping_frame).await?;
 
         // Wait for pong (simplified)
-        let latency_ms = start.elapsed().as_millis() as u64;
-
-        let state = self.state.read().await;
+        let rtt_ms = start.elapsed().as_millis() as f64;
 
         Ok(TestResults {
             success: true,
-            latency_ms,
-            packet_loss: 0.0,
-            rssi_dbm: state.rssi_dbm,
-            snr_db: state.snr_db,
+            rtt_ms: Some(rtt_ms),
+            error: None,
         })
     }
 
@@ -735,18 +745,25 @@ mod tests {
 
     #[test]
     fn test_meshtastic_codec() {
+        let source = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([0u8; NODE_ID_SIZE]);
+        let timestamp = now_ms();
+        let payload = vec![1, 2, 3, 4];
+        let msg_id = MessageId::generate(&source, &dest, &payload, timestamp, 0);
+
         let frame = Frame::new(
             MessageType::Data,
-            NodeId::zero(),
-            NodeId::zero(),
-            vec![1, 2, 3, 4],
-            now_ms(),
+            source,
+            dest,
+            payload,
+            msg_id,
+            timestamp,
         ).unwrap();
 
         let encoded = MeshtasticCodec::encode(&frame).unwrap();
         let decoded = MeshtasticCodec::decode(&encoded).unwrap();
 
-        assert_eq!(frame.message_type, decoded.message_type);
+        assert_eq!(frame.header.message_type, decoded.header.message_type);
     }
 
     #[test]
