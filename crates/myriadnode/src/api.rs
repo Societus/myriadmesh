@@ -903,6 +903,29 @@ struct ScheduleUpdateResponse {
     fallback_adapters: Vec<String>,
 }
 
+/// Parse adapter type from string (case-insensitive)
+fn parse_adapter_type(s: &str) -> Result<myriadmesh_protocol::types::AdapterType, StatusCode> {
+    use myriadmesh_protocol::types::AdapterType;
+
+    match s.to_lowercase().as_str() {
+        "ethernet" => Ok(AdapterType::Ethernet),
+        "bluetooth" => Ok(AdapterType::Bluetooth),
+        "bluetooth_le" | "bluetoothle" | "ble" => Ok(AdapterType::BluetoothLE),
+        "cellular" => Ok(AdapterType::Cellular),
+        "wifi_halow" | "wifihalow" | "halow" => Ok(AdapterType::WiFiHaLoW),
+        "lorawan" | "lora" => Ok(AdapterType::LoRaWAN),
+        "meshtastic" => Ok(AdapterType::Meshtastic),
+        "frsgmrs" | "frs" | "gmrs" => Ok(AdapterType::FRSGMRS),
+        "cbradio" | "cb" => Ok(AdapterType::CBRadio),
+        "shortwave" | "sw" => Ok(AdapterType::Shortwave),
+        "aprs" => Ok(AdapterType::APRS),
+        "dialup" => Ok(AdapterType::Dialup),
+        "pppoe" => Ok(AdapterType::PPPoE),
+        "i2p" => Ok(AdapterType::I2P),
+        _ => Err(StatusCode::BAD_REQUEST),
+    }
+}
+
 /// Schedule an adapter update
 async fn schedule_update(
     State(state): State<Arc<ApiState>>,
@@ -913,8 +936,8 @@ async fn schedule_update(
         .as_ref()
         .ok_or(StatusCode::NOT_IMPLEMENTED)?;
 
-    // Parse adapter type (simplified - in production would use proper parsing)
-    let adapter_type = myriadmesh_protocol::types::AdapterType::Ethernet; // TODO: Parse from request
+    // Parse adapter type from request
+    let adapter_type = parse_adapter_type(&request.adapter_type)?;
 
     // Parse version
     let version_parts: Vec<&str> = request.target_version.split('.').collect();
@@ -1021,8 +1044,8 @@ async fn get_fallback_adapters(
         .as_ref()
         .ok_or(StatusCode::NOT_IMPLEMENTED)?;
 
-    // Parse adapter type (simplified - in production would use proper parsing)
-    let adapter_type = myriadmesh_protocol::types::AdapterType::Ethernet; // TODO: Parse from path
+    // Parse adapter type from path parameter
+    let adapter_type = parse_adapter_type(&adapter_type_str)?;
 
     match update_coordinator
         .identify_fallback_adapters(adapter_type)
