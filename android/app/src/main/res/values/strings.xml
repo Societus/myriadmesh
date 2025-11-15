@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MyriadMesh</string>
+
+    <!-- General -->
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="retry">Retry</string>
+    <string name="save">Save</string>
+    <string name="delete">Delete</string>
+    <string name="settings">Settings</string>
+
+    <!-- Navigation -->
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_messages">Messages</string>
+    <string name="nav_appliances">Appliances</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Service -->
+    <string name="service_notification_title">MyriadMesh</string>
+    <string name="service_notification_text">Mesh network active</string>
+    <string name="service_notification_channel_name">MyriadMesh Service</string>
+    <string name="service_notification_channel_description">Persistent notification for mesh networking service</string>
+
+    <!-- Appliance -->
+    <string name="appliance_discovery_title">Discover Appliances</string>
+    <string name="appliance_pair">Pair</string>
+    <string name="appliance_unpair">Unpair</string>
+    <string name="appliance_scanning">Scanning for appliances…</string>
+    <string name="appliance_no_devices_found">No appliances found</string>
+
+    <!-- Messages -->
+    <string name="messages_empty">No messages</string>
+    <string name="messages_send">Send</string>
+    <string name="messages_compose">Compose</string>
+
+    <!-- Permissions -->
+    <string name="permission_location_rationale">Location permission is needed to discover nearby mesh devices via WiFi Direct and Bluetooth</string>
+    <string name="permission_bluetooth_rationale">Bluetooth permission is needed for mesh networking via Bluetooth Classic and BLE</string>
+    <string name="permission_camera_rationale">Camera permission is needed to scan QR codes for appliance pairing</string>
+    <string name="permission_notification_rationale">Notification permission is needed to show service status and new messages</string>
+
+    <!-- Errors -->
+    <string name="error_generic">An error occurred</string>
+    <string name="error_network">Network error</string>
+    <string name="error_connection">Connection failed</string>
+</resources>
