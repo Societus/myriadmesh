@@ -158,7 +158,13 @@ impl DeviceStore {
         // Load existing data or create new
         let data = if file_path.exists() {
             let contents = fs::read_to_string(&file_path).await?;
-            serde_json::from_str(&contents)?
+            if contents.is_empty() {
+                DeviceStoreData {
+                    devices: HashMap::new(),
+                }
+            } else {
+                serde_json::from_str(&contents)?
+            }
         } else {
             DeviceStoreData {
                 devices: HashMap::new(),
