@@ -20,8 +20,10 @@ pub mod adapter;
 pub mod adapters;
 pub mod error;
 pub mod i2p;
+pub mod license;
 pub mod manager;
 pub mod metrics;
+pub mod plugin;
 pub mod reload;
 pub mod types;
 pub mod version_tracking;
@@ -33,8 +35,13 @@ pub use adapters::{
 };
 pub use error::{NetworkError, Result};
 pub use i2p::{I2pAdapter, I2pRouterConfig};
+pub use license::{AmateurClass, FccClient, LicenseClass, LicenseManager, LicenseState};
 pub use manager::AdapterManager;
 pub use metrics::AdapterMetrics;
+pub use plugin::{
+    AdapterPlugin, ApplicationPlugin, BridgePlugin, ComponentType, HttpMethod, MessageHandler,
+    MyriadMeshPlugin, PluginConfig, PluginDependency, PluginRegistry, RestEndpoint, UiComponent,
+};
 pub use reload::{
     AdapterHealthMonitor, AdapterLoadStatus, AdapterMetadata, AdapterRegistry,
     DegradationThresholds, HealthMetrics, HistoricalVersion, RollbackHistory,

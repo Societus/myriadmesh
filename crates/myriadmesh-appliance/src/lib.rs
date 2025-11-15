@@ -14,6 +14,7 @@ pub mod cache;
 pub mod device;
 pub mod manager;
 pub mod pairing;
+pub mod power;
 pub mod types;
 
 // Re-export commonly used types
@@ -21,4 +22,8 @@ pub use cache::{CachedMessage, MessageCache, MessageCacheConfig, MessagePriority
 pub use device::{PairedDevice, PairedDeviceInfo};
 pub use manager::{ApplianceManager, ApplianceManagerConfig, ApplianceStats};
 pub use pairing::{PairingMethod, PairingRequest, PairingResponse, PairingResult, PairingToken};
+pub use power::{
+    BatteryThreshold, DataUsagePolicy, DataUsageTracker, PowerAction, PowerManager,
+    PowerManagerConfig, PowerSupply, QuotaCheck, ResetPeriod,
+};
 pub use types::{ApplianceCapabilities, ApplianceError, ApplianceResult};

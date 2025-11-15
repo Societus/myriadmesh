@@ -39,6 +39,10 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 # Internal dependencies
 myriadmesh-core = { path = "../myriadmesh-core" }
 myriadmesh-crypto = { path = "../myriadmesh-crypto" }
+myriadmesh-protocol = { path = "../myriadmesh-protocol" }
+
+# Logging
+log = "0.4"
 
 [dev-dependencies]
 tempfile = "3.8"

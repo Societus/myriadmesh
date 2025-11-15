@@ -47,6 +47,15 @@ pub enum NetworkError {
     #[error("Adapter health check failed: {0}")]
     HealthCheckFailed(String),
 
+    #[error("License required for transmission")]
+    LicenseRequired,
+
+    #[error("License expired: {0}")]
+    LicenseExpired(String),
+
+    #[error("Invalid callsign: {0}")]
+    InvalidCallsign(String),
+
     #[error("Protocol error: {0}")]
     Protocol(#[from] myriadmesh_protocol::ProtocolError),
 
