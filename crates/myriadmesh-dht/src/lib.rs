@@ -7,6 +7,7 @@
 //! - Route record storage for performance optimization
 
 pub mod error;
+pub mod iterative_lookup;
 pub mod kbucket;
 pub mod node_info;
 pub mod operations;
@@ -15,6 +16,7 @@ pub mod routing_table;
 pub mod storage;
 
 pub use error::{DhtError, Result};
+pub use iterative_lookup::{IterativeLookup, LookupResult, LookupStats};
 pub use kbucket::KBucket;
 pub use node_info::{AdapterInfo, NodeCapabilities, NodeInfo, PublicNodeInfo};
 pub use operations::{FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse};
