@@ -19,6 +19,6 @@ pub mod types;
 // Re-export commonly used types
 pub use cache::{CachedMessage, MessageCache, MessageCacheConfig, MessagePriority};
 pub use device::{PairedDevice, PairedDeviceInfo};
-pub use manager::{ApplianceManager, ApplianceStats};
+pub use manager::{ApplianceManager, ApplianceManagerConfig, ApplianceStats};
 pub use pairing::{PairingMethod, PairingRequest, PairingResponse, PairingResult, PairingToken};
 pub use types::{ApplianceCapabilities, ApplianceError, ApplianceResult};

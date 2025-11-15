@@ -1863,6 +1863,7 @@ dependencies = [
  "clap",
  "config",
  "dirs",
+ "ed25519-dalek",
  "hex",
  "myriadmesh-appliance",
  "myriadmesh-core",

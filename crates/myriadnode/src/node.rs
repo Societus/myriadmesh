@@ -13,6 +13,7 @@ use crate::monitor::NetworkMonitor;
 use crate::scoring::ScoringWeights;
 use crate::storage::Storage;
 
+use myriadmesh_appliance::{ApplianceManager, ApplianceManagerConfig, MessageCacheConfig};
 use myriadmesh_crypto::identity::NodeIdentity;
 use myriadmesh_dht::routing_table::RoutingTable;
 use myriadmesh_network::{adapters::*, AdapterManager, NetworkAdapter};
@@ -32,6 +33,7 @@ pub struct Node {
     #[allow(dead_code)]
     dht: RoutingTable,
     api_server: Option<ApiServer>,
+    appliance_manager: Option<Arc<ApplianceManager>>,
     monitor: NetworkMonitor,
     failover_manager: Arc<FailoverManager>,
     heartbeat_service: Arc<HeartbeatService>,
@@ -161,6 +163,45 @@ impl Node {
             config.heartbeat.interval_secs
         );
 
+        // Initialize ApplianceManager if appliance mode is enabled
+        let appliance_manager = if config.appliance.enabled {
+            info!("Initializing appliance mode...");
+
+            // Convert sodiumoxide secret key to ed25519-dalek SigningKey
+            let secret_key_bytes = identity.export_secret_key();
+            let signing_key = ed25519_dalek::SigningKey::from_bytes(
+                secret_key_bytes
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("Invalid secret key length"))?,
+            );
+
+            let appliance_config = ApplianceManagerConfig {
+                node_id: hex::encode(&config.node.id),
+                max_paired_devices: config.appliance.max_paired_devices,
+                message_caching: config.appliance.message_caching,
+                relay_enabled: config.appliance.enable_relay,
+                bridge_enabled: config.appliance.enable_bridge,
+                require_pairing_approval: config.appliance.require_pairing_approval,
+                pairing_methods: config.appliance.pairing_methods.clone(),
+                cache_config: MessageCacheConfig {
+                    max_messages_per_device: config.appliance.max_cache_messages_per_device,
+                    max_total_messages: config.appliance.max_total_cache_messages,
+                },
+                data_directory: config.data_directory.join("appliance"),
+            };
+
+            let manager = Arc::new(ApplianceManager::new(appliance_config, signing_key).await?);
+            info!(
+                "✓ Appliance manager initialized (max devices: {}, cache: {})",
+                config.appliance.max_paired_devices,
+                config.appliance.max_total_cache_messages
+            );
+            Some(manager)
+        } else {
+            info!("Appliance mode disabled");
+            None
+        };
+
         // Initialize API server if enabled
         let api_server = if config.api.enabled {
             let server = ApiServer::new(
@@ -168,7 +209,7 @@ impl Node {
                 Arc::clone(&adapter_manager),
                 Arc::clone(&heartbeat_service),
                 Arc::clone(&failover_manager),
-                None, // TODO: Initialize ApplianceManager if appliance mode is enabled
+                appliance_manager.clone(),
                 hex::encode(&config.node.id),
                 config.node.name.clone(),
             )
@@ -193,6 +234,7 @@ impl Node {
             message_queue,
             dht,
             api_server,
+            appliance_manager,
             monitor,
             failover_manager,
             heartbeat_service,
@@ -437,6 +479,11 @@ impl Node {
         if let Some(_api_server) = &self.api_server {
             info!("Stopping API server...");
             // Server will be dropped and cleaned up
+        }
+
+        if let Some(appliance_manager) = &self.appliance_manager {
+            info!("Stopping appliance manager...");
+            appliance_manager.shutdown().await;
         }
 
         info!("Closing storage...");
