@@ -12,14 +12,14 @@
 **Blocker:** Yes - needed for Phase 5 discovery/test entries
 
 **Tasks:**
-- [ ] Add `myriadmesh-ledger` dependency to `myriadnode/Cargo.toml`
-- [ ] Initialize ledger in `myriadnode/src/node.rs` startup
-- [ ] Add API endpoints in `myriadnode/src/api.rs`:
+- [x] Add `myriadmesh-ledger` dependency to `myriadnode/Cargo.toml`
+- [x] Initialize ledger in `myriadnode/src/node.rs` startup
+- [x] Add API endpoints in `myriadnode/src/api.rs`:
   - `GET /api/ledger/blocks` - List recent blocks
   - `GET /api/ledger/blocks/:height` - Get specific block
   - `GET /api/ledger/entries` - Query entries by type
   - `POST /api/ledger/entry` - Submit new entry
-- [ ] Wire ledger into message routing for confirmations
+- [x] Wire ledger into message routing for confirmations
 - [ ] Test multi-node ledger consensus
 
 **Files:**

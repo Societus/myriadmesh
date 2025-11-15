@@ -46,6 +46,14 @@ const SPAM_PENALTY_DURATION_MINS: u64 = 10;
 /// Message deduplication TTL (seconds)
 const DEDUP_TTL_SECS: u64 = 3600;
 
+use myriadmesh_protocol::message::MessageId;
+
+/// Callback type for message routing confirmations
+/// Called when a message is successfully routed (delivered locally or forwarded)
+/// Arguments: (message_id, source, destination, was_delivered_locally)
+pub type MessageConfirmationCallback =
+    Arc<dyn Fn(MessageId, NodeId, NodeId, bool) + Send + Sync>;
+
 /// Router statistics
 #[derive(Debug, Default, Clone)]
 pub struct RouterStats {
@@ -95,6 +103,10 @@ pub struct Router {
 
     /// Offline message cache (for store-and-forward)
     offline_cache: Arc<RwLock<OfflineMessageCache>>,
+
+    /// Message confirmation callback (for ledger integration)
+    /// Called when messages are successfully routed
+    confirmation_callback: Option<MessageConfirmationCallback>,
 }
 
 impl Router {
@@ -121,6 +133,7 @@ impl Router {
             stats: Arc::new(RwLock::new(RouterStats::default())),
             local_delivery_tx: None,
             offline_cache: Arc::new(RwLock::new(OfflineMessageCache::new())),
+            confirmation_callback: None,
         }
     }
 
@@ -130,6 +143,25 @@ impl Router {
     /// * `tx` - Channel sender for locally delivered messages
     pub fn set_local_delivery_channel(&mut self, tx: mpsc::UnboundedSender<Message>) {
         self.local_delivery_tx = Some(tx);
+    }
+
+    /// Set the message confirmation callback
+    ///
+    /// This callback is invoked when messages are successfully routed, allowing
+    /// external systems (like the ledger) to record message confirmations.
+    ///
+    /// # Arguments
+    /// * `callback` - Function called with (message_id, source, destination, was_local)
+    ///
+    /// # Example
+    /// ```ignore
+    /// router.set_confirmation_callback(Arc::new(|msg_id, src, dest, is_local| {
+    ///     // Create ledger MESSAGE entry here
+    ///     println!("Message routed: {:?} from {:?} to {:?}", msg_id, src, dest);
+    /// }));
+    /// ```
+    pub fn set_confirmation_callback(&mut self, callback: MessageConfirmationCallback) {
+        self.confirmation_callback = Some(callback);
     }
 
     /// Create a channel for receiving locally delivered messages
@@ -294,8 +326,14 @@ impl Router {
             }
         }
 
+        // Capture message details before consuming
+        let msg_id = message.id;
+        let src = message.source;
+        let dest = message.destination;
+        let is_local = dest == self.node_id;
+
         // Route based on destination
-        if message.destination == self.node_id {
+        if is_local {
             // Message is for us - deliver locally
             self.deliver_local(message).await?;
         } else {
@@ -306,6 +344,11 @@ impl Router {
         // Update statistics
         let mut stats = self.stats.write().await;
         stats.messages_routed += 1;
+
+        // Call confirmation callback if set (for ledger integration)
+        if let Some(callback) = &self.confirmation_callback {
+            callback(msg_id, src, dest, is_local);
+        }
 
         Ok(())
     }

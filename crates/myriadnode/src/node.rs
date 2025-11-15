@@ -60,6 +60,13 @@ impl Node {
         let message_queue = PriorityQueue::new(1000); // Max 1000 messages per priority level
         info!("✓ Message queue initialized");
 
+        // TODO: When Router is fully integrated, set up ledger confirmation callback:
+        // router.set_confirmation_callback(Arc::new(move |msg_id, src, dest, is_local| {
+        //     // Create MESSAGE ledger entry for successful routing
+        //     // This records message delivery confirmations in the blockchain
+        //     // See: myriadmesh-ledger/src/entry.rs - MessageEntry
+        // }));
+
         // Initialize DHT
         // SECURITY C6: NodeID is now 64 bytes for collision resistance
         let node_id_bytes: [u8; NODE_ID_SIZE] = config
