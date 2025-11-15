@@ -137,6 +137,28 @@ From `docs/roadmap/phases.md:280-411`:
 - ✅ BLAKE2b-512 payload integrity verification
 - ✅ All 13 tests passing
 
+### 4.8 MyriadNode API Enhancements ✅ COMPLETE
+**Lines Added**: ~150 lines
+**Commits**: ea0a621, 5b024cc, ce0ac1f, 54dc604, a1bf337, 7560049
+**Completion Date**: 2025-11-15
+
+**Implemented Features**:
+- ✅ Update system API integration (4 new endpoints)
+  - POST /api/updates/schedule - Schedule adapter updates
+  - GET /api/updates/schedules - List pending schedules
+  - GET /api/updates/available - Check for available updates
+  - GET /api/updates/fallbacks/:adapter_type - Get fallback adapters
+- ✅ Adapter type parsing with 14 adapter type support and aliases
+- ✅ Real node uptime tracking (GET /api/node/status)
+- ✅ Active adapter counting based on Ready status
+- ✅ Heartbeat node status with time-based health indicators
+  - "alive" (< 5 minutes), "stale" (5-10 min), "offline" (> 10 min)
+  - Sorted by most recently seen
+- ✅ Failover event history with comprehensive event mapping
+  - AdapterSwitch, ThresholdViolation, AdapterDown, AdapterRecovered
+
+**Resolved TODOs**: 8 placeholders replaced with real implementations
+
 ---
 
 ## Development Strategy
@@ -297,8 +319,14 @@ crates/myriadmesh-tui/
    - 6-hour verification window
    - Critical CVE override
    - Update forwarding with signature chains
+7. **MyriadNode API Improvements** - ~150 lines (2025-11-15)
+   - Update system integration (4 new endpoints)
+   - Adapter type parsing with 14 type support
+   - Real uptime and active adapter tracking
+   - Heartbeat node status with time-based health
+   - Failover event history with full mapping
 
-**Total Code Added**: 7,918 lines
+**Total Code Added**: 8,068 lines
 **All Tests Passing**: 502 workspace tests (59 ledger + 55 routing + 8 i2p/routing + 13 updates + others)
 
 ### 📋 Remaining
