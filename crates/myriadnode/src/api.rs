@@ -401,20 +401,35 @@ struct HeartbeatStatsResponse {
 
 async fn get_heartbeat_nodes(State(state): State<Arc<ApiState>>) -> Json<Vec<HeartbeatNodeEntry>> {
     let node_map = state.heartbeat_service.get_node_map().await;
+    let current_time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
 
     let mut entries = Vec::new();
-    for (node_id, _node_info) in node_map.iter() {
+    for (node_id, node_info) in node_map.iter() {
+        // Determine status based on how recent the last heartbeat was
+        // Consider alive if seen within last 5 minutes (300 seconds)
+        let time_since_last_seen = current_time.saturating_sub(node_info.last_seen);
+        let status = if time_since_last_seen < 300 {
+            "alive"
+        } else if time_since_last_seen < 600 {
+            "stale"
+        } else {
+            "offline"
+        };
+
         entries.push(HeartbeatNodeEntry {
             node_id: node_id.to_hex(),
-            status: "alive".to_string(), // TODO: Determine actual status
-            last_seen: 0,                // TODO: Get actual last_seen
-            rtt_ms: 0.0,                 // TODO: Get actual RTT
-            consecutive_failures: 0,     // TODO: Track failures
+            status: status.to_string(),
+            last_seen: node_info.last_seen,
+            rtt_ms: 0.0,             // TODO: Track RTT in heartbeat service
+            consecutive_failures: 0, // TODO: Track failures in heartbeat service
         });
     }
 
-    // Sort by node_id for now
-    entries.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    // Sort by last_seen (most recent first)
+    entries.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
 
     Json(entries)
 }
