@@ -1,5 +1,5 @@
 use jni::objects::{JByteArray, JClass, JString};
-use jni::sys::{jboolean, jint, jlong, jstring, JNI_TRUE, JNI_FALSE};
+use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use std::sync::Arc;
 use tokio::runtime::Runtime;

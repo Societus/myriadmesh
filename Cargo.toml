@@ -12,6 +12,7 @@ members = [
     "crates/myriadmesh-tui",
     "crates/myriadmesh-appliance",
     "crates/myriadmesh-android",
+    "crates/myriadmesh-updates",
 ]
 resolver = "2"
 
