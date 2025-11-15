@@ -91,9 +91,10 @@ pub struct DialupAdapter {
 
 impl DialupAdapter {
     pub fn new(config: DialupConfig) -> Self {
-        let (typical_bandwidth_bps, typical_latency_ms, power_consumption) = match config.modem_type {
-            ModemType::SerialHayes => (2400, 300.0, PowerConsumption::Low),  // V.92 modem
-            ModemType::UsbModem => (56000, 200.0, PowerConsumption::Low),    // V.92 USB
+        let (typical_bandwidth_bps, typical_latency_ms, power_consumption) = match config.modem_type
+        {
+            ModemType::SerialHayes => (2400, 300.0, PowerConsumption::Low), // V.92 modem
+            ModemType::UsbModem => (56000, 200.0, PowerConsumption::Low),   // V.92 USB
             ModemType::GsmModule => (115200, 500.0, PowerConsumption::Medium), // GSM/LTE
         };
 
@@ -242,7 +243,7 @@ impl NetworkAdapter for DialupAdapter {
                 // TODO: Spawn RX listening task
                 unimplemented!("Phase 5 stub: Start RX task")
             }
-            _ => Err(crate::error::NetworkError::AdapterNotReady.into()),
+            _ => Err(crate::error::NetworkError::AdapterNotReady),
         }
     }
 

@@ -36,10 +36,10 @@ pub struct HfRadioConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DigitalMode {
-    PSK31,      // Phase Shift Keying (31.25 baud)
-    RTTY,       // Radio Teletype (45/75 baud)
-    FT8,        // FT8 (requires WSJT-X decoder)
-    Packet,     // AX.25 Packet Radio
+    PSK31,  // Phase Shift Keying (31.25 baud)
+    RTTY,   // Radio Teletype (45/75 baud)
+    FT8,    // FT8 (requires WSJT-X decoder)
+    Packet, // AX.25 Packet Radio
 }
 
 impl Default for HfRadioConfig {
@@ -91,7 +91,7 @@ impl HfRadioAdapter {
         let max_message_size = match config.digital_mode {
             DigitalMode::PSK31 => 512,
             DigitalMode::RTTY => 256,
-            DigitalMode::FT8 => 77,      // FT8 has very limited payload
+            DigitalMode::FT8 => 77, // FT8 has very limited payload
             DigitalMode::Packet => 256,
         };
 
@@ -102,10 +102,10 @@ impl HfRadioAdapter {
             typical_bandwidth_bps: match config.digital_mode {
                 DigitalMode::PSK31 => 31,
                 DigitalMode::RTTY => 75,
-                DigitalMode::FT8 => 6,   // 15 second symbols
+                DigitalMode::FT8 => 6, // 15 second symbols
                 DigitalMode::Packet => 1200,
             },
-            reliability: 0.70, // Variable due to propagation
+            reliability: 0.70,        // Variable due to propagation
             range_meters: 20000000.0, // Worldwide (ionospheric skip)
             power_consumption: PowerConsumption::High,
             cost_per_mb: 0.0,
@@ -229,7 +229,7 @@ impl NetworkAdapter for HfRadioAdapter {
                 // TODO: Spawn RX listening task
                 unimplemented!("Phase 5 stub: Start RX task")
             }
-            _ => Err(crate::error::NetworkError::AdapterNotReady.into()),
+            _ => Err(crate::error::NetworkError::AdapterNotReady),
         }
     }
 

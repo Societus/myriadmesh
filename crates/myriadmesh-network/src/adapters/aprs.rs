@@ -64,9 +64,9 @@ struct AprsState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AprsMode {
-    TncOnly,      // Direct TNC connection via serial
-    AprsIs,       // APRS-IS network (internet)
-    Hybrid,       // Both TNC and APRS-IS
+    TncOnly, // Direct TNC connection via serial
+    AprsIs,  // APRS-IS network (internet)
+    Hybrid,  // Both TNC and APRS-IS
 }
 
 /// APRS adapter
@@ -84,10 +84,10 @@ impl AprsAdapter {
         let capabilities = AdapterCapabilities {
             adapter_type: AdapterType::APRS,
             max_message_size: 256,
-            typical_latency_ms: 3000.0, // RF propagation
+            typical_latency_ms: 3000.0,  // RF propagation
             typical_bandwidth_bps: 1200, // 1200 bps standard
-            reliability: 0.92, // Atmospheric interference
-            range_meters: 30000.0, // 30 km typical
+            reliability: 0.92,           // Atmospheric interference
+            range_meters: 30000.0,       // 30 km typical
             power_consumption: PowerConsumption::Low,
             cost_per_mb: 0.0,
             supports_broadcast: true,
@@ -199,7 +199,7 @@ impl NetworkAdapter for AprsAdapter {
             _ => {
                 let mut status = self.status.write().await;
                 *status = AdapterStatus::Error;
-                Err(crate::error::NetworkError::AdapterNotReady.into())
+                Err(crate::error::NetworkError::AdapterNotReady)
             }
         }
     }
@@ -211,7 +211,7 @@ impl NetworkAdapter for AprsAdapter {
                 // TODO: Spawn RX listening tasks
                 unimplemented!("Phase 5 stub: Start RX tasks")
             }
-            _ => Err(crate::error::NetworkError::AdapterNotReady.into()),
+            _ => Err(crate::error::NetworkError::AdapterNotReady),
         }
     }
 

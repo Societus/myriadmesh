@@ -37,8 +37,8 @@ pub struct FrsGmrsConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModulationType {
     FM,
-    AFSK,       // Audio Frequency Shift Keying (1200 bps)
-    FreeDV,     // Digital voice mode using Codec2
+    AFSK,   // Audio Frequency Shift Keying (1200 bps)
+    FreeDV, // Digital voice mode using Codec2
 }
 
 impl Default for FrsGmrsConfig {
@@ -82,9 +82,9 @@ pub struct FrsGmrsAdapter {
 impl FrsGmrsAdapter {
     pub fn new(config: FrsGmrsConfig) -> Self {
         let max_message_size = match config.modulation {
-            ModulationType::FM => 64,       // Limited by modulation bandwidth
-            ModulationType::AFSK => 128,    // 1200 bps AFSK
-            ModulationType::FreeDV => 256,  // 1600 bps with Codec2
+            ModulationType::FM => 64,      // Limited by modulation bandwidth
+            ModulationType::AFSK => 128,   // 1200 bps AFSK
+            ModulationType::FreeDV => 256, // 1600 bps with Codec2
         };
 
         let capabilities = AdapterCapabilities {
@@ -201,7 +201,7 @@ impl NetworkAdapter for FrsGmrsAdapter {
                 // TODO: Spawn RX listening task for audio input
                 unimplemented!("Phase 5 stub: Start audio reception")
             }
-            _ => Err(crate::error::NetworkError::AdapterNotReady.into()),
+            _ => Err(crate::error::NetworkError::AdapterNotReady),
         }
     }
 

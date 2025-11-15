@@ -57,6 +57,7 @@ struct WifiHalowState {
 }
 
 /// WiFi HaLoW adapter
+#[allow(dead_code)]
 pub struct WifiHalowAdapter {
     config: WifiHalowConfig,
     status: Arc<RwLock<AdapterStatus>>,
@@ -74,7 +75,7 @@ impl WifiHalowAdapter {
             typical_latency_ms: 50.0,
             typical_bandwidth_bps: 6_000_000, // 6 Mbps typical
             reliability: 0.97,
-            range_meters: 5000.0, // 5 km typical
+            range_meters: 5000.0,                     // 5 km typical
             power_consumption: PowerConsumption::Low, // With TWT: 80% less than WiFi
             cost_per_mb: 0.0,
             supports_broadcast: true,
@@ -158,7 +159,7 @@ impl NetworkAdapter for WifiHalowAdapter {
                 // TODO: Spawn RX listening task
                 unimplemented!("Phase 5 stub: Start RX task")
             }
-            _ => Err(crate::error::NetworkError::AdapterNotReady.into()),
+            _ => Err(crate::error::NetworkError::AdapterNotReady),
         }
     }
 

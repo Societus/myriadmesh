@@ -65,6 +65,7 @@ struct LoRaState {
 }
 
 /// LoRaWAN/Meshtastic adapter
+#[allow(dead_code)]
 pub struct LoRaAdapter {
     config: LoRaConfig,
     status: Arc<RwLock<AdapterStatus>>,
@@ -78,15 +79,15 @@ impl LoRaAdapter {
     pub fn new(config: LoRaConfig) -> Self {
         let capabilities = AdapterCapabilities {
             adapter_type: AdapterType::LoRaWAN,
-            max_message_size: 240,                // Single LoRa frame
-            typical_latency_ms: 2000.0,           // ~2 seconds for SF7
-            typical_bandwidth_bps: 250,           // ~250 bps at SF7
-            reliability: 0.95,                     // High reliability, LOS
-            range_meters: 15000.0,                 // 15 km typical
+            max_message_size: 240,      // Single LoRa frame
+            typical_latency_ms: 2000.0, // ~2 seconds for SF7
+            typical_bandwidth_bps: 250, // ~250 bps at SF7
+            reliability: 0.95,          // High reliability, LOS
+            range_meters: 15000.0,      // 15 km typical
             power_consumption: PowerConsumption::Low,
-            cost_per_mb: 0.0,                      // License-free spectrum
-            supports_broadcast: true,              // LoRa broadcast capable
-            supports_multicast: true,              // Supports group addressing
+            cost_per_mb: 0.0,         // License-free spectrum
+            supports_broadcast: true, // LoRa broadcast capable
+            supports_multicast: true, // Supports group addressing
         };
 
         let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
@@ -142,7 +143,8 @@ impl LoRaAdapter {
     fn meshtastic_decode(&self, data: &[u8]) -> Result<Frame> {
         // TODO: Phase 5 Implementation
         if !self.config.meshtastic_mode {
-            return Frame::deserialize(data).map_err(|e| crate::error::NetworkError::ReceiveFailed(format!("{}", e)).into());
+            return Frame::deserialize(data)
+                .map_err(|e| crate::error::NetworkError::ReceiveFailed(format!("{}", e)));
         }
 
         // Parse Meshtastic header and extract payload
@@ -180,7 +182,7 @@ impl NetworkAdapter for LoRaAdapter {
                 // Spawn background task to read from modem and queue received frames
                 unimplemented!("Phase 5 stub: Start RX listening")
             }
-            _ => Err(NetworkError::AdapterNotReady.into()),
+            _ => Err(NetworkError::AdapterNotReady),
         }
     }
 
@@ -272,7 +274,7 @@ mod tests {
         let adapter = LoRaAdapter::new(LoRaConfig::default());
         let caps = adapter.get_capabilities();
 
-        assert_eq!(caps.adapter_type, AdapterType::LoRa);
+        assert_eq!(caps.adapter_type, AdapterType::LoRaWAN);
         assert_eq!(caps.max_message_size, 240);
         assert!(caps.supports_broadcast);
         assert_eq!(caps.range_meters, 15000.0);
