@@ -12,10 +12,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 /// Power supply type for the device
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PowerSupply {
     /// Mains AC power - always available, no restrictions
+    #[default]
     ACMains,
 
     /// Power over Ethernet with budget management
@@ -41,12 +42,6 @@ pub enum PowerSupply {
         /// Critical threshold percentage (default: 5%)
         critical_threshold_percent: u8,
     },
-}
-
-impl Default for PowerSupply {
-    fn default() -> Self {
-        Self::ACMains
-    }
 }
 
 impl PowerSupply {

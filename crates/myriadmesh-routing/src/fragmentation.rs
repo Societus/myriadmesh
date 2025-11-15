@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn test_fragment_frame_small_message() {
         // Create a small test frame (4 bytes will be very small)
-        let test_data = vec![1, 2, 3, 4];
+        let test_data = [1, 2, 3, 4];
         let mtu = 1500;
 
         // Test with small serialized data - bincode result will be small
