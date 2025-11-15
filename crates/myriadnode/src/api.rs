@@ -446,19 +446,78 @@ struct HeartbeatNodeEntry {
 // === Failover Endpoints ===
 
 async fn get_failover_events(
-    State(_state): State<Arc<ApiState>>,
+    State(state): State<Arc<ApiState>>,
 ) -> Json<Vec<FailoverEventResponse>> {
-    // TODO: Properly map FailoverEvent enum variants to response format
-    Json(vec![])
+    use crate::failover::FailoverEvent;
+
+    // Get recent failover events (last 50)
+    let events = state.failover_manager.get_recent_events(50).await;
+
+    // Map events to response format
+    let responses: Vec<FailoverEventResponse> = events
+        .into_iter()
+        .map(|event| match event {
+            FailoverEvent::AdapterSwitch { from, to, reason } => FailoverEventResponse {
+                event_type: "adapter_switch".to_string(),
+                adapter: None,
+                from_adapter: Some(from),
+                to_adapter: Some(to),
+                reason: Some(reason),
+                metric: None,
+                value: None,
+                threshold: None,
+            },
+            FailoverEvent::ThresholdViolation {
+                adapter,
+                metric,
+                value,
+                threshold,
+            } => FailoverEventResponse {
+                event_type: "threshold_violation".to_string(),
+                adapter: Some(adapter),
+                from_adapter: None,
+                to_adapter: None,
+                reason: Some(format!("{} exceeded threshold", metric)),
+                metric: Some(metric),
+                value: Some(value),
+                threshold: Some(threshold),
+            },
+            FailoverEvent::AdapterDown { adapter, reason } => FailoverEventResponse {
+                event_type: "adapter_down".to_string(),
+                adapter: Some(adapter),
+                from_adapter: None,
+                to_adapter: None,
+                reason: Some(reason),
+                metric: None,
+                value: None,
+                threshold: None,
+            },
+            FailoverEvent::AdapterRecovered { adapter } => FailoverEventResponse {
+                event_type: "adapter_recovered".to_string(),
+                adapter: Some(adapter),
+                from_adapter: None,
+                to_adapter: None,
+                reason: Some("Adapter has recovered and is available".to_string()),
+                metric: None,
+                value: None,
+                threshold: None,
+            },
+        })
+        .collect();
+
+    Json(responses)
 }
 
 #[derive(Serialize)]
 struct FailoverEventResponse {
-    timestamp: u64,
-    from_adapter: String,
-    to_adapter: String,
-    reason: String,
-    success: bool,
+    event_type: String,
+    adapter: Option<String>,
+    from_adapter: Option<String>,
+    to_adapter: Option<String>,
+    reason: Option<String>,
+    metric: Option<String>,
+    value: Option<f64>,
+    threshold: Option<f64>,
 }
 
 async fn force_failover(
