@@ -161,6 +161,7 @@ impl ApiServer {
             .route("/api/ledger/blocks", get(list_ledger_blocks))
             .route("/api/ledger/blocks/:height", get(get_ledger_block))
             .route("/api/ledger/entries", get(list_ledger_entries))
+            .route("/api/ledger/entry", post(submit_ledger_entry))
             .route("/api/ledger/stats", get(get_ledger_stats))
             // Legacy v1 endpoints (for backwards compatibility)
             .route("/api/v1/node/status", get(get_node_status))
@@ -1465,5 +1466,42 @@ async fn list_ledger_entries(
         "entries": entries,
         "count": entries.len(),
         "chain_height": local_height,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitEntryRequest {
+    entry_type: String,
+    // Entry-specific data would go here
+    // For now, we accept a generic data field
+    #[serde(default)]
+    #[allow(dead_code)]
+    data: serde_json::Value,
+}
+
+async fn submit_ledger_entry(
+    State(_state): State<Arc<ApiState>>,
+    Json(request): Json<SubmitEntryRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    // Validate entry type
+    let valid_types = ["Discovery", "Test", "Message", "KeyExchange"];
+    if !valid_types.contains(&request.entry_type.as_str()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // In a full implementation, this would:
+    // 1. Parse the entry data according to type
+    // 2. Sign the entry with the node's private key
+    // 3. Add to a mempool for inclusion in the next block
+    // 4. Broadcast to peers via P2P network
+    //
+    // For now, we return a placeholder response indicating
+    // that entry submission would happen through the P2P network
+
+    Ok(Json(serde_json::json!({
+        "status": "accepted",
+        "message": "Entry validation passed. Full P2P submission not yet implemented.",
+        "entry_type": request.entry_type,
+        "note": "Entries are currently bundled into blocks by validators through the P2P network."
     })))
 }
