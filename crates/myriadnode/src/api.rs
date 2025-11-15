@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::config::ApiConfig;
 use crate::failover::FailoverManager;
@@ -32,6 +32,7 @@ pub struct ApiState {
     failover_manager: Arc<FailoverManager>,
     appliance_manager: Option<Arc<ApplianceManager>>,
     update_coordinator: Option<Arc<UpdateCoordinator>>,
+    storage: Option<Arc<RwLock<crate::storage::Storage>>>,
     node_id: String,
     node_name: String,
     start_time: SystemTime,
@@ -52,6 +53,7 @@ impl ApiServer {
         failover_manager: Arc<FailoverManager>,
         appliance_manager: Option<Arc<ApplianceManager>>,
         update_coordinator: Option<Arc<UpdateCoordinator>>,
+        storage: Option<Arc<RwLock<crate::storage::Storage>>>,
         node_id: String,
         node_name: String,
     ) -> Result<Self> {
@@ -62,6 +64,7 @@ impl ApiServer {
             failover_manager,
             appliance_manager,
             update_coordinator,
+            storage,
             node_id,
             node_name,
             start_time: SystemTime::now(),
@@ -236,14 +239,88 @@ struct NodeInfoResponse {
 // === Message Endpoints ===
 
 async fn send_message(
-    State(_state): State<Arc<ApiState>>,
-    Json(_request): Json<SendMessageRequest>,
+    State(state): State<Arc<ApiState>>,
+    Json(request): Json<SendMessageRequest>,
 ) -> Result<Json<MessageResponse>, StatusCode> {
-    // TODO: Implement message sending
-    Ok(Json(MessageResponse {
-        message_id: "msg_123".to_string(),
-        status: "queued".to_string(),
-    }))
+    // Generate message ID
+    use myriadmesh_protocol::message::MessageId;
+    use myriadmesh_protocol::NodeId;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Parse source (this node) and destination NodeIds
+    let source_bytes = hex::decode(&state.node_id).unwrap_or_else(|_| vec![0u8; 64]);
+    let mut source_id_bytes = [0u8; 64];
+    source_id_bytes.copy_from_slice(&source_bytes[..64.min(source_bytes.len())]);
+    let source = NodeId::from_bytes(source_id_bytes);
+
+    let dest_bytes = hex::decode(&request.destination).unwrap_or_else(|_| vec![0u8; 64]);
+    let mut dest_id_bytes = [0u8; 64];
+    dest_id_bytes.copy_from_slice(&dest_bytes[..64.min(dest_bytes.len())]);
+    let destination = NodeId::from_bytes(dest_id_bytes);
+
+    let message_id = MessageId::generate(
+        &source,
+        &destination,
+        request.payload.as_bytes(),
+        timestamp,
+        0, // sequence number (could be tracked per destination)
+    );
+    let message_id_str = format!("{:?}", message_id);
+
+    // Store message in database if storage is available
+    if let Some(storage) = &state.storage {
+        let storage_guard = storage.read().await;
+        let pool = storage_guard.pool();
+
+        // Convert priority (default to normal priority if not specified)
+        let priority = request.priority.unwrap_or(2) as i64;
+
+        // Convert payload string to bytes
+        let payload = request.payload.as_bytes().to_vec();
+
+        // Insert message into database
+        if let Err(e) = sqlx::query(
+            r#"
+            INSERT INTO messages (id, destination, payload, priority, status, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+        )
+        .bind(&message_id_str)
+        .bind(&request.destination)
+        .bind(&payload)
+        .bind(priority)
+        .bind("queued")
+        .bind(timestamp as i64)
+        .bind(timestamp as i64)
+        .execute(pool)
+        .await
+        {
+            warn!("Failed to store message: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+
+        // TODO: Actually route the message through the router
+        // For now, we just store it in the database
+        info!(
+            "Message queued: {} to {} ({} bytes)",
+            message_id_str,
+            request.destination,
+            payload.len()
+        );
+
+        Ok(Json(MessageResponse {
+            message_id: message_id_str,
+            status: "queued".to_string(),
+        }))
+    } else {
+        // No storage configured
+        Err(StatusCode::SERVICE_UNAVAILABLE)
+    }
 }
 
 #[derive(Deserialize)]
@@ -260,9 +337,47 @@ struct MessageResponse {
     status: String,
 }
 
-async fn list_messages(State(_state): State<Arc<ApiState>>) -> Json<Vec<MessageInfo>> {
-    // TODO: Implement message listing
-    Json(vec![])
+async fn list_messages(State(state): State<Arc<ApiState>>) -> Json<Vec<MessageInfo>> {
+    if let Some(storage) = &state.storage {
+        let storage_guard = storage.read().await;
+        let pool = storage_guard.pool();
+
+        // Query recent messages (limit to last 100)
+        let messages = sqlx::query_as::<_, (String, String, i64, String, i64)>(
+            r#"
+            SELECT id, destination, priority, status, created_at
+            FROM messages
+            ORDER BY created_at DESC
+            LIMIT 100
+            "#,
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+        let message_infos: Vec<MessageInfo> = messages
+            .into_iter()
+            .map(
+                |(id, destination, priority, status, timestamp)| MessageInfo {
+                    message_id: id,
+                    timestamp: timestamp as u64,
+                    direction: if destination == state.node_id {
+                        "inbound".to_string()
+                    } else {
+                        "outbound".to_string()
+                    },
+                    status,
+                    destination: Some(destination),
+                    priority: Some(priority as u8),
+                },
+            )
+            .collect();
+
+        Json(message_infos)
+    } else {
+        // No storage available
+        Json(vec![])
+    }
 }
 
 #[derive(Serialize)]
@@ -272,6 +387,8 @@ struct MessageInfo {
     timestamp: u64,
     direction: String,
     status: String,
+    destination: Option<String>,
+    priority: Option<u8>,
 }
 
 // === Adapter Endpoints ===

@@ -112,7 +112,7 @@ impl NetworkMonitor {
 
     async fn run_ping_tests(
         adapter_manager: &Arc<RwLock<AdapterManager>>,
-        _storage: &Arc<RwLock<Storage>>,
+        storage: &Arc<RwLock<Storage>>,
     ) -> Result<()> {
         debug!("Running ping tests...");
 
@@ -133,7 +133,20 @@ impl NetworkMonitor {
                         adapter_id, status, latency
                     );
 
-                    // TODO: Store metrics in database
+                    // Store ping metrics in database
+                    let storage_guard = storage.read().await;
+                    if let Err(e) = storage_guard
+                        .store_metrics(
+                            &adapter_id,
+                            "ping_test",
+                            Some(latency.as_secs_f64() * 1000.0), // Convert to milliseconds
+                            None,
+                            None,
+                        )
+                        .await
+                    {
+                        warn!("Failed to store ping metrics for '{}': {}", adapter_id, e);
+                    }
                 }
                 None => {
                     warn!("Adapter '{}' not found during ping test", adapter_id);
@@ -146,7 +159,7 @@ impl NetworkMonitor {
 
     async fn run_throughput_tests(
         adapter_manager: &Arc<RwLock<AdapterManager>>,
-        _storage: &Arc<RwLock<Storage>>,
+        storage: &Arc<RwLock<Storage>>,
     ) -> Result<()> {
         debug!("Running throughput tests...");
 
@@ -166,8 +179,27 @@ impl NetworkMonitor {
                         capabilities.typical_latency_ms
                     );
 
+                    // Store throughput metrics in database
+                    // For now, use capability-based metrics until we implement actual throughput testing
+                    let storage_guard = storage.read().await;
+                    if let Err(e) = storage_guard
+                        .store_metrics(
+                            &adapter_id,
+                            "throughput_test",
+                            Some(capabilities.typical_latency_ms),
+                            Some(capabilities.typical_bandwidth_bps as f64),
+                            None,
+                        )
+                        .await
+                    {
+                        warn!(
+                            "Failed to store throughput metrics for '{}': {}",
+                            adapter_id, e
+                        );
+                    }
+
                     // TODO: Perform actual throughput test by sending test frames
-                    // TODO: Store metrics in database
+                    // This would involve sending a series of test frames and measuring actual bandwidth
                 }
                 None => {
                     warn!("Adapter '{}' not found during throughput test", adapter_id);
@@ -180,7 +212,7 @@ impl NetworkMonitor {
 
     async fn run_reliability_tests(
         adapter_manager: &Arc<RwLock<AdapterManager>>,
-        _storage: &Arc<RwLock<Storage>>,
+        storage: &Arc<RwLock<Storage>>,
     ) -> Result<()> {
         debug!("Running reliability tests...");
 
@@ -199,8 +231,27 @@ impl NetworkMonitor {
                         adapter_id, status, capabilities.reliability
                     );
 
+                    // Store reliability metrics in database
+                    // For now, use capability-based metrics until we implement actual packet loss testing
+                    let storage_guard = storage.read().await;
+                    if let Err(e) = storage_guard
+                        .store_metrics(
+                            &adapter_id,
+                            "reliability_test",
+                            None,
+                            None,
+                            Some(capabilities.reliability),
+                        )
+                        .await
+                    {
+                        warn!(
+                            "Failed to store reliability metrics for '{}': {}",
+                            adapter_id, e
+                        );
+                    }
+
                     // TODO: Perform packet loss test
-                    // TODO: Store metrics in database
+                    // This would involve sending test packets and measuring loss rate
                 }
                 None => {
                     warn!("Adapter '{}' not found during reliability test", adapter_id);

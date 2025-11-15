@@ -232,6 +232,7 @@ impl Node {
                 Arc::clone(&failover_manager),
                 appliance_manager.clone(),
                 update_coordinator.clone(),
+                Some(Arc::clone(&storage)),
                 config.node.name.clone(),
                 hex::encode(&config.node.id),
             )
