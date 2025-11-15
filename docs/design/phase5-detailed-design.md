@@ -732,18 +732,22 @@ Phase 5 is complete when:
 
 ---
 
-## Design Questions
+## Design Decisions - FINALIZED
 
-See accompanying `PHASE_5_DESIGN_QUESTIONS.md` for detailed clarification questions.
+All design clarifications have been completed. See `PHASE_5_DESIGN_ANSWERS.md` for detailed rationale.
 
-**Quick Summary:**
+**Key Decisions Implemented:**
 
-1. **Hardware Availability:** Which Phase 5 adapters should have full implementations vs. mocks?
-2. **License Verification:** How strict should license checks be (warnings vs. blocks)?
-3. **Fragmentation:** Should reassembly happen at adapter level or message router?
-4. **Power Management:** Implement full battery support or defer to Phase 6?
-5. **Propagation Awareness:** For HF, should routing consider solar activity?
-6. **Legacy Support:** How long should dial-up remain supported?
+1. ✅ **All 6 adapters require full implementations** by end of Phase 5
+2. ✅ **License strategy:** Block transmission, allow listen-only when unlicensed
+3. ✅ **Fragmentation:** Hybrid approach with routing-aware logic
+4. ✅ **Power management:** Adaptive power scaling per supply type (AC/PoE/Battery)
+5. ✅ **HF Propagation:** Full space weather integration from NOAA/VOACAP
+6. ✅ **Hardware strategy:** Build everything now, fix when hardware available
+7. ✅ **Documentation:** Multi-tier (Beginner/Intermediate/Advanced + Vendor-specific)
+8. ✅ **Legacy support:** Indefinite, with modular plugin architecture
+9. ✅ **Interoperability:** Full bridges to Meshtastic/APRS with advanced scheduling
+10. ✅ **Extensibility:** Core plugin system for future technologies
 
 ---
 
