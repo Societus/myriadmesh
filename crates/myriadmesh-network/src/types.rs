@@ -20,11 +20,23 @@ pub enum Address {
     /// Cellular phone number or IP
     Cellular(String),
 
-    /// LoRaWAN device address
-    LoRaWAN(String),
+    /// LoRaWAN/Meshtastic device address
+    LoRa(String),
 
-    /// Radio callsign
-    Radio(String),
+    /// WiFi HaLoW MAC or SSID address
+    WifiHaLow(String),
+
+    /// APRS callsign
+    APRS(String),
+
+    /// FRS/GMRS frequency identifier
+    FrsGmrs(String),
+
+    /// HF/Shortwave callsign and frequency
+    HfRadio(String),
+
+    /// Dial-up phone number
+    Dialup(String),
 
     /// i2p destination
     I2P(String),
@@ -41,8 +53,12 @@ impl Address {
             Address::Bluetooth(s) => s,
             Address::BluetoothLE(s) => s,
             Address::Cellular(s) => s,
-            Address::LoRaWAN(s) => s,
-            Address::Radio(s) => s,
+            Address::LoRa(s) => s,
+            Address::WifiHaLow(s) => s,
+            Address::APRS(s) => s,
+            Address::FrsGmrs(s) => s,
+            Address::HfRadio(s) => s,
+            Address::Dialup(s) => s,
             Address::I2P(s) => s,
             Address::Unknown(s) => s,
         }
@@ -55,8 +71,12 @@ impl Address {
             Address::Bluetooth(_) => AdapterType::Bluetooth,
             Address::BluetoothLE(_) => AdapterType::BluetoothLE,
             Address::Cellular(_) => AdapterType::Cellular,
-            Address::LoRaWAN(_) => AdapterType::LoRaWAN,
-            Address::Radio(_) => AdapterType::APRS,
+            Address::LoRa(_) => AdapterType::LoRaWAN,
+            Address::WifiHaLow(_) => AdapterType::WiFiHaLoW,
+            Address::APRS(_) => AdapterType::APRS,
+            Address::FrsGmrs(_) => AdapterType::FRSGMRS,
+            Address::HfRadio(_) => AdapterType::Shortwave,
+            Address::Dialup(_) => AdapterType::Dialup,
             Address::I2P(_) => AdapterType::I2P,
             Address::Unknown(_) => AdapterType::Unknown,
         }
