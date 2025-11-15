@@ -206,14 +206,12 @@ impl Node {
             info!("Initializing update coordinator...");
 
             // Clone the identity for the update coordinator
-            let update_identity = NodeIdentity::from_keypair(
-                identity.public_key.clone(),
-                identity.secret_key.clone()
-            );
+            let update_identity =
+                NodeIdentity::from_keypair(identity.public_key, identity.secret_key.clone());
 
-            let coordinator = Arc::new(myriadmesh_updates::UpdateCoordinator::new(
-                Arc::new(update_identity)
-            ));
+            let coordinator = Arc::new(myriadmesh_updates::UpdateCoordinator::new(Arc::new(
+                update_identity,
+            )));
 
             info!(
                 "✓ Update coordinator initialized (auto_install: {}, verification: {}h)",

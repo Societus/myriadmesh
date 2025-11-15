@@ -44,6 +44,7 @@ pub struct ApiServer {
 }
 
 impl ApiServer {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: ApiConfig,
         adapter_manager: Arc<RwLock<AdapterManager>>,
@@ -115,7 +116,10 @@ impl ApiServer {
             .route("/api/updates/schedule", post(schedule_update))
             .route("/api/updates/schedules", get(list_update_schedules))
             .route("/api/updates/available", get(check_available_updates))
-            .route("/api/updates/fallbacks/:adapter_type", get(get_fallback_adapters))
+            .route(
+                "/api/updates/fallbacks/:adapter_type",
+                get(get_fallback_adapters),
+            )
             // Appliance endpoints
             .route("/api/appliance/info", get(get_appliance_info))
             .route("/api/appliance/stats", get(get_appliance_stats))
@@ -178,11 +182,7 @@ struct HealthResponse {
 
 async fn get_node_status(State(state): State<Arc<ApiState>>) -> Json<NodeStatusResponse> {
     // Calculate uptime since node start
-    let uptime_secs = state
-        .start_time
-        .elapsed()
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let uptime_secs = state.start_time.elapsed().map(|d| d.as_secs()).unwrap_or(0);
 
     // Count active (Ready) adapters
     let manager = state.adapter_manager.read().await;
@@ -1041,9 +1041,15 @@ async fn schedule_update(
     }
 
     let target_version = myriadmesh_network::version_tracking::SemanticVersion::new(
-        version_parts[0].parse().map_err(|_| StatusCode::BAD_REQUEST)?,
-        version_parts[1].parse().map_err(|_| StatusCode::BAD_REQUEST)?,
-        version_parts[2].parse().map_err(|_| StatusCode::BAD_REQUEST)?,
+        version_parts[0]
+            .parse()
+            .map_err(|_| StatusCode::BAD_REQUEST)?,
+        version_parts[1]
+            .parse()
+            .map_err(|_| StatusCode::BAD_REQUEST)?,
+        version_parts[2]
+            .parse()
+            .map_err(|_| StatusCode::BAD_REQUEST)?,
     );
 
     let duration = std::time::Duration::from_secs(request.estimated_duration_secs.unwrap_or(300));

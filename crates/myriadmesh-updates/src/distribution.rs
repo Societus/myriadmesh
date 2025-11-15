@@ -86,7 +86,7 @@ impl UpdatePackage {
         hasher.update(&self.payload);
         let computed = hasher.finalize();
 
-        &computed[..] == &self.payload_hash
+        computed[..] == self.payload_hash
     }
 
     /// Add a signature to the package

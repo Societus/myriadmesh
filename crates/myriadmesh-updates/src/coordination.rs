@@ -208,7 +208,7 @@ impl UpdateCoordinator {
 
         // Register the peer's downtime
         let downtime = PeerDowntime {
-            peer_id: schedule.node_id.clone(),
+            peer_id: schedule.node_id,
             adapter_type: schedule.adapter_type,
             start_time: schedule.scheduled_start,
             end_time: schedule.scheduled_end(),
@@ -230,7 +230,7 @@ impl UpdateCoordinator {
         // Verify payload hash
         if !package.verify_payload_hash() {
             return Err(UpdateError::HashMismatch {
-                expected: hex::encode(&package.payload_hash),
+                expected: hex::encode(package.payload_hash),
                 actual: "invalid".to_string(),
             });
         }
@@ -404,7 +404,6 @@ impl UpdateCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::distribution::UpdateMetadata;
 
     #[tokio::test]
     async fn test_coordinator_initialization() {

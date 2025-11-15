@@ -320,6 +320,7 @@ pub struct UpdateScheduleManager {
     pending_schedules: Arc<RwLock<HashMap<AdapterType, UpdateSchedule>>>,
 
     /// Requests we've sent to neighbors
+    #[allow(clippy::type_complexity)]
     sent_requests: Arc<RwLock<HashMap<String, (UpdateScheduleRequest, HashSet<NodeId>)>>>,
 
     /// Responses we've received
@@ -379,7 +380,7 @@ impl UpdateScheduleManager {
         responses
             .entry(request_id)
             .or_insert_with(HashMap::new)
-            .insert(response.node_id().clone(), response);
+            .insert(*response.node_id(), response);
     }
 
     /// Check if all neighbors have responded to a request

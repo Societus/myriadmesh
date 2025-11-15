@@ -53,9 +53,11 @@ pub struct SignerVerification {
 /// Signature verifier with reputation tracking
 pub struct SignatureVerifier {
     /// Callback to get a node's public key
+    #[allow(clippy::type_complexity)]
     public_key_provider: Box<dyn Fn(&NodeId) -> Option<PublicKey> + Send + Sync>,
 
     /// Callback to get a node's reputation
+    #[allow(clippy::type_complexity)]
     reputation_provider: Box<dyn Fn(&NodeId) -> Option<f64> + Send + Sync>,
 }
 
@@ -80,7 +82,7 @@ impl SignatureVerifier {
             hasher.update(&package.payload);
             let computed = hasher.finalize();
             return Err(UpdateError::HashMismatch {
-                expected: hex::encode(&package.payload_hash),
+                expected: hex::encode(package.payload_hash),
                 actual: hex::encode(&computed[..]),
             });
         }
@@ -94,7 +96,7 @@ impl SignatureVerifier {
 
         // Verify each signature
         for sig_info in &package.signatures {
-            let verification = self.verify_signature(&sig_info, &signable_data);
+            let verification = self.verify_signature(sig_info, &signable_data);
 
             if verification.signature_valid {
                 valid_count += 1;
@@ -104,7 +106,7 @@ impl SignatureVerifier {
                 trusted_count += 1;
             }
 
-            signer_details.insert(sig_info.signer.clone(), verification);
+            signer_details.insert(sig_info.signer, verification);
         }
 
         // Determine if verification passed
@@ -132,7 +134,7 @@ impl SignatureVerifier {
             Some(key) => key,
             None => {
                 return SignerVerification {
-                    node_id: sig_info.signer.clone(),
+                    node_id: sig_info.signer,
                     signature_valid: false,
                     reputation: None,
                     trusted: false,
@@ -154,7 +156,7 @@ impl SignatureVerifier {
                 .unwrap_or(false);
 
         SignerVerification {
-            node_id: sig_info.signer.clone(),
+            node_id: sig_info.signer,
             signature_valid,
             reputation,
             trusted,
@@ -229,7 +231,7 @@ impl SignatureVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::distribution::{CveFixInfo, CveSeverity, UpdateMetadata};
+    use crate::distribution::UpdateMetadata;
     use myriadmesh_crypto::signing::sign_message;
     use myriadmesh_network::version_tracking::SemanticVersion;
     use myriadmesh_protocol::types::AdapterType;
@@ -282,23 +284,22 @@ mod tests {
         let sig2 = sign_message(&identity2, &signable_data).unwrap();
         let sig3 = sign_message(&identity3, &signable_data).unwrap();
 
-        package.add_signature(UpdateSignature::new(node1.clone(), sig1).with_reputation(0.9));
-        package.add_signature(UpdateSignature::new(node2.clone(), sig2).with_reputation(0.85));
-        package.add_signature(UpdateSignature::new(node3.clone(), sig3).with_reputation(0.7));
+        package.add_signature(UpdateSignature::new(node1, sig1).with_reputation(0.9));
+        package.add_signature(UpdateSignature::new(node2, sig2).with_reputation(0.85));
+        package.add_signature(UpdateSignature::new(node3, sig3).with_reputation(0.7));
 
         // Create verifier
         let pub_keys: HashMap<NodeId, PublicKey> = [
-            (node1.clone(), identity1.public_key.clone()),
-            (node2.clone(), identity2.public_key.clone()),
-            (node3.clone(), identity3.public_key.clone()),
+            (node1, identity1.public_key),
+            (node2, identity2.public_key),
+            (node3, identity3.public_key),
         ]
         .into_iter()
         .collect();
 
-        let reputations: HashMap<NodeId, f64> =
-            [(node1.clone(), 0.9), (node2.clone(), 0.85), (node3, 0.7)]
-                .into_iter()
-                .collect();
+        let reputations: HashMap<NodeId, f64> = [(node1, 0.9), (node2, 0.85), (node3, 0.7)]
+            .into_iter()
+            .collect();
 
         let verifier = SignatureVerifier::new(
             move |node_id| pub_keys.get(node_id).cloned(),
