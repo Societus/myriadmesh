@@ -15,6 +15,9 @@ use tokio::sync::RwLock;
 use crate::adapter::NetworkAdapter;
 use crate::error::Result;
 
+/// Type alias for message handler functions
+pub type MessageHandlerFn = Arc<dyn Fn(&Frame) -> Result<()> + Send + Sync>;
+
 /// Plugin configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginConfig {
@@ -98,7 +101,7 @@ pub struct MessageHandler {
     /// Message type ID
     pub message_type: u8,
     /// Handler function
-    pub handler: Arc<dyn Fn(&Frame) -> Result<()> + Send + Sync>,
+    pub handler: MessageHandlerFn,
 }
 
 /// UI component type
@@ -187,7 +190,10 @@ impl PluginRegistry {
     }
 
     /// Register an application plugin
-    pub async fn register_application(&self, application: Arc<dyn ApplicationPlugin>) -> Result<()> {
+    pub async fn register_application(
+        &self,
+        application: Arc<dyn ApplicationPlugin>,
+    ) -> Result<()> {
         let name = application.plugin_name().to_string();
         log::info!("Registering application plugin: {}", name);
         self.applications.write().await.insert(name, application);

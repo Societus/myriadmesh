@@ -15,7 +15,10 @@
 use crate::adapter::{AdapterStatus, NetworkAdapter, PeerInfo, TestResults};
 use crate::error::{NetworkError, Result};
 use crate::types::{AdapterCapabilities, Address, PowerConsumption};
-use myriadmesh_protocol::{types::{AdapterType, NODE_ID_SIZE}, Frame, MessageId, MessageType, NodeId};
+use myriadmesh_protocol::{
+    types::{AdapterType, NODE_ID_SIZE},
+    Frame, MessageId, MessageType, NodeId,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -104,8 +107,8 @@ impl LoRaConfig {
     pub fn calculate_time_on_air(&self, payload_bytes: usize) -> u64 {
         // Simplified time-on-air calculation
         // Real implementation would use proper LoRa formula
-        let symbol_time_ms = (1000.0 * (1 << self.spreading_factor) as f64)
-            / (self.bandwidth_khz as f64 * 1000.0);
+        let symbol_time_ms =
+            (1000.0 * (1 << self.spreading_factor) as f64) / (self.bandwidth_khz as f64 * 1000.0);
 
         // Preamble + header + payload symbols
         let preamble_symbols = 8.0;
@@ -150,7 +153,7 @@ impl DutyCycleTracker {
             tx_time_ms: Arc::new(AtomicU64::new(0)),
             window_start_ms: Arc::new(AtomicU64::new(now_ms())),
             limit: limit_percent / 100.0,
-            window_duration_ms: 3600_000, // 1 hour
+            window_duration_ms: 3_600_000, // 1 hour
         }
     }
 
@@ -184,6 +187,7 @@ impl DutyCycleTracker {
     }
 
     /// Get current duty cycle usage (0.0-1.0)
+    #[allow(dead_code)]
     fn get_usage(&self) -> f32 {
         let tx_time = self.tx_time_ms.load(Ordering::Relaxed);
         (tx_time as f32) / (self.window_duration_ms as f32)
@@ -191,6 +195,7 @@ impl DutyCycleTracker {
 }
 
 /// Hardware abstraction for LoRa modem
+#[allow(dead_code)]
 trait LoRaModem: Send + Sync {
     /// Initialize the modem
     fn initialize(&mut self, config: &LoRaConfig) -> Result<()>;
@@ -215,6 +220,7 @@ trait LoRaModem: Send + Sync {
 }
 
 /// Mock LoRa modem for testing
+#[allow(dead_code)]
 struct MockLoRaModem {
     config: LoRaConfig,
     tx_queue: Arc<RwLock<Vec<Vec<u8>>>>,
@@ -327,7 +333,9 @@ impl MeshtasticCodec {
 
         // Verify magic bytes
         if data[0] != 0x94 || data[1] != 0x28 {
-            return Err(NetworkError::ReceiveFailed("Invalid magic bytes".to_string()));
+            return Err(NetworkError::ReceiveFailed(
+                "Invalid magic bytes".to_string(),
+            ));
         }
 
         // Extract payload length
@@ -512,8 +520,11 @@ impl NetworkAdapter for LoRaAdapter {
             *status = AdapterStatus::Ready;
         }
 
-        log::info!("LoRa adapter initialized at {} Hz, SF{}",
-            self.config.frequency_hz, self.config.spreading_factor);
+        log::info!(
+            "LoRa adapter initialized at {} Hz, SF{}",
+            self.config.frequency_hz,
+            self.config.spreading_factor
+        );
 
         Ok(())
     }
@@ -625,9 +636,11 @@ impl NetworkAdapter for LoRaAdapter {
             payload,
             msg_id,
             timestamp,
-        ).map_err(|e| NetworkError::DiscoveryFailed(e.to_string()))?;
+        )
+        .map_err(|e| NetworkError::DiscoveryFailed(e.to_string()))?;
 
-        self.send(&Address::LoRa("broadcast".to_string()), &discovery_frame).await?;
+        self.send(&Address::LoRa("broadcast".to_string()), &discovery_frame)
+            .await?;
 
         // Listen for responses (simplified - real implementation would collect responses)
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -657,14 +670,8 @@ impl NetworkAdapter for LoRaAdapter {
         let payload = vec![];
         let msg_id = MessageId::generate(&source, &dest, &payload, timestamp, 0);
 
-        let ping_frame = Frame::new(
-            MessageType::Ping,
-            source,
-            dest,
-            payload,
-            msg_id,
-            timestamp,
-        ).map_err(|e| NetworkError::Other(e.to_string()))?;
+        let ping_frame = Frame::new(MessageType::Ping, source, dest, payload, msg_id, timestamp)
+            .map_err(|e| NetworkError::Other(e.to_string()))?;
 
         self.send(destination, &ping_frame).await?;
 
@@ -688,7 +695,9 @@ impl NetworkAdapter for LoRaAdapter {
 
     fn parse_address(&self, addr_str: &str) -> Result<Address> {
         if !addr_str.starts_with("lora://") {
-            return Err(NetworkError::InvalidAddress("Not a LoRa address".to_string()));
+            return Err(NetworkError::InvalidAddress(
+                "Not a LoRa address".to_string(),
+            ));
         }
 
         Ok(Address::LoRa(addr_str.to_string()))
@@ -751,14 +760,8 @@ mod tests {
         let payload = vec![1, 2, 3, 4];
         let msg_id = MessageId::generate(&source, &dest, &payload, timestamp, 0);
 
-        let frame = Frame::new(
-            MessageType::Data,
-            source,
-            dest,
-            payload,
-            msg_id,
-            timestamp,
-        ).unwrap();
+        let frame =
+            Frame::new(MessageType::Data, source, dest, payload, msg_id, timestamp).unwrap();
 
         let encoded = MeshtasticCodec::encode(&frame).unwrap();
         let decoded = MeshtasticCodec::decode(&encoded).unwrap();

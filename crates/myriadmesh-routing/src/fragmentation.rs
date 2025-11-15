@@ -94,7 +94,7 @@ pub fn fragment_frame(frame: &Frame, mtu: usize) -> Result<Vec<Vec<u8>>> {
     }
 
     let message_id = rand::random::<u16>();
-    let total_frags = (serialized.len() + payload_size - 1) / payload_size;
+    let total_frags = serialized.len().div_ceil(payload_size);
 
     if total_frags > 255 {
         return Err(crate::error::RoutingError::Other(
@@ -128,6 +128,7 @@ struct ReassemblyState {
     /// Fragment storage
     fragments: Vec<Option<Vec<u8>>>,
     /// Total expected fragments
+    #[allow(dead_code)]
     total_fragments: u8,
     /// Timestamp when first fragment received
     started_at: Instant,
@@ -165,18 +166,14 @@ impl FragmentReassembler {
 
         let mut pending = self.pending.write().await;
 
-        // Initialize state if first fragment
-        if !pending.contains_key(&header.message_id) {
-            let state = ReassemblyState {
+        // Initialize state if first fragment and get mutable reference
+        let state = pending
+            .entry(header.message_id)
+            .or_insert_with(|| ReassemblyState {
                 fragments: vec![None; header.total_fragments as usize],
                 total_fragments: header.total_fragments,
                 started_at: Instant::now(),
-            };
-            pending.insert(header.message_id, state);
-        }
-
-        // Get state
-        let state = pending.get_mut(&header.message_id)?;
+            });
 
         // Check timeout
         if state.started_at.elapsed() > self.timeout {
@@ -195,10 +192,8 @@ impl FragmentReassembler {
         if state.fragments.iter().all(|f| f.is_some()) {
             // Reassemble
             let mut result = Vec::new();
-            for frag in &state.fragments {
-                if let Some(data) = frag {
-                    result.extend_from_slice(data);
-                }
+            for data in state.fragments.iter().flatten() {
+                result.extend_from_slice(data);
             }
 
             // Remove from pending

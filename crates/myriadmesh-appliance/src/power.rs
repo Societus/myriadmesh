@@ -163,9 +163,9 @@ impl Default for PowerManagerConfig {
     fn default() -> Self {
         let mut power_scaling_table = HashMap::new();
         power_scaling_table.insert(100, 30); // 100% battery = 30 dBm
-        power_scaling_table.insert(50, 25);  // 50% battery = 25 dBm
-        power_scaling_table.insert(20, 20);  // 20% battery = 20 dBm
-        power_scaling_table.insert(5, 10);   // 5% battery = 10 dBm
+        power_scaling_table.insert(50, 25); // 50% battery = 25 dBm
+        power_scaling_table.insert(20, 20); // 20% battery = 20 dBm
+        power_scaling_table.insert(5, 10); // 5% battery = 10 dBm
 
         Self {
             supply: PowerSupply::default(),
@@ -218,7 +218,10 @@ impl PowerManager {
             if let Some(battery_percent) = config.supply.battery_percent() {
                 for threshold in thresholds {
                     if battery_percent <= threshold.threshold_percent {
-                        return Ok(matches!(threshold.action, PowerAction::FullPower | PowerAction::ReducePower { .. }));
+                        return Ok(matches!(
+                            threshold.action,
+                            PowerAction::FullPower | PowerAction::ReducePower { .. }
+                        ));
                     }
                 }
             }
@@ -238,7 +241,9 @@ impl PowerManager {
             let mut closest_power = 30u8;
 
             for (&threshold, &power) in &config.power_scaling_table {
-                if threshold <= battery_percent && (battery_percent - threshold) < (battery_percent - closest_percent) {
+                if threshold <= battery_percent
+                    && (battery_percent - threshold) < (battery_percent - closest_percent)
+                {
                     closest_percent = threshold;
                     closest_power = power;
                 }
@@ -304,10 +309,10 @@ impl ResetPeriod {
     /// Get period duration in seconds
     pub fn duration_secs(&self) -> u64 {
         match self {
-            Self::Daily => 86400,         // 24 hours
-            Self::Weekly => 604800,       // 7 days
-            Self::Monthly => 2592000,     // 30 days (approximate)
-            Self::Quarterly => 7776000,   // 90 days (approximate)
+            Self::Daily => 86400,       // 24 hours
+            Self::Weekly => 604800,     // 7 days
+            Self::Monthly => 2592000,   // 30 days (approximate)
+            Self::Quarterly => 7776000, // 90 days (approximate)
         }
     }
 }

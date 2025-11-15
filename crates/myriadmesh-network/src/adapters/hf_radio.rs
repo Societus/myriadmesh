@@ -88,9 +88,7 @@ impl HfRadioConfig {
 
         // Power limit check
         if self.tx_power_watts > 100 {
-            return Err(NetworkError::Other(
-                "Power exceeds 100W limit".to_string(),
-            ));
+            return Err(NetworkError::Other("Power exceeds 100W limit".to_string()));
         }
 
         Ok(())
@@ -156,6 +154,7 @@ impl SpaceWeather {
 
 /// Internal HF radio state
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct HfRadioState {
     connected: bool,
     current_frequency_hz: f32,
@@ -166,6 +165,7 @@ struct HfRadioState {
 }
 
 /// CAT (Computer-Aided Transceiver) control interface
+#[allow(dead_code)]
 trait CatControl: Send + Sync {
     fn set_frequency(&mut self, freq_hz: f32) -> Result<()>;
     fn get_frequency(&self) -> Result<f32>;
@@ -175,6 +175,7 @@ trait CatControl: Send + Sync {
 }
 
 /// Mock CAT controller for testing
+#[allow(dead_code)]
 struct MockCatControl {
     frequency: f32,
     mode: String,
@@ -245,7 +246,8 @@ impl Psk31Codec {
 
                 for _ in 0..samples_per_bit {
                     let t = audio.len() as f32 / self.sample_rate as f32;
-                    let sample = (2.0 * std::f32::consts::PI * carrier_freq * t + phase).sin() * 0.8;
+                    let sample =
+                        (2.0 * std::f32::consts::PI * carrier_freq * t + phase).sin() * 0.8;
                     audio.push(sample);
                 }
             }
@@ -255,6 +257,7 @@ impl Psk31Codec {
     }
 
     /// Decode PSK31 (simplified)
+    #[allow(dead_code)]
     fn decode(&self, _audio: &[f32]) -> Result<Vec<u8>> {
         // Simplified: would need carrier recovery and phase detection
         Ok(Vec::new())
@@ -290,7 +293,11 @@ impl RttyCodec {
             // Data bits (5-bit Baudot)
             for bit in 0..5 {
                 let bit_value = (byte >> bit) & 1;
-                let freq = if bit_value == 1 { mark_freq } else { space_freq };
+                let freq = if bit_value == 1 {
+                    mark_freq
+                } else {
+                    space_freq
+                };
 
                 for i in 0..samples_per_bit {
                     let t = (audio.len() + i) as f32 / self.sample_rate as f32;
@@ -310,6 +317,7 @@ impl RttyCodec {
         audio
     }
 
+    #[allow(dead_code)]
     fn decode(&self, _audio: &[f32]) -> Result<Vec<u8>> {
         // Simplified decoder
         Ok(Vec::new())
@@ -399,9 +407,9 @@ impl HfRadioAdapter {
 
         // Simulated values
         Ok(SpaceWeather {
-            sfi: 120,      // Moderate solar flux
-            k_index: 2,    // Quiet conditions
-            a_index: 10,   // Low geomagnetic activity
+            sfi: 120,    // Moderate solar flux
+            k_index: 2,  // Quiet conditions
+            a_index: 10, // Low geomagnetic activity
             timestamp,
         })
     }
@@ -479,7 +487,10 @@ impl NetworkAdapter for HfRadioAdapter {
         }
 
         // Initialize CAT control
-        self.cat.write().await.set_frequency(self.config.frequency_hz)?;
+        self.cat
+            .write()
+            .await
+            .set_frequency(self.config.frequency_hz)?;
 
         // Fetch space weather if auto-band switching enabled
         if self.config.auto_band_switching {

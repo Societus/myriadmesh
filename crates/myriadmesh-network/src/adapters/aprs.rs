@@ -130,6 +130,7 @@ impl AprsConfig {
 
 /// Internal APRS state
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct AprsState {
     /// Connected to APRS-IS or TNC
     connected: bool,
@@ -146,14 +147,16 @@ struct AprsState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 enum AprsMode {
-    TncOnly,  // Direct TNC connection via serial
-    AprsIs,   // APRS-IS network (internet)
-    Hybrid,   // Both TNC and APRS-IS
+    TncOnly, // Direct TNC connection via serial
+    AprsIs,  // APRS-IS network (internet)
+    Hybrid,  // Both TNC and APRS-IS
 }
 
 /// AX.25 frame structure
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct Ax25Frame {
     /// Destination address
     dest: String,
@@ -169,6 +172,7 @@ struct Ax25Frame {
     pid: u8,
 }
 
+#[allow(dead_code)]
 impl Ax25Frame {
     /// Create new AX.25 frame
     fn new(dest: String, source: String, info: Vec<u8>) -> Self {
@@ -222,7 +226,9 @@ impl Ax25Frame {
 
         // Verify KISS framing
         if data[0] != 0xC0 || data[data.len() - 1] != 0xC0 {
-            return Err(NetworkError::ReceiveFailed("Invalid KISS framing".to_string()));
+            return Err(NetworkError::ReceiveFailed(
+                "Invalid KISS framing".to_string(),
+            ));
         }
 
         if data[1] != 0x00 {
@@ -273,7 +279,9 @@ impl Ax25Frame {
     /// Decode callsign from AX.25 format
     fn decode_callsign(data: &[u8]) -> Result<String> {
         if data.len() != 7 {
-            return Err(NetworkError::ReceiveFailed("Invalid callsign length".to_string()));
+            return Err(NetworkError::ReceiveFailed(
+                "Invalid callsign length".to_string(),
+            ));
         }
 
         let mut callsign = String::new();
@@ -313,6 +321,7 @@ trait Tnc: Send + Sync {
 }
 
 /// Mock TNC for testing
+#[allow(dead_code)]
 struct MockTnc {
     config: AprsConfig,
     tx_queue: Arc<RwLock<Vec<Ax25Frame>>>,
@@ -359,6 +368,7 @@ impl Tnc for MockTnc {
 }
 
 /// APRS-IS client for internet gateway
+#[allow(dead_code)]
 struct AprsIsClient {
     server: String,
     port: u16,
@@ -367,6 +377,7 @@ struct AprsIsClient {
     connected: bool,
 }
 
+#[allow(dead_code)]
 impl AprsIsClient {
     fn new(server: String, port: u16, callsign: String, passcode: u16) -> Self {
         Self {
@@ -431,13 +442,13 @@ impl AprsAdapter {
     pub fn new(config: AprsConfig) -> Self {
         let capabilities = AdapterCapabilities {
             adapter_type: AdapterType::APRS,
-            max_message_size: 256,      // AX.25 limit
-            typical_latency_ms: 3000.0, // RF propagation
+            max_message_size: 256,       // AX.25 limit
+            typical_latency_ms: 3000.0,  // RF propagation
             typical_bandwidth_bps: 1200, // 1200 bps standard
             reliability: 0.92,           // Atmospheric interference
             range_meters: 30000.0,       // 30 km typical
             power_consumption: PowerConsumption::Low,
-            cost_per_mb: 0.0,           // License-free for hams
+            cost_per_mb: 0.0, // License-free for hams
             supports_broadcast: true,
             supports_multicast: true,
         };
@@ -576,7 +587,10 @@ impl NetworkAdapter for AprsAdapter {
             *status = AdapterStatus::Ready;
         }
 
-        log::info!("APRS adapter initialized for callsign {}", self.config.callsign);
+        log::info!(
+            "APRS adapter initialized for callsign {}",
+            self.config.callsign
+        );
         Ok(())
     }
 
@@ -638,9 +652,7 @@ impl NetworkAdapter for AprsAdapter {
 
         // Extract destination callsign
         let dest_callsign = match destination {
-            Address::APRS(addr) => {
-                addr.strip_prefix("aprs://").unwrap_or("APRS").to_string()
-            }
+            Address::APRS(addr) => addr.strip_prefix("aprs://").unwrap_or("APRS").to_string(),
             _ => "APRS".to_string(),
         };
 
@@ -707,7 +719,9 @@ impl NetworkAdapter for AprsAdapter {
 
     fn parse_address(&self, addr_str: &str) -> Result<Address> {
         if !addr_str.starts_with("aprs://") {
-            return Err(NetworkError::InvalidAddress("Not an APRS address".to_string()));
+            return Err(NetworkError::InvalidAddress(
+                "Not an APRS address".to_string(),
+            ));
         }
 
         Ok(Address::APRS(addr_str.to_string()))
@@ -765,11 +779,7 @@ mod tests {
 
     #[test]
     fn test_ax25_frame_creation() {
-        let frame = Ax25Frame::new(
-            "APRS".to_string(),
-            "N0CALL".to_string(),
-            vec![1, 2, 3, 4],
-        );
+        let frame = Ax25Frame::new("APRS".to_string(), "N0CALL".to_string(), vec![1, 2, 3, 4]);
 
         assert_eq!(frame.dest, "APRS");
         assert_eq!(frame.source, "N0CALL");
@@ -778,14 +788,10 @@ mod tests {
 
     #[test]
     fn test_kiss_encoding() {
-        let frame = Ax25Frame::new(
-            "APRS".to_string(),
-            "N0CALL".to_string(),
-            vec![1, 2, 3, 4],
-        );
+        let frame = Ax25Frame::new("APRS".to_string(), "N0CALL".to_string(), vec![1, 2, 3, 4]);
 
         let kiss = frame.to_kiss();
-        assert!(kiss.len() > 0);
+        assert!(!kiss.is_empty());
         assert_eq!(kiss[0], 0xC0); // FEND
         assert_eq!(kiss[kiss.len() - 1], 0xC0); // FEND
     }
@@ -799,8 +805,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_aprs_adapter_initialization() {
-        let mut config = AprsConfig::default();
-        config.license_check = false; // Skip license check for test
+        let config = AprsConfig {
+            license_check: false,
+            ..Default::default()
+        };
         let mut adapter = AprsAdapter::new(config);
 
         assert!(adapter.initialize().await.is_ok());
@@ -824,11 +832,7 @@ mod tests {
 
         assert!(tnc.initialize(&config).is_ok());
 
-        let frame = Ax25Frame::new(
-            "APRS".to_string(),
-            "N0CALL".to_string(),
-            vec![1, 2, 3, 4],
-        );
+        let frame = Ax25Frame::new("APRS".to_string(), "N0CALL".to_string(), vec![1, 2, 3, 4]);
 
         assert!(tnc.send_frame(&frame).is_ok());
     }

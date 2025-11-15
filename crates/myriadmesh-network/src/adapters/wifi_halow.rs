@@ -66,9 +66,7 @@ impl WifiHalowConfig {
     pub fn validate(&self) -> Result<()> {
         // Check channel range
         if self.channel == 0 || self.channel > 59 {
-            return Err(NetworkError::Other(
-                "Channel must be 1-59".to_string(),
-            ));
+            return Err(NetworkError::Other("Channel must be 1-59".to_string()));
         }
 
         // Check TWT interval
@@ -117,6 +115,7 @@ impl WifiHalowConfig {
 
 /// Internal WiFi HaLoW state
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct WifiHalowState {
     connected: bool,
     rssi_dbm: Option<i16>,
@@ -230,10 +229,7 @@ impl NetworkStack for MockNetworkStack {
     }
 
     fn scan_networks(&self) -> Result<Vec<String>> {
-        Ok(vec![
-            "mesh-network".to_string(),
-            "halow-test".to_string(),
-        ])
+        Ok(vec!["mesh-network".to_string(), "halow-test".to_string()])
     }
 }
 
@@ -296,10 +292,7 @@ impl WifiHalowAdapter {
     /// Connect to HaLoW network
     async fn connect_to_network(&self) -> Result<()> {
         let mut stack = self.network_stack.write().await;
-        stack.connect(
-            &self.config.ssid,
-            self.config.password.as_deref(),
-        )?;
+        stack.connect(&self.config.ssid, self.config.password.as_deref())?;
 
         let mut state = self.state.write().await;
         state.connected = true;

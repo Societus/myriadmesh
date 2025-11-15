@@ -35,9 +35,7 @@ pub use adapters::{
 };
 pub use error::{NetworkError, Result};
 pub use i2p::{I2pAdapter, I2pRouterConfig};
-pub use license::{
-    AmateurClass, FccClient, LicenseClass, LicenseManager, LicenseState,
-};
+pub use license::{AmateurClass, FccClient, LicenseClass, LicenseManager, LicenseState};
 pub use manager::AdapterManager;
 pub use metrics::AdapterMetrics;
 pub use plugin::{

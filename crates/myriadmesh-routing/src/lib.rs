@@ -33,8 +33,7 @@ pub use adaptive::{
 pub use deduplication::DeduplicationCache;
 pub use error::{Result, RoutingError};
 pub use fragmentation::{
-    fragment_frame, FragmentHeader, FragmentReassembler, FragmentationDecision,
-    FragmentationReason,
+    fragment_frame, FragmentHeader, FragmentReassembler, FragmentationDecision, FragmentationReason,
 };
 pub use geographic::{GeoCoordinates, GeoRoutingTable, NodeLocation};
 pub use multipath::{MultiPathRouter, MultiPathStats, MultiPathStrategy, NetworkPath};

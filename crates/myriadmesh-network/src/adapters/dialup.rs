@@ -66,6 +66,7 @@ impl Default for DialupConfig {
 
 /// Internal dial-up state
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct DialupState {
     /// Connected to ISP or network
     connected: bool,
@@ -82,6 +83,7 @@ struct DialupState {
 }
 
 /// Modem controller abstraction
+#[allow(dead_code)]
 trait ModemController: Send + Sync {
     /// Send AT command and wait for response
     fn send_at_command(&mut self, command: &str, timeout_ms: u64) -> Result<String>;
@@ -137,9 +139,7 @@ impl MockModemController {
 impl ModemController for MockModemController {
     fn send_at_command(&mut self, command: &str, _timeout_ms: u64) -> Result<String> {
         // Extract base command (without parameters)
-        let base_cmd = command.split(|c| c == '=' || c == ' ')
-            .next()
-            .unwrap_or(command);
+        let base_cmd = command.split(['=', ' ']).next().unwrap_or(command);
 
         // Handle dial commands specially
         if command.starts_with("ATDT") {
@@ -177,6 +177,7 @@ enum PppState {
     Established,
 }
 
+#[allow(dead_code)]
 struct PppSession {
     state: PppState,
     local_ip: Option<String>,
@@ -266,6 +267,7 @@ impl PppSession {
     }
 
     /// Decapsulate PPP frame
+    #[allow(dead_code)]
     fn decapsulate(&self, frame: &[u8]) -> Result<Vec<u8>> {
         if frame.len() < 8 {
             return Err(NetworkError::Other("Invalid PPP frame".to_string()));
@@ -305,18 +307,21 @@ struct SmsCodec;
 
 impl SmsCodec {
     /// Encode text to GSM 7-bit encoding
+    #[allow(dead_code)]
     fn encode_gsm7(text: &str) -> Vec<u8> {
         // Simplified: just use ASCII bytes (real impl would use GSM 7-bit alphabet)
         text.as_bytes().to_vec()
     }
 
     /// Decode GSM 7-bit encoding to text
+    #[allow(dead_code)]
     fn decode_gsm7(data: &[u8]) -> String {
         // Simplified: just convert from ASCII
         String::from_utf8_lossy(data).to_string()
     }
 
     /// Create SMS PDU (Protocol Data Unit)
+    #[allow(dead_code)]
     fn create_pdu(destination: &str, message: &str) -> Vec<u8> {
         // Real implementation would create full PDU with:
         // - SMSC (SMS Center) address
@@ -335,6 +340,7 @@ impl SmsCodec {
     }
 
     /// Parse received SMS PDU
+    #[allow(dead_code)]
     fn parse_pdu(_pdu: &[u8]) -> Result<(String, String)> {
         // Real implementation would parse full PDU
         // For now, return mock data
@@ -419,7 +425,9 @@ impl DialupAdapter {
         // Test connection
         let response = modem.send_at_command("AT", 1000)?;
         if !response.contains("OK") {
-            return Err(NetworkError::InitializationFailed("Modem not responding".to_string()));
+            return Err(NetworkError::InitializationFailed(
+                "Modem not responding".to_string(),
+            ));
         }
 
         // Get signal quality for GSM
@@ -440,8 +448,8 @@ impl DialupAdapter {
             ModemType::SerialHayes | ModemType::UsbModem => {
                 // Dial using tone dialing
                 let dial_cmd = format!("ATDT{}", self.config.phone_number);
-                let response = modem.send_at_command(&dial_cmd,
-                    self.config.dial_timeout_secs as u64 * 1000)?;
+                let response = modem
+                    .send_at_command(&dial_cmd, self.config.dial_timeout_secs as u64 * 1000)?;
 
                 if !response.contains("CONNECT") {
                     return Err(NetworkError::Other("Dial failed".to_string()));
@@ -459,8 +467,9 @@ impl DialupAdapter {
                 let response = modem.send_at_command("AT+CIFSR", 2000)?;
 
                 // Extract IP address from response
-                let ip = response.lines()
-                    .find(|line| line.chars().next().map_or(false, |c| c.is_numeric()))
+                let ip = response
+                    .lines()
+                    .find(|line| line.chars().next().is_some_and(|c| c.is_numeric()))
                     .unwrap_or("192.168.1.100")
                     .to_string();
 
@@ -481,7 +490,8 @@ impl DialupAdapter {
         ppp.negotiate_lcp().await?;
 
         // PAP authentication
-        ppp.authenticate_pap(&self.config.ppp_username, &self.config.ppp_password).await?;
+        ppp.authenticate_pap(&self.config.ppp_username, &self.config.ppp_password)
+            .await?;
 
         // IPCP configuration
         ppp.negotiate_ipcp().await?;
@@ -528,9 +538,12 @@ impl DialupAdapter {
     }
 
     /// Send SMS via GSM modem (fallback for very low bandwidth)
+    #[allow(dead_code)]
     async fn send_sms(&self, destination: &str, message: &str) -> Result<()> {
         if self.config.modem_type != ModemType::GsmModule {
-            return Err(NetworkError::Other("SMS only supported on GSM modems".to_string()));
+            return Err(NetworkError::Other(
+                "SMS only supported on GSM modems".to_string(),
+            ));
         }
 
         let mut modem = self.modem.write().await;
@@ -543,7 +556,9 @@ impl DialupAdapter {
         let response = modem.send_at_command(&sms_cmd, 1000)?;
 
         if !response.contains(">") {
-            return Err(NetworkError::SendFailed("SMS prompt not received".to_string()));
+            return Err(NetworkError::SendFailed(
+                "SMS prompt not received".to_string(),
+            ));
         }
 
         // Send message (in real implementation, send Ctrl+Z after message)
@@ -553,9 +568,12 @@ impl DialupAdapter {
     }
 
     /// Receive SMS (very limited bandwidth, emergency fallback)
+    #[allow(dead_code)]
     async fn receive_sms(&self) -> Result<(String, String)> {
         if self.config.modem_type != ModemType::GsmModule {
-            return Err(NetworkError::Other("SMS only supported on GSM modems".to_string()));
+            return Err(NetworkError::Other(
+                "SMS only supported on GSM modems".to_string(),
+            ));
         }
 
         // In real implementation:
@@ -567,6 +585,7 @@ impl DialupAdapter {
     }
 
     /// Get connection duration in seconds
+    #[allow(dead_code)]
     async fn get_call_duration(&self) -> u64 {
         if let Some(start_time) = *self.call_start_time.read().await {
             start_time.elapsed().as_secs()
@@ -669,8 +688,8 @@ impl NetworkAdapter for DialupAdapter {
         }
 
         // Serialize frame
-        let data = bincode::serialize(frame)
-            .map_err(|e| NetworkError::SendFailed(e.to_string()))?;
+        let data =
+            bincode::serialize(frame).map_err(|e| NetworkError::SendFailed(e.to_string()))?;
 
         // Encapsulate in PPP if session exists
         let ppp_session = self.ppp_session.read().await;
@@ -753,7 +772,9 @@ impl NetworkAdapter for DialupAdapter {
 
     fn get_local_address(&self) -> Option<Address> {
         let state = self.state.try_read().ok()?;
-        state.ip_address.as_ref()
+        state
+            .ip_address
+            .as_ref()
             .map(|ip| Address::Dialup(ip.clone()))
     }
 
@@ -948,7 +969,8 @@ mod tests {
             b"test".to_vec(),
             MessageId::from_bytes([0; 16]),
             0,
-        ).unwrap();
+        )
+        .unwrap();
         let addr = Address::Dialup("test".to_string());
 
         // Should fail - not connected

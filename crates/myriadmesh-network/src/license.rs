@@ -76,7 +76,10 @@ impl LicenseState {
     /// Check if license allows HF operation
     pub fn allows_hf(&self) -> bool {
         match self {
-            Self::Valid { license_class: LicenseClass::Amateur(class), .. } => class.allows_hf(),
+            Self::Valid {
+                license_class: LicenseClass::Amateur(class),
+                ..
+            } => class.allows_hf(),
             _ => false,
         }
     }
@@ -92,6 +95,7 @@ impl LicenseState {
 
 /// Cache entry for license validation
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct CacheEntry {
     callsign: String,
     valid: bool,
@@ -239,7 +243,11 @@ impl LicenseManager {
     pub async fn can_transmit(&self) -> Result<()> {
         let state = self.state.read().await;
         match &*state {
-            LicenseState::Valid { expires_at, callsign, .. } => {
+            LicenseState::Valid {
+                expires_at,
+                callsign,
+                ..
+            } => {
                 // Check expiration
                 if let Some(expiration) = expires_at {
                     if now() >= *expiration {

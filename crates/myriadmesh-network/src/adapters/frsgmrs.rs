@@ -139,6 +139,7 @@ impl FrsGmrsConfig {
 
 /// Internal FRS/GMRS state
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct FrsGmrsState {
     tx_active: bool,
     current_frequency_hz: f32,
@@ -421,6 +422,7 @@ impl FrsGmrsAdapter {
     }
 
     /// Decode audio to frame
+    #[allow(dead_code)]
     async fn decode_frame(&self, audio: &[f32]) -> Result<Frame> {
         // Check CTCSS
         if let Some(ref ctcss) = self.ctcss {
