@@ -51,8 +51,7 @@ use myriadmesh_protocol::message::MessageId;
 /// Callback type for message routing confirmations
 /// Called when a message is successfully routed (delivered locally or forwarded)
 /// Arguments: (message_id, source, destination, was_delivered_locally)
-pub type MessageConfirmationCallback =
-    Arc<dyn Fn(MessageId, NodeId, NodeId, bool) + Send + Sync>;
+pub type MessageConfirmationCallback = Arc<dyn Fn(MessageId, NodeId, NodeId, bool) + Send + Sync>;
 
 /// Router statistics
 #[derive(Debug, Default, Clone)]
