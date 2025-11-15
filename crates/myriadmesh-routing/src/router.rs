@@ -8,8 +8,8 @@
 //! - Reputation-based throttling
 
 use crate::{
-    deduplication::DeduplicationCache, priority_queue::PriorityQueue, rate_limiter::RateLimiter,
-    RoutingError,
+    deduplication::DeduplicationCache, offline_cache::OfflineMessageCache,
+    priority_queue::PriorityQueue, rate_limiter::RateLimiter, RoutingError,
 };
 use myriadmesh_protocol::{message::Message, NodeId};
 use std::{
@@ -17,7 +17,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 
 /// Maximum message size (1 MB)
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
@@ -45,6 +45,13 @@ const SPAM_PENALTY_DURATION_MINS: u64 = 10;
 
 /// Message deduplication TTL (seconds)
 const DEDUP_TTL_SECS: u64 = 3600;
+
+use myriadmesh_protocol::message::MessageId;
+
+/// Callback type for message routing confirmations
+/// Called when a message is successfully routed (delivered locally or forwarded)
+/// Arguments: (message_id, source, destination, was_delivered_locally)
+pub type MessageConfirmationCallback = Arc<dyn Fn(MessageId, NodeId, NodeId, bool) + Send + Sync>;
 
 /// Router statistics
 #[derive(Debug, Default, Clone)]
@@ -89,6 +96,16 @@ pub struct Router {
 
     /// Router statistics
     stats: Arc<RwLock<RouterStats>>,
+
+    /// Local delivery channel (for messages destined for this node)
+    local_delivery_tx: Option<mpsc::UnboundedSender<Message>>,
+
+    /// Offline message cache (for store-and-forward)
+    offline_cache: Arc<RwLock<OfflineMessageCache>>,
+
+    /// Message confirmation callback (for ledger integration)
+    /// Called when messages are successfully routed
+    confirmation_callback: Option<MessageConfirmationCallback>,
 }
 
 impl Router {
@@ -113,7 +130,47 @@ impl Router {
             burst_tracker: Arc::new(RwLock::new(HashMap::new())),
             spam_tracker: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(RouterStats::default())),
+            local_delivery_tx: None,
+            offline_cache: Arc::new(RwLock::new(OfflineMessageCache::new())),
+            confirmation_callback: None,
         }
+    }
+
+    /// Set the local delivery channel
+    ///
+    /// # Arguments
+    /// * `tx` - Channel sender for locally delivered messages
+    pub fn set_local_delivery_channel(&mut self, tx: mpsc::UnboundedSender<Message>) {
+        self.local_delivery_tx = Some(tx);
+    }
+
+    /// Set the message confirmation callback
+    ///
+    /// This callback is invoked when messages are successfully routed, allowing
+    /// external systems (like the ledger) to record message confirmations.
+    ///
+    /// # Arguments
+    /// * `callback` - Function called with (message_id, source, destination, was_local)
+    ///
+    /// # Example
+    /// ```ignore
+    /// router.set_confirmation_callback(Arc::new(|msg_id, src, dest, is_local| {
+    ///     // Create ledger MESSAGE entry here
+    ///     println!("Message routed: {:?} from {:?} to {:?}", msg_id, src, dest);
+    /// }));
+    /// ```
+    pub fn set_confirmation_callback(&mut self, callback: MessageConfirmationCallback) {
+        self.confirmation_callback = Some(callback);
+    }
+
+    /// Create a channel for receiving locally delivered messages
+    ///
+    /// Returns a tuple of (sender, receiver) for local message delivery
+    pub fn create_local_delivery_channel() -> (
+        mpsc::UnboundedSender<Message>,
+        mpsc::UnboundedReceiver<Message>,
+    ) {
+        mpsc::unbounded_channel()
     }
 
     /// Route an incoming message
@@ -268,8 +325,14 @@ impl Router {
             }
         }
 
+        // Capture message details before consuming
+        let msg_id = message.id;
+        let src = message.source;
+        let dest = message.destination;
+        let is_local = dest == self.node_id;
+
         // Route based on destination
-        if message.destination == self.node_id {
+        if is_local {
             // Message is for us - deliver locally
             self.deliver_local(message).await?;
         } else {
@@ -281,24 +344,88 @@ impl Router {
         let mut stats = self.stats.write().await;
         stats.messages_routed += 1;
 
+        // Call confirmation callback if set (for ledger integration)
+        if let Some(callback) = &self.confirmation_callback {
+            callback(msg_id, src, dest, is_local);
+        }
+
         Ok(())
     }
 
     /// Deliver message to local application
-    async fn deliver_local(&self, _message: Message) -> Result<(), RoutingError> {
-        // TODO: Implement local delivery
-        // This will integrate with the application layer
-        Ok(())
+    async fn deliver_local(&self, message: Message) -> Result<(), RoutingError> {
+        if let Some(tx) = &self.local_delivery_tx {
+            // Send message to local delivery channel
+            tx.send(message).map_err(|e| {
+                RoutingError::Other(format!("Local delivery channel closed: {}", e))
+            })?;
+
+            // Update statistics
+            let mut stats = self.stats.write().await;
+            stats.messages_routed += 1;
+
+            Ok(())
+        } else {
+            // No local delivery channel configured, log and drop
+            Err(RoutingError::Other(
+                "Local delivery channel not configured".to_string(),
+            ))
+        }
     }
 
     /// Forward message to next hop
     async fn forward_message(&self, message: Message) -> Result<(), RoutingError> {
+        // TODO: Check if destination is reachable
+        // For now, we'll try to send and cache on failure
+
         // Add to outbound queue based on priority
         let mut queue = self.outbound_queue.write().await;
         queue
             .enqueue(message)
             .map_err(|e| RoutingError::QueueFull(e.to_string()))?;
         Ok(())
+    }
+
+    /// Cache message for offline destination (store-and-forward)
+    ///
+    /// # Arguments
+    /// * `destination` - The offline node ID
+    /// * `message` - The message to cache
+    ///
+    /// # Returns
+    /// Ok(()) if cached successfully, Err if cache is full
+    pub async fn cache_for_offline(
+        &self,
+        destination: NodeId,
+        message: Message,
+    ) -> Result<(), RoutingError> {
+        let mut cache = self.offline_cache.write().await;
+        cache.cache_message(destination, message.clone(), message.priority)?;
+        Ok(())
+    }
+
+    /// Retrieve cached messages for a node that came online
+    ///
+    /// # Arguments
+    /// * `node_id` - The node that came online
+    ///
+    /// # Returns
+    /// Vector of cached messages for this node
+    pub async fn retrieve_offline_messages(&self, node_id: &NodeId) -> Vec<Message> {
+        let mut cache = self.offline_cache.write().await;
+        cache.retrieve_messages(node_id)
+    }
+
+    /// Check if there are cached messages for a node
+    pub async fn has_offline_messages(&self, node_id: &NodeId) -> bool {
+        let cache = self.offline_cache.read().await;
+        cache.has_messages(node_id)
+    }
+
+    /// Get count of cached messages for a node
+    pub async fn offline_message_count(&self, node_id: &NodeId) -> usize {
+        let cache = self.offline_cache.read().await;
+        cache.message_count(node_id)
     }
 
     /// Estimate message size in bytes
@@ -354,6 +481,12 @@ impl Router {
         {
             let mut dedup = self.dedup_cache.write().await;
             dedup.cleanup_expired();
+        }
+
+        // Cleanup offline message cache (remove expired messages)
+        {
+            let mut cache = self.offline_cache.write().await;
+            cache.cleanup_expired();
         }
     }
 }

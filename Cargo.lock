@@ -1981,6 +1981,7 @@ dependencies = [
  "myriadmesh-crypto",
  "myriadmesh-dht",
  "myriadmesh-i2p",
+ "myriadmesh-ledger",
  "myriadmesh-network",
  "myriadmesh-protocol",
  "myriadmesh-routing",

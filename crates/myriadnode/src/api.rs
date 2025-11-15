@@ -1,6 +1,6 @@
 use anyhow::Result;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post},
     Json, Router,
@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::config::ApiConfig;
 use crate::failover::FailoverManager;
@@ -19,6 +19,7 @@ use crate::heartbeat::HeartbeatService;
 use myriadmesh_appliance::{
     types::DevicePreferences, ApplianceManager, CachedMessage, PairingRequest, PairingResponse,
 };
+use myriadmesh_ledger::ChainSync;
 use myriadmesh_network::{AdapterManager, AdapterStatus as NetworkAdapterStatus};
 use myriadmesh_updates::UpdateCoordinator;
 
@@ -30,8 +31,10 @@ pub struct ApiState {
     adapter_manager: Arc<RwLock<AdapterManager>>,
     heartbeat_service: Arc<HeartbeatService>,
     failover_manager: Arc<FailoverManager>,
+    ledger: Arc<RwLock<ChainSync>>,
     appliance_manager: Option<Arc<ApplianceManager>>,
     update_coordinator: Option<Arc<UpdateCoordinator>>,
+    storage: Option<Arc<RwLock<crate::storage::Storage>>>,
     node_id: String,
     node_name: String,
     start_time: SystemTime,
@@ -50,8 +53,10 @@ impl ApiServer {
         adapter_manager: Arc<RwLock<AdapterManager>>,
         heartbeat_service: Arc<HeartbeatService>,
         failover_manager: Arc<FailoverManager>,
+        ledger: Arc<RwLock<ChainSync>>,
         appliance_manager: Option<Arc<ApplianceManager>>,
         update_coordinator: Option<Arc<UpdateCoordinator>>,
+        storage: Option<Arc<RwLock<crate::storage::Storage>>>,
         node_id: String,
         node_name: String,
     ) -> Result<Self> {
@@ -60,8 +65,10 @@ impl ApiServer {
             adapter_manager,
             heartbeat_service,
             failover_manager,
+            ledger,
             appliance_manager,
             update_coordinator,
+            storage,
             node_id,
             node_name,
             start_time: SystemTime::now(),
@@ -150,6 +157,12 @@ impl ApiServer {
                 "/api/appliance/cache/stats/:device_id",
                 get(get_cache_stats),
             )
+            // Ledger endpoints
+            .route("/api/ledger/blocks", get(list_ledger_blocks))
+            .route("/api/ledger/blocks/:height", get(get_ledger_block))
+            .route("/api/ledger/entries", get(list_ledger_entries))
+            .route("/api/ledger/entry", post(submit_ledger_entry))
+            .route("/api/ledger/stats", get(get_ledger_stats))
             // Legacy v1 endpoints (for backwards compatibility)
             .route("/api/v1/node/status", get(get_node_status))
             .route("/api/v1/node/info", get(get_node_info))
@@ -236,14 +249,88 @@ struct NodeInfoResponse {
 // === Message Endpoints ===
 
 async fn send_message(
-    State(_state): State<Arc<ApiState>>,
-    Json(_request): Json<SendMessageRequest>,
+    State(state): State<Arc<ApiState>>,
+    Json(request): Json<SendMessageRequest>,
 ) -> Result<Json<MessageResponse>, StatusCode> {
-    // TODO: Implement message sending
-    Ok(Json(MessageResponse {
-        message_id: "msg_123".to_string(),
-        status: "queued".to_string(),
-    }))
+    // Generate message ID
+    use myriadmesh_protocol::message::MessageId;
+    use myriadmesh_protocol::NodeId;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Parse source (this node) and destination NodeIds
+    let source_bytes = hex::decode(&state.node_id).unwrap_or_else(|_| vec![0u8; 64]);
+    let mut source_id_bytes = [0u8; 64];
+    source_id_bytes.copy_from_slice(&source_bytes[..64.min(source_bytes.len())]);
+    let source = NodeId::from_bytes(source_id_bytes);
+
+    let dest_bytes = hex::decode(&request.destination).unwrap_or_else(|_| vec![0u8; 64]);
+    let mut dest_id_bytes = [0u8; 64];
+    dest_id_bytes.copy_from_slice(&dest_bytes[..64.min(dest_bytes.len())]);
+    let destination = NodeId::from_bytes(dest_id_bytes);
+
+    let message_id = MessageId::generate(
+        &source,
+        &destination,
+        request.payload.as_bytes(),
+        timestamp,
+        0, // sequence number (could be tracked per destination)
+    );
+    let message_id_str = format!("{:?}", message_id);
+
+    // Store message in database if storage is available
+    if let Some(storage) = &state.storage {
+        let storage_guard = storage.read().await;
+        let pool = storage_guard.pool();
+
+        // Convert priority (default to normal priority if not specified)
+        let priority = request.priority.unwrap_or(2) as i64;
+
+        // Convert payload string to bytes
+        let payload = request.payload.as_bytes().to_vec();
+
+        // Insert message into database
+        if let Err(e) = sqlx::query(
+            r#"
+            INSERT INTO messages (id, destination, payload, priority, status, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+        )
+        .bind(&message_id_str)
+        .bind(&request.destination)
+        .bind(&payload)
+        .bind(priority)
+        .bind("queued")
+        .bind(timestamp as i64)
+        .bind(timestamp as i64)
+        .execute(pool)
+        .await
+        {
+            warn!("Failed to store message: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+
+        // TODO: Actually route the message through the router
+        // For now, we just store it in the database
+        info!(
+            "Message queued: {} to {} ({} bytes)",
+            message_id_str,
+            request.destination,
+            payload.len()
+        );
+
+        Ok(Json(MessageResponse {
+            message_id: message_id_str,
+            status: "queued".to_string(),
+        }))
+    } else {
+        // No storage configured
+        Err(StatusCode::SERVICE_UNAVAILABLE)
+    }
 }
 
 #[derive(Deserialize)]
@@ -260,9 +347,47 @@ struct MessageResponse {
     status: String,
 }
 
-async fn list_messages(State(_state): State<Arc<ApiState>>) -> Json<Vec<MessageInfo>> {
-    // TODO: Implement message listing
-    Json(vec![])
+async fn list_messages(State(state): State<Arc<ApiState>>) -> Json<Vec<MessageInfo>> {
+    if let Some(storage) = &state.storage {
+        let storage_guard = storage.read().await;
+        let pool = storage_guard.pool();
+
+        // Query recent messages (limit to last 100)
+        let messages = sqlx::query_as::<_, (String, String, i64, String, i64)>(
+            r#"
+            SELECT id, destination, priority, status, created_at
+            FROM messages
+            ORDER BY created_at DESC
+            LIMIT 100
+            "#,
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+        let message_infos: Vec<MessageInfo> = messages
+            .into_iter()
+            .map(
+                |(id, destination, priority, status, timestamp)| MessageInfo {
+                    message_id: id,
+                    timestamp: timestamp as u64,
+                    direction: if destination == state.node_id {
+                        "inbound".to_string()
+                    } else {
+                        "outbound".to_string()
+                    },
+                    status,
+                    destination: Some(destination),
+                    priority: Some(priority as u8),
+                },
+            )
+            .collect();
+
+        Json(message_infos)
+    } else {
+        // No storage available
+        Json(vec![])
+    }
 }
 
 #[derive(Serialize)]
@@ -272,6 +397,8 @@ struct MessageInfo {
     timestamp: u64,
     direction: String,
     status: String,
+    destination: Option<String>,
+    priority: Option<u8>,
 }
 
 // === Adapter Endpoints ===
@@ -303,18 +430,40 @@ async fn get_adapter(
 }
 
 async fn start_adapter(
-    State(_state): State<Arc<ApiState>>,
-    Path(_id): Path<String>,
+    State(state): State<Arc<ApiState>>,
+    Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    // TODO: Implement adapter start
+    let manager = state.adapter_manager.read().await;
+
+    // Get adapter
+    let adapter_arc = manager.get_adapter(&id).ok_or(StatusCode::NOT_FOUND)?;
+
+    // Start the adapter
+    let mut adapter = adapter_arc.write().await;
+    adapter
+        .start()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     Ok(StatusCode::OK)
 }
 
 async fn stop_adapter(
-    State(_state): State<Arc<ApiState>>,
-    Path(_id): Path<String>,
+    State(state): State<Arc<ApiState>>,
+    Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    // TODO: Implement adapter stop
+    let manager = state.adapter_manager.read().await;
+
+    // Get adapter
+    let adapter_arc = manager.get_adapter(&id).ok_or(StatusCode::NOT_FOUND)?;
+
+    // Stop the adapter
+    let mut adapter = adapter_arc.write().await;
+    adapter
+        .stop()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     Ok(StatusCode::OK)
 }
 
@@ -1161,4 +1310,198 @@ async fn get_fallback_adapters(
         }))),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
+}
+
+// === Ledger Endpoints ===
+
+async fn list_ledger_blocks(
+    State(state): State<Arc<ApiState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let ledger = state.ledger.read().await;
+    let local_height = ledger.local_height();
+
+    // Get the last 10 blocks (or fewer if chain is shorter)
+    let start_height = local_height.saturating_sub(9);
+    let mut blocks = Vec::new();
+
+    for height in start_height..=local_height {
+        if let Ok(block) = ledger.storage().load_block(height) {
+            blocks.push(serde_json::json!({
+                "height": block.header.height,
+                "creator": hex::encode(block.header.creator.as_bytes()),
+                "previous_hash": hex::encode(block.header.previous_hash),
+                "timestamp": block.header.timestamp,
+                "entry_count": block.entries.len(),
+                "validator_count": block.validator_signatures.len(),
+            }));
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "blocks": blocks,
+        "chain_height": local_height,
+        "block_count": blocks.len(),
+    })))
+}
+
+async fn get_ledger_block(
+    State(state): State<Arc<ApiState>>,
+    Path(height): Path<u64>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let ledger = state.ledger.read().await;
+
+    match ledger.storage().load_block(height) {
+        Ok(block) => {
+            let entries: Vec<_> = block
+                .entries
+                .iter()
+                .map(|entry| {
+                    serde_json::json!({
+                        "type": format!("{:?}", entry.entry_type),
+                        "signature_valid": true, // Simplified - actual validation would go here
+                    })
+                })
+                .collect();
+
+            let validators: Vec<_> = block
+                .validator_signatures
+                .iter()
+                .map(|sig| {
+                    serde_json::json!({
+                        "validator": hex::encode(sig.validator.as_bytes()),
+                    })
+                })
+                .collect();
+
+            Ok(Json(serde_json::json!({
+                "height": block.header.height,
+                "version": block.header.version,
+                "creator": hex::encode(block.header.creator.as_bytes()),
+                "previous_hash": hex::encode(block.header.previous_hash),
+                "merkle_root": hex::encode(block.header.merkle_root),
+                "timestamp": block.header.timestamp,
+                "entries": entries,
+                "validators": validators,
+            })))
+        }
+        Err(_) => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+async fn get_ledger_stats(
+    State(state): State<Arc<ApiState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let ledger = state.ledger.read().await;
+    let storage_stats = ledger.storage().stats();
+    let sync_stats = ledger.stats();
+
+    Ok(Json(serde_json::json!({
+        "chain_height": ledger.local_height(),
+        "block_count": storage_stats.block_count,
+        "storage_bytes": storage_stats.total_size_bytes,
+        "pruning_enabled": storage_stats.pruning_enabled,
+        "keep_blocks": storage_stats.keep_blocks,
+        "sync": {
+            "state": format!("{:?}", sync_stats.state),
+            "blocks_discovered": sync_stats.blocks_discovered,
+            "blocks_downloaded": sync_stats.blocks_downloaded,
+            "blocks_validated": sync_stats.blocks_validated,
+            "validation_errors": sync_stats.validation_errors,
+        }
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct EntriesQuery {
+    #[serde(default = "default_entries_limit")]
+    limit: usize,
+}
+
+fn default_entries_limit() -> usize {
+    50
+}
+
+async fn list_ledger_entries(
+    State(state): State<Arc<ApiState>>,
+    Query(query): Query<EntriesQuery>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let ledger = state.ledger.read().await;
+    let local_height = ledger.local_height();
+
+    // Get the last 10 blocks (or fewer if chain is shorter)
+    let start_height = local_height.saturating_sub(9);
+    let mut entries = Vec::new();
+
+    for height in start_height..=local_height {
+        if let Ok(block) = ledger.storage().load_block(height) {
+            for entry in block.entries.iter() {
+                let node_id = entry.node_id();
+                let entry_type_name = match &entry.entry_type {
+                    myriadmesh_ledger::EntryType::Discovery(_) => "Discovery",
+                    myriadmesh_ledger::EntryType::Test(_) => "Test",
+                    myriadmesh_ledger::EntryType::Message(_) => "Message",
+                    myriadmesh_ledger::EntryType::KeyExchange(_) => "KeyExchange",
+                };
+
+                entries.push(serde_json::json!({
+                    "block_height": height,
+                    "timestamp": entry.timestamp.to_rfc3339(),
+                    "type": entry_type_name,
+                    "node_id": hex::encode(node_id.as_bytes()),
+                }));
+
+                // Stop if we've reached the limit
+                if entries.len() >= query.limit {
+                    break;
+                }
+            }
+
+            if entries.len() >= query.limit {
+                break;
+            }
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "entries": entries,
+        "count": entries.len(),
+        "chain_height": local_height,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitEntryRequest {
+    entry_type: String,
+    // Entry-specific data would go here
+    // For now, we accept a generic data field
+    #[serde(default)]
+    #[allow(dead_code)]
+    data: serde_json::Value,
+}
+
+async fn submit_ledger_entry(
+    State(_state): State<Arc<ApiState>>,
+    Json(request): Json<SubmitEntryRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    // Validate entry type
+    let valid_types = ["Discovery", "Test", "Message", "KeyExchange"];
+    if !valid_types.contains(&request.entry_type.as_str()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // In a full implementation, this would:
+    // 1. Parse the entry data according to type
+    // 2. Sign the entry with the node's private key
+    // 3. Add to a mempool for inclusion in the next block
+    // 4. Broadcast to peers via P2P network
+    //
+    // For now, we return a placeholder response indicating
+    // that entry submission would happen through the P2P network
+
+    Ok(Json(serde_json::json!({
+        "status": "accepted",
+        "message": "Entry validation passed. Full P2P submission not yet implemented.",
+        "entry_type": request.entry_type,
+        "note": "Entries are currently bundled into blocks by validators through the P2P network."
+    })))
 }

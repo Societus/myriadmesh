@@ -112,6 +112,26 @@ Be respectful, inclusive, and professional in all interactions. We're building a
    - Dead code in incomplete features (use `#[allow(dead_code)]` with comment)
    - Formatting inconsistencies (run `cargo fmt --all`)
 
+   **Common rustfmt CI failures:**
+
+   1. **Long type aliases split across lines:**
+      ```rust
+      // ❌ CI will fail - rustfmt wants this on one line
+      pub type MessageConfirmationCallback =
+          Arc<dyn Fn(MessageId, NodeId, NodeId, bool) + Send + Sync>;
+
+      // ✅ CI will pass - keep type aliases on single line
+      pub type MessageConfirmationCallback = Arc<dyn Fn(MessageId, NodeId, NodeId, bool) + Send + Sync>;
+      ```
+
+      **Fix:** Run `cargo fmt --all` before committing. If you manually format
+      type aliases, keep them on a single line even if they exceed 100 characters.
+      Rustfmt's stable version prefers single-line type aliases.
+
+   2. **Trailing commas in multi-line items:**
+      Rustfmt enforces trailing commas in multi-line function calls, match arms,
+      and struct definitions. Always run `cargo fmt --all` to auto-fix these.
+
    **Known exceptions:**
    - `myriadmesh-android`: Skeleton implementation awaiting hardware integration
      - Contains intentional dead code for future MyriadNode integration

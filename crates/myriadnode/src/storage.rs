@@ -1,6 +1,7 @@
 use anyhow::Result;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
 
 /// Persistent storage manager
@@ -89,4 +90,92 @@ impl Storage {
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
+
+    /// Store adapter metrics
+    pub async fn store_metrics(
+        &self,
+        adapter_name: &str,
+        destination: &str,
+        latency_ms: Option<f64>,
+        bandwidth_bps: Option<f64>,
+        reliability: Option<f64>,
+    ) -> Result<()> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        sqlx::query(
+            r#"
+            INSERT INTO metrics (adapter_name, destination, latency_ms, bandwidth_bps, reliability, timestamp)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+        )
+        .bind(adapter_name)
+        .bind(destination)
+        .bind(latency_ms)
+        .bind(bandwidth_bps)
+        .bind(reliability)
+        .bind(timestamp)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Query recent metrics for an adapter
+    pub async fn get_recent_metrics(
+        &self,
+        adapter_name: &str,
+        limit: i64,
+    ) -> Result<Vec<MetricRecord>> {
+        let records = sqlx::query_as::<_, MetricRecord>(
+            r#"
+            SELECT id, adapter_name, destination, latency_ms, bandwidth_bps, reliability, timestamp
+            FROM metrics
+            WHERE adapter_name = ?1
+            ORDER BY timestamp DESC
+            LIMIT ?2
+            "#,
+        )
+        .bind(adapter_name)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(records)
+    }
+
+    /// Clean up old metrics (older than specified days)
+    pub async fn cleanup_old_metrics(&self, days: i64) -> Result<u64> {
+        let cutoff = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            - (days * 86400);
+
+        let result = sqlx::query(
+            r#"
+            DELETE FROM metrics
+            WHERE timestamp < ?1
+            "#,
+        )
+        .bind(cutoff)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+}
+
+/// Metric record from database
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct MetricRecord {
+    pub id: i64,
+    pub adapter_name: String,
+    pub destination: String,
+    pub latency_ms: Option<f64>,
+    pub bandwidth_bps: Option<f64>,
+    pub reliability: Option<f64>,
+    pub timestamp: i64,
 }

@@ -19,6 +19,7 @@ myriadmesh-dht = { path = "../myriadmesh-dht" }
 myriadmesh-routing = { path = "../myriadmesh-routing" }
 myriadmesh-network = { path = "../myriadmesh-network" }
 myriadmesh-i2p = { path = "../myriadmesh-i2p" }
+myriadmesh-ledger = { path = "../myriadmesh-ledger" }
 myriadmesh-appliance = { path = "../myriadmesh-appliance" }
 myriadmesh-updates = { path = "../myriadmesh-updates" }
 

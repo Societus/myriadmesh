@@ -10,6 +10,7 @@ pub struct Config {
     pub node: NodeConfig,
     pub api: ApiConfig,
     pub dht: DhtConfig,
+    pub ledger: LedgerConfig,
     pub network: NetworkConfig,
     pub security: SecurityConfig,
     pub i2p: I2pConfig,
@@ -54,6 +55,13 @@ pub struct DhtConfig {
     pub port: u16,
     pub cache_messages: bool,
     pub cache_ttl_days: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LedgerConfig {
+    pub enabled: bool,
+    pub keep_blocks: u64,
+    pub min_reputation: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -327,6 +335,11 @@ impl Config {
                 port: 4001,
                 cache_messages: true,
                 cache_ttl_days: 7,
+            },
+            ledger: LedgerConfig {
+                enabled: true,
+                keep_blocks: 1000,
+                min_reputation: 0.5,
             },
             network: NetworkConfig {
                 adapters: AdapterConfigs {
