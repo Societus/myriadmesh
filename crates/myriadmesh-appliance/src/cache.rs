@@ -210,7 +210,8 @@ impl MessageCache {
         self.check_limits(&message.device_id).await?;
 
         let mut data = self.data.write().await;
-        data.messages.insert(message.message_id.clone(), message.clone());
+        data.messages
+            .insert(message.message_id.clone(), message.clone());
         drop(data);
         self.save().await
     }
@@ -328,16 +329,12 @@ impl MessageCache {
         let mut messages: Vec<_> = data
             .messages
             .values()
-            .filter(|m| {
-                m.device_id == device_id && (!only_undelivered || !m.delivered)
-            })
+            .filter(|m| m.device_id == device_id && (!only_undelivered || !m.delivered))
             .cloned()
             .collect();
 
         // Sort by priority DESC, then received_at ASC
-        messages.sort_by(|a, b| {
-            (b.priority, a.received_at).cmp(&(a.priority, b.received_at))
-        });
+        messages.sort_by(|a, b| (b.priority, a.received_at).cmp(&(a.priority, b.received_at)));
 
         messages.truncate(limit);
         Ok(messages)
@@ -398,7 +395,11 @@ impl MessageCache {
 
         let oldest_message_age_secs = device_messages
             .iter()
-            .map(|m| Utc::now().signed_duration_since(m.received_at).num_seconds())
+            .map(|m| {
+                Utc::now()
+                    .signed_duration_since(m.received_at)
+                    .num_seconds()
+            })
             .max()
             .unwrap_or(0);
 
@@ -526,10 +527,7 @@ mod tests {
         );
 
         cache.store(&msg).await.unwrap();
-        cache
-            .mark_delivered(&["msg-1".to_string()])
-            .await
-            .unwrap();
+        cache.mark_delivered(&["msg-1".to_string()]).await.unwrap();
 
         let undelivered = cache.retrieve("device-1", None, true).await.unwrap();
         assert_eq!(undelivered.len(), 0);

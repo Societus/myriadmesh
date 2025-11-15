@@ -193,8 +193,7 @@ impl Node {
             let manager = Arc::new(ApplianceManager::new(appliance_config, signing_key).await?);
             info!(
                 "✓ Appliance manager initialized (max devices: {}, cache: {})",
-                config.appliance.max_paired_devices,
-                config.appliance.max_total_cache_messages
+                config.appliance.max_paired_devices, config.appliance.max_total_cache_messages
             );
             Some(manager)
         } else {

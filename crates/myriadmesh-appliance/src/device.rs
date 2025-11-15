@@ -188,7 +188,8 @@ impl DeviceStore {
     /// Store a paired device
     pub async fn store(&self, device: &PairedDevice) -> ApplianceResult<()> {
         let mut data = self.data.write().await;
-        data.devices.insert(device.device_id.clone(), device.clone());
+        data.devices
+            .insert(device.device_id.clone(), device.clone());
         drop(data);
         self.save().await
     }
@@ -243,7 +244,7 @@ mod tests {
         let store = DeviceStore::new(temp_file.path()).await.unwrap();
 
         // Create a test device
-        let node_id = NodeId::generate();
+        let node_id = NodeId::from_bytes([0u8; 64]);
         let device = PairedDevice::new(
             "test-device-1".to_string(),
             node_id,

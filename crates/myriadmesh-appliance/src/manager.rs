@@ -2,7 +2,9 @@
 
 use crate::cache::{CachedMessage, MessageCache, MessageCacheConfig};
 use crate::device::{DeviceStore, PairedDevice, PairedDeviceInfo};
-use crate::pairing::{PairingManager, PairingRequest, PairingResponse, PairingResult, PairingToken};
+use crate::pairing::{
+    PairingManager, PairingRequest, PairingResponse, PairingResult, PairingToken,
+};
 use crate::types::{ApplianceCapabilities, ApplianceError, ApplianceResult, DevicePreferences};
 use blake2::Digest;
 use ed25519_dalek::SigningKey;
@@ -77,7 +79,8 @@ impl ApplianceManager {
 
         // Initialize message cache
         let cache_file_path = config.data_directory.join("message_cache.json");
-        let message_cache = Arc::new(MessageCache::new(cache_file_path, config.cache_config.clone()).await?);
+        let message_cache =
+            Arc::new(MessageCache::new(cache_file_path, config.cache_config.clone()).await?);
 
         // Initialize pairing manager
         let pairing_manager = Arc::new(PairingManager::new(
@@ -148,7 +151,9 @@ impl ApplianceManager {
         // Check if max devices reached
         let current_paired = self.device_store.count_active().await?;
         if current_paired >= self.config.max_paired_devices {
-            return Err(ApplianceError::MaxDevicesReached(self.config.max_paired_devices));
+            return Err(ApplianceError::MaxDevicesReached(
+                self.config.max_paired_devices,
+            ));
         }
 
         // Check if device already paired
@@ -185,7 +190,8 @@ impl ApplianceManager {
         if result.success {
             if let Some(session_token) = &result.session_token {
                 // Create session token hash
-                let token_hash = format!("{:x}", blake2::Blake2b512::digest(session_token.as_bytes()));
+                let token_hash =
+                    format!("{:x}", blake2::Blake2b512::digest(session_token.as_bytes()));
 
                 // Store paired device
                 let device = PairedDevice::new(device_id, node_id, public_key, token_hash);
@@ -199,7 +205,10 @@ impl ApplianceManager {
     }
 
     /// Get paired device information
-    pub async fn get_paired_device(&self, device_id: &str) -> ApplianceResult<Option<PairedDevice>> {
+    pub async fn get_paired_device(
+        &self,
+        device_id: &str,
+    ) -> ApplianceResult<Option<PairedDevice>> {
         self.device_store.get(device_id).await
     }
 
@@ -294,7 +303,9 @@ impl ApplianceManager {
         self.device_store.update_last_seen(device_id).await?;
 
         // Retrieve messages
-        self.message_cache.retrieve(device_id, limit, only_undelivered).await
+        self.message_cache
+            .retrieve(device_id, limit, only_undelivered)
+            .await
     }
 
     /// Mark messages as delivered
@@ -303,12 +314,19 @@ impl ApplianceManager {
     }
 
     /// Get cache statistics for a device
-    pub async fn get_cache_stats(&self, device_id: &str) -> ApplianceResult<crate::cache::CacheStats> {
+    pub async fn get_cache_stats(
+        &self,
+        device_id: &str,
+    ) -> ApplianceResult<crate::cache::CacheStats> {
         self.message_cache.get_stats(device_id).await
     }
 
     /// Verify session token for a device
-    pub async fn verify_session_token(&self, device_id: &str, token: &str) -> ApplianceResult<bool> {
+    pub async fn verify_session_token(
+        &self,
+        device_id: &str,
+        token: &str,
+    ) -> ApplianceResult<bool> {
         let device = self
             .device_store
             .get(device_id)
@@ -319,7 +337,11 @@ impl ApplianceManager {
     }
 
     /// Get appliance statistics
-    pub async fn get_stats(&self, uptime_secs: u64, adapters_online: usize) -> ApplianceResult<ApplianceStats> {
+    pub async fn get_stats(
+        &self,
+        uptime_secs: u64,
+        adapters_online: usize,
+    ) -> ApplianceResult<ApplianceStats> {
         let paired_devices = self.device_store.count_active().await?;
 
         // Count total cached messages across all devices
@@ -359,14 +381,19 @@ impl Drop for ApplianceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::SigningKey;
+    use crate::pairing::PairingMethod;
+    use ed25519_dalek::{Signer, SigningKey};
+    use myriadmesh_crypto::identity::NodeId;
     use rand::rngs::OsRng;
+    use rand::RngCore;
     use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_appliance_manager_pairing_flow() {
         let temp_dir = TempDir::new().unwrap();
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let mut key_bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut key_bytes);
+        let signing_key = SigningKey::from_bytes(&key_bytes);
 
         let config = ApplianceManagerConfig {
             node_id: "test-appliance".to_string(),
@@ -378,7 +405,9 @@ mod tests {
         let manager = ApplianceManager::new(config, signing_key).await.unwrap();
 
         // Mobile device
-        let device_signing_key = SigningKey::generate(&mut OsRng);
+        let mut device_key_bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut device_key_bytes);
+        let device_signing_key = SigningKey::from_bytes(&device_key_bytes);
         let device_public_key = device_signing_key.verifying_key().to_bytes().to_vec();
 
         // Initiate pairing
@@ -398,7 +427,7 @@ mod tests {
             challenge_signature: challenge_sig.to_bytes().to_vec(),
         };
 
-        let node_id = myriadmesh_core::NodeId::generate();
+        let node_id = NodeId::from_bytes([0u8; 64]);
         let result = manager
             .complete_pairing(response, "mobile-1".to_string(), node_id, device_public_key)
             .await
@@ -414,7 +443,9 @@ mod tests {
     #[tokio::test]
     async fn test_message_caching() {
         let temp_dir = TempDir::new().unwrap();
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let mut key_bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut key_bytes);
+        let signing_key = SigningKey::from_bytes(&key_bytes);
 
         let config = ApplianceManagerConfig {
             node_id: "test-appliance".to_string(),
@@ -425,7 +456,7 @@ mod tests {
         let manager = ApplianceManager::new(config, signing_key).await.unwrap();
 
         // Create a paired device manually
-        let node_id = myriadmesh_core::NodeId::generate();
+        let node_id = NodeId::from_bytes([0u8; 64]);
         let device = PairedDevice::new(
             "mobile-1".to_string(),
             node_id,
@@ -448,7 +479,10 @@ mod tests {
         manager.cache_message(message).await.unwrap();
 
         // Retrieve messages
-        let messages = manager.retrieve_messages("mobile-1", None, false).await.unwrap();
+        let messages = manager
+            .retrieve_messages("mobile-1", None, false)
+            .await
+            .unwrap();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].message_id, "msg-1");
 

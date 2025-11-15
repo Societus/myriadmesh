@@ -104,7 +104,11 @@ impl Default for RoutingPreferences {
     fn default() -> Self {
         Self {
             default_policy: "balanced".to_string(),
-            adapter_priority: vec!["i2p".to_string(), "wifi".to_string(), "cellular".to_string()],
+            adapter_priority: vec![
+                "i2p".to_string(),
+                "wifi".to_string(),
+                "cellular".to_string(),
+            ],
             qos_class_default: "normal".to_string(),
             multipath_enabled: true,
             geographic_routing_enabled: false,

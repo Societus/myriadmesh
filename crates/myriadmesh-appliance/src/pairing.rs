@@ -83,7 +83,7 @@ impl PairingToken {
 
     /// Generate QR code data
     pub fn to_qr_data(&self) -> ApplianceResult<String> {
-        serde_json::to_string(self).map_err(|e| ApplianceError::Serialization(e))
+        serde_json::to_string(self).map_err(ApplianceError::Serialization)
     }
 }
 
@@ -131,10 +131,7 @@ impl PairingManager {
     }
 
     /// Initiate a pairing request
-    pub async fn initiate_pairing(
-        &self,
-        request: PairingRequest,
-    ) -> ApplianceResult<PairingToken> {
+    pub async fn initiate_pairing(&self, request: PairingRequest) -> ApplianceResult<PairingToken> {
         // Validate request
         if request.device_id.is_empty() {
             return Err(ApplianceError::Configuration(
@@ -214,9 +211,12 @@ impl PairingManager {
 
         // Verify challenge signature
         let device_public_key = VerifyingKey::from_bytes(
-            &pending.request.public_key.clone().try_into().map_err(|_| {
-                ApplianceError::Crypto("Invalid public key format".to_string())
-            })?,
+            &pending
+                .request
+                .public_key
+                .clone()
+                .try_into()
+                .map_err(|_| ApplianceError::Crypto("Invalid public key format".to_string()))?,
         )
         .map_err(|_| ApplianceError::Crypto("Failed to parse public key".to_string()))?;
 
@@ -284,15 +284,21 @@ pub struct PairingRequestInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::Signer;
+    use rand::RngCore;
 
     #[tokio::test]
     async fn test_pairing_flow() {
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let mut key_bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut key_bytes);
+        let signing_key = SigningKey::from_bytes(&key_bytes);
         let node_id = "test-node-123".to_string();
         let manager = PairingManager::new(signing_key.clone(), node_id.clone(), false);
 
         // Mobile device generates keys
-        let device_signing_key = SigningKey::generate(&mut OsRng);
+        let mut device_key_bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut device_key_bytes);
+        let device_signing_key = SigningKey::from_bytes(&device_key_bytes);
         let device_public_key = device_signing_key.verifying_key().to_bytes().to_vec();
 
         // Initiate pairing
@@ -303,7 +309,7 @@ mod tests {
             timestamp: Utc::now().timestamp(),
         };
 
-        let token = manager.initiate_pairing(request).unwrap();
+        let token = manager.initiate_pairing(request).await.unwrap();
         assert!(!token.token.is_empty());
         assert!(!token.is_expired());
 
@@ -323,11 +329,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_pairing_with_approval() {
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let mut key_bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut key_bytes);
+        let signing_key = SigningKey::from_bytes(&key_bytes);
         let node_id = "test-node-123".to_string();
         let manager = PairingManager::new(signing_key.clone(), node_id.clone(), true);
 
-        let device_signing_key = SigningKey::generate(&mut OsRng);
+        let mut device_key_bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut device_key_bytes);
+        let device_signing_key = SigningKey::from_bytes(&device_key_bytes);
         let device_public_key = device_signing_key.verifying_key().to_bytes().to_vec();
 
         let request = PairingRequest {
