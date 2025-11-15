@@ -7,7 +7,7 @@ use crate::distribution::{
 };
 use crate::{Result, UpdateError};
 use blake2::{Blake2b512, Digest};
-use myriadmesh_crypto::signing::verify_signature;
+use myriadmesh_crypto::signing::{verify_signature, Signature};
 use myriadmesh_protocol::NodeId;
 use sodiumoxide::crypto::sign::ed25519::PublicKey;
 use std::collections::HashMap;
@@ -59,6 +59,9 @@ pub struct SignatureVerifier {
     /// Callback to get a node's reputation
     #[allow(clippy::type_complexity)]
     reputation_provider: Box<dyn Fn(&NodeId) -> Option<f64> + Send + Sync>,
+
+    /// Publisher's public key for verifying official releases
+    publisher_public_key: Option<PublicKey>,
 }
 
 impl SignatureVerifier {
@@ -71,6 +74,23 @@ impl SignatureVerifier {
         Self {
             public_key_provider: Box::new(public_key_provider),
             reputation_provider: Box::new(reputation_provider),
+            publisher_public_key: None,
+        }
+    }
+
+    /// Set the publisher's public key for verifying official releases
+    pub fn with_publisher_key(mut self, public_key: PublicKey) -> Self {
+        self.publisher_public_key = Some(public_key);
+        self
+    }
+
+    /// Verify the publisher's signature on an update package
+    fn verify_publisher_signature(&self, payload_hash: &[u8], signature: &Signature) -> bool {
+        if let Some(publisher_key) = &self.publisher_public_key {
+            verify_signature(publisher_key, payload_hash, signature).is_ok()
+        } else {
+            // No publisher key configured, cannot verify
+            false
         }
     }
 
@@ -176,10 +196,16 @@ impl SignatureVerifier {
                 publisher_signature,
                 ..
             } => {
-                // For official sources, we need the publisher signature
-                if publisher_signature.is_some() {
-                    // TODO: Verify publisher signature separately
-                    (true, None)
+                // For official sources, verify the publisher signature
+                if let Some(sig) = publisher_signature {
+                    if self.verify_publisher_signature(&package.payload_hash, sig) {
+                        (true, None)
+                    } else {
+                        (
+                            false,
+                            Some("Publisher signature verification failed".to_string()),
+                        )
+                    }
                 } else {
                     // If no publisher signature, fall back to peer verification
                     if trusted_count >= MIN_TRUSTED_SIGNATURES {

@@ -17,7 +17,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 
 /// Maximum message size (1 MB)
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
@@ -89,6 +89,9 @@ pub struct Router {
 
     /// Router statistics
     stats: Arc<RwLock<RouterStats>>,
+
+    /// Local delivery channel (for messages destined for this node)
+    local_delivery_tx: Option<mpsc::UnboundedSender<Message>>,
 }
 
 impl Router {
@@ -113,7 +116,26 @@ impl Router {
             burst_tracker: Arc::new(RwLock::new(HashMap::new())),
             spam_tracker: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(RouterStats::default())),
+            local_delivery_tx: None,
         }
+    }
+
+    /// Set the local delivery channel
+    ///
+    /// # Arguments
+    /// * `tx` - Channel sender for locally delivered messages
+    pub fn set_local_delivery_channel(&mut self, tx: mpsc::UnboundedSender<Message>) {
+        self.local_delivery_tx = Some(tx);
+    }
+
+    /// Create a channel for receiving locally delivered messages
+    ///
+    /// Returns a tuple of (sender, receiver) for local message delivery
+    pub fn create_local_delivery_channel() -> (
+        mpsc::UnboundedSender<Message>,
+        mpsc::UnboundedReceiver<Message>,
+    ) {
+        mpsc::unbounded_channel()
     }
 
     /// Route an incoming message
@@ -285,10 +307,24 @@ impl Router {
     }
 
     /// Deliver message to local application
-    async fn deliver_local(&self, _message: Message) -> Result<(), RoutingError> {
-        // TODO: Implement local delivery
-        // This will integrate with the application layer
-        Ok(())
+    async fn deliver_local(&self, message: Message) -> Result<(), RoutingError> {
+        if let Some(tx) = &self.local_delivery_tx {
+            // Send message to local delivery channel
+            tx.send(message).map_err(|e| {
+                RoutingError::Other(format!("Local delivery channel closed: {}", e))
+            })?;
+
+            // Update statistics
+            let mut stats = self.stats.write().await;
+            stats.messages_routed += 1;
+
+            Ok(())
+        } else {
+            // No local delivery channel configured, log and drop
+            Err(RoutingError::Other(
+                "Local delivery channel not configured".to_string(),
+            ))
+        }
     }
 
     /// Forward message to next hop

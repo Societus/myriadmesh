@@ -303,18 +303,40 @@ async fn get_adapter(
 }
 
 async fn start_adapter(
-    State(_state): State<Arc<ApiState>>,
-    Path(_id): Path<String>,
+    State(state): State<Arc<ApiState>>,
+    Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    // TODO: Implement adapter start
+    let manager = state.adapter_manager.read().await;
+
+    // Get adapter
+    let adapter_arc = manager.get_adapter(&id).ok_or(StatusCode::NOT_FOUND)?;
+
+    // Start the adapter
+    let mut adapter = adapter_arc.write().await;
+    adapter
+        .start()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     Ok(StatusCode::OK)
 }
 
 async fn stop_adapter(
-    State(_state): State<Arc<ApiState>>,
-    Path(_id): Path<String>,
+    State(state): State<Arc<ApiState>>,
+    Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    // TODO: Implement adapter stop
+    let manager = state.adapter_manager.read().await;
+
+    // Get adapter
+    let adapter_arc = manager.get_adapter(&id).ok_or(StatusCode::NOT_FOUND)?;
+
+    // Stop the adapter
+    let mut adapter = adapter_arc.write().await;
+    adapter
+        .stop()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     Ok(StatusCode::OK)
 }
 

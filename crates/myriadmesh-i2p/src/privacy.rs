@@ -161,19 +161,68 @@ impl PrivacyLayer {
 
     /// Remove padding from padded message
     pub fn unpad_message(&self, padded: &[u8]) -> Result<Vec<u8>, String> {
-        if padded.len() < 2 {
+        // If no padding strategy or message too short, return as-is
+        if matches!(self.config.padding_strategy, PaddingStrategy::None) || padded.len() < 2 {
             return Ok(padded.to_vec());
         }
 
-        // Read padding length from end
-        let _data_len = padded.len();
-
-        // Check if this message has padding indicator
         // Padding format: [data][padding_length: u16][padding_bytes]
-        // We need to find where the padding length indicator is
+        // The u16 padding_length is stored just before the padding bytes
 
-        // For now, assume no padding if we can't determine
-        // TODO: Implement proper padding detection based on strategy
+        if padded.len() < 2 {
+            return Err("Message too short to contain padding length".to_string());
+        }
+
+        // Read padding length from bytes at position (len - padding_size - 2)
+        // We need to extract the u16 that indicates how much padding there is
+        // The last padding_size bytes are random padding
+        // The 2 bytes before that contain the padding_size as u16
+
+        // Try to read the padding length
+        // Start from the end and work backwards to find the padding length indicator
+        let total_len = padded.len();
+
+        // We need at least 2 bytes for the padding length indicator
+        if total_len < 2 {
+            return Ok(padded.to_vec());
+        }
+
+        // The padding length is stored as the last u16 before the padding
+        // So if we have: [data...][u16: padding_len][padding_bytes...]
+        // We need to find where the u16 is located
+
+        // Actually, looking at apply_padding, the format is:
+        // [data][padding_length as u16][random padding bytes]
+        // So padding_length tells us how many random bytes follow the u16
+
+        // Read the last portion to find padding_length
+        // We iterate backwards to find a reasonable padding length
+        for potential_padding_len in 0..=MAX_PADDING_SIZE.min(total_len.saturating_sub(2)) {
+            if total_len < potential_padding_len + 2 {
+                continue;
+            }
+
+            let padding_len_pos = total_len - potential_padding_len - 2;
+            if padding_len_pos + 2 > total_len {
+                continue;
+            }
+
+            let padding_len_bytes = &padded[padding_len_pos..padding_len_pos + 2];
+            let indicated_padding_len =
+                u16::from_le_bytes([padding_len_bytes[0], padding_len_bytes[1]]) as usize;
+
+            // Check if this indicated length matches our position
+            if indicated_padding_len == potential_padding_len
+                && indicated_padding_len <= MAX_PADDING_SIZE
+            {
+                // This looks like the correct padding length
+                // Data is everything before the padding_length u16
+                return Ok(padded[..padding_len_pos].to_vec());
+            }
+        }
+
+        // If we couldn't find valid padding, return as-is
+        // This might be an unpadded message or corrupted
         Ok(padded.to_vec())
     }
 
@@ -453,6 +502,93 @@ mod tests {
 
         // Should have some padding
         assert!(padded.len() >= data.len());
+    }
+
+    #[test]
+    fn test_padding_roundtrip_min_size() {
+        let config = PrivacyConfig {
+            padding_strategy: PaddingStrategy::MinSize,
+            min_message_size: 512,
+            ..Default::default()
+        };
+
+        let layer = PrivacyLayer::new(config);
+        let original_data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+        // Pad the message
+        let padded = layer.pad_message(&original_data);
+        assert!(padded.len() >= 512);
+
+        // Unpad the message
+        let unpadded = layer
+            .unpad_message(&padded)
+            .expect("Unpadding should succeed");
+
+        // Should recover original data
+        assert_eq!(unpadded, original_data);
+    }
+
+    #[test]
+    fn test_padding_roundtrip_random() {
+        let config = PrivacyConfig {
+            padding_strategy: PaddingStrategy::Random,
+            max_padding_size: 1024,
+            ..Default::default()
+        };
+
+        let layer = PrivacyLayer::new(config);
+        let original_data = b"This is a test message with some content".to_vec();
+
+        // Pad the message
+        let padded = layer.pad_message(&original_data);
+        assert!(padded.len() > original_data.len());
+
+        // Unpad the message
+        let unpadded = layer
+            .unpad_message(&padded)
+            .expect("Unpadding should succeed");
+
+        // Should recover original data
+        assert_eq!(unpadded, original_data);
+    }
+
+    #[test]
+    fn test_padding_roundtrip_fixed_buckets() {
+        let config = PrivacyConfig {
+            padding_strategy: PaddingStrategy::FixedBuckets,
+            ..Default::default()
+        };
+
+        let layer = PrivacyLayer::new(config);
+        let original_data = b"Short message".to_vec();
+
+        // Pad the message
+        let padded = layer.pad_message(&original_data);
+
+        // Unpad the message
+        let unpadded = layer
+            .unpad_message(&padded)
+            .expect("Unpadding should succeed");
+
+        // Should recover original data
+        assert_eq!(unpadded, original_data);
+    }
+
+    #[test]
+    fn test_unpadding_no_padding_strategy() {
+        let config = PrivacyConfig {
+            padding_strategy: PaddingStrategy::None,
+            ..Default::default()
+        };
+
+        let layer = PrivacyLayer::new(config);
+        let data = vec![1, 2, 3, 4, 5];
+
+        // With no padding, unpad should return data as-is
+        let unpadded = layer
+            .unpad_message(&data)
+            .expect("Unpadding should succeed");
+        assert_eq!(unpadded, data);
     }
 
     #[test]
