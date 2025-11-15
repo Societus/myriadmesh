@@ -73,20 +73,51 @@ Be respectful, inclusive, and professional in all interactions. We're building a
 
 3. **Format your code:**
    ```bash
-   cargo fmt
+   cargo fmt --all
    ```
 
 4. **Run linter:**
    ```bash
-   cargo clippy -- -D warnings
+   cargo clippy --workspace --all-targets --all-features -- -D warnings
    ```
 
 5. **Run tests:**
    ```bash
-   cargo test --all-features
+   cargo test --workspace --all-features
    ```
 
-6. **Commit your changes:**
+6. **Pre-submission checklist** (run before committing):
+
+   **IMPORTANT:** Run these checks to ensure CI will pass:
+
+   ```bash
+   # 1. Format check (no changes should be needed)
+   cargo fmt --all -- --check
+
+   # 2. Clippy on entire workspace
+   cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+   # 3. Run all tests
+   cargo test --workspace --all-features
+
+   # 4. Build all targets
+   cargo build --workspace --all-targets --all-features
+   ```
+
+   **Common issues to watch for:**
+   - Unused imports (especially after refactoring)
+   - Unnecessary `.clone()` calls on Copy types (NodeId, PublicKey)
+   - Needless borrows in function arguments
+   - `mut` variables that aren't actually mutated
+   - Dead code in incomplete features (use `#[allow(dead_code)]` with comment)
+   - Formatting inconsistencies (run `cargo fmt --all`)
+
+   **Known exceptions:**
+   - `myriadmesh-android`: Skeleton implementation awaiting hardware integration
+     - Contains intentional dead code for future MyriadNode integration
+     - JNI functions require `mut env` even when clippy suggests otherwise
+
+7. **Commit your changes:**
    ```bash
    git add .
    git commit -m "Add feature: description of your changes"

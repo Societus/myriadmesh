@@ -1,8 +1,6 @@
 use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
-use std::sync::Arc;
-use tokio::runtime::Runtime;
 
 mod node;
 use node::AndroidNode;
@@ -174,6 +172,7 @@ pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeSendM
 /// # Safety
 /// This function is called from JNI and must handle all errors safely.
 #[no_mangle]
+#[allow(unused_mut)] // env.new_string() requires mutable borrow
 pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeGetNodeId(
     mut env: JNIEnv,
     _class: JClass,
@@ -206,6 +205,7 @@ pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeGetNo
 /// # Safety
 /// This function is called from JNI and must handle all errors safely.
 #[no_mangle]
+#[allow(unused_mut)] // env.new_string() requires mutable borrow
 pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeGetStatus(
     mut env: JNIEnv,
     _class: JClass,

@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
-use tokio::sync::Mutex;
 
 /// Android wrapper for MyriadNode.
 /// This struct manages the node lifecycle and provides a safe interface for JNI.
 pub struct AndroidNode {
     config_path: String,
     data_dir: String,
+    #[allow(dead_code)] // Will be used when MyriadNode is integrated
     runtime: Arc<Runtime>,
     // TODO: Add actual MyriadNode instance when ready
     // node: Option<Arc<Mutex<myriadnode::Node>>>,
