@@ -201,6 +201,30 @@ impl Node {
             None
         };
 
+        // Initialize UpdateCoordinator if updates are enabled
+        let update_coordinator = if config.updates.enabled {
+            info!("Initializing update coordinator...");
+
+            // Clone the identity for the update coordinator
+            let update_identity = NodeIdentity::from_keypair(
+                identity.public_key.clone(),
+                identity.secret_key.clone()
+            );
+
+            let coordinator = Arc::new(myriadmesh_updates::UpdateCoordinator::new(
+                Arc::new(update_identity)
+            ));
+
+            info!(
+                "✓ Update coordinator initialized (auto_install: {}, verification: {}h)",
+                config.updates.auto_install, config.updates.verification_period_hours
+            );
+            Some(coordinator)
+        } else {
+            info!("Update system disabled");
+            None
+        };
+
         // Initialize API server if enabled
         let api_server = if config.api.enabled {
             let server = ApiServer::new(
@@ -209,7 +233,7 @@ impl Node {
                 Arc::clone(&heartbeat_service),
                 Arc::clone(&failover_manager),
                 appliance_manager.clone(),
-                None, // TODO: Initialize UpdateCoordinator
+                update_coordinator.clone(),
                 config.node.name.clone(),
                 hex::encode(&config.node.id),
             )
