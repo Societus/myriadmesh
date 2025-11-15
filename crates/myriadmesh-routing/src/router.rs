@@ -8,8 +8,8 @@
 //! - Reputation-based throttling
 
 use crate::{
-    deduplication::DeduplicationCache, priority_queue::PriorityQueue, rate_limiter::RateLimiter,
-    RoutingError,
+    deduplication::DeduplicationCache, offline_cache::OfflineMessageCache,
+    priority_queue::PriorityQueue, rate_limiter::RateLimiter, RoutingError,
 };
 use myriadmesh_protocol::{message::Message, NodeId};
 use std::{
@@ -92,6 +92,9 @@ pub struct Router {
 
     /// Local delivery channel (for messages destined for this node)
     local_delivery_tx: Option<mpsc::UnboundedSender<Message>>,
+
+    /// Offline message cache (for store-and-forward)
+    offline_cache: Arc<RwLock<OfflineMessageCache>>,
 }
 
 impl Router {
@@ -117,6 +120,7 @@ impl Router {
             spam_tracker: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(RouterStats::default())),
             local_delivery_tx: None,
+            offline_cache: Arc::new(RwLock::new(OfflineMessageCache::new())),
         }
     }
 
@@ -329,12 +333,57 @@ impl Router {
 
     /// Forward message to next hop
     async fn forward_message(&self, message: Message) -> Result<(), RoutingError> {
+        // TODO: Check if destination is reachable
+        // For now, we'll try to send and cache on failure
+
         // Add to outbound queue based on priority
         let mut queue = self.outbound_queue.write().await;
         queue
             .enqueue(message)
             .map_err(|e| RoutingError::QueueFull(e.to_string()))?;
         Ok(())
+    }
+
+    /// Cache message for offline destination (store-and-forward)
+    ///
+    /// # Arguments
+    /// * `destination` - The offline node ID
+    /// * `message` - The message to cache
+    ///
+    /// # Returns
+    /// Ok(()) if cached successfully, Err if cache is full
+    pub async fn cache_for_offline(
+        &self,
+        destination: NodeId,
+        message: Message,
+    ) -> Result<(), RoutingError> {
+        let mut cache = self.offline_cache.write().await;
+        cache.cache_message(destination, message.clone(), message.priority)?;
+        Ok(())
+    }
+
+    /// Retrieve cached messages for a node that came online
+    ///
+    /// # Arguments
+    /// * `node_id` - The node that came online
+    ///
+    /// # Returns
+    /// Vector of cached messages for this node
+    pub async fn retrieve_offline_messages(&self, node_id: &NodeId) -> Vec<Message> {
+        let mut cache = self.offline_cache.write().await;
+        cache.retrieve_messages(node_id)
+    }
+
+    /// Check if there are cached messages for a node
+    pub async fn has_offline_messages(&self, node_id: &NodeId) -> bool {
+        let cache = self.offline_cache.read().await;
+        cache.has_messages(node_id)
+    }
+
+    /// Get count of cached messages for a node
+    pub async fn offline_message_count(&self, node_id: &NodeId) -> usize {
+        let cache = self.offline_cache.read().await;
+        cache.message_count(node_id)
     }
 
     /// Estimate message size in bytes
@@ -390,6 +439,12 @@ impl Router {
         {
             let mut dedup = self.dedup_cache.write().await;
             dedup.cleanup_expired();
+        }
+
+        // Cleanup offline message cache (remove expired messages)
+        {
+            let mut cache = self.offline_cache.write().await;
+            cache.cleanup_expired();
         }
     }
 }
