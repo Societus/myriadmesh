@@ -17,6 +17,7 @@ pub struct Config {
     pub logging: LoggingConfig,
     pub heartbeat: HeartbeatConfig,
     pub appliance: ApplianceConfig,
+    pub updates: UpdateConfig,
 
     #[serde(skip)]
     config_file_path: PathBuf,
@@ -215,6 +216,42 @@ impl Default for ApplianceConfig {
     }
 }
 
+/// Update system configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateConfig {
+    /// Enable automatic update checking
+    pub enabled: bool,
+    /// Enable automatic update installation (requires enabled=true)
+    pub auto_install: bool,
+    /// Require manual approval for non-critical updates
+    pub require_approval: bool,
+    /// Verification period in hours (time to wait for peer signatures)
+    pub verification_period_hours: u64,
+    /// Minimum number of trusted peer signatures required
+    pub min_trusted_signatures: usize,
+    /// Minimum reputation threshold for trusted signers
+    pub min_trust_reputation: f64,
+    /// Automatically create update schedules
+    pub auto_schedule: bool,
+    /// Check for updates interval in hours
+    pub check_interval_hours: u64,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_install: false,
+            require_approval: true,
+            verification_period_hours: 6,
+            min_trusted_signatures: 3,
+            min_trust_reputation: 0.8,
+            auto_schedule: true,
+            check_interval_hours: 24,
+        }
+    }
+}
+
 impl Config {
     /// Load configuration from file or use defaults
     pub fn load(config_path: Option<PathBuf>, data_dir: Option<PathBuf>) -> Result<Self> {
@@ -370,6 +407,7 @@ impl Config {
                 max_nodes: 1000,
             },
             appliance: ApplianceConfig::default(),
+            updates: UpdateConfig::default(),
             config_file_path: config_path.clone(),
             data_directory: data_dir,
         };

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Exclude sensitive data from cloud backups -->
+        <exclude domain="sharedpref" path="encrypted_prefs" />
+        <exclude domain="database" path="myriadmesh.db" />
+    </cloud-backup>
+    <device-transfer>
+        <!-- Exclude sensitive data from device transfers -->
+        <exclude domain="sharedpref" path="encrypted_prefs" />
+        <exclude domain="database" path="myriadmesh.db" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,1 +1,32 @@
 /target
+
+# Android
+android/.gradle/
+android/.idea/
+android/local.properties
+android/build/
+android/app/build/
+android/app/src/main/jniLibs/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.log
+
+# Android Studio
+.idea/
+.gradle/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# NDK
+android/obj/
+android/libs/
+
+# Signing
+*.jks
+*.keystore

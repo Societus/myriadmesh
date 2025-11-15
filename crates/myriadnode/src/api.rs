@@ -20,6 +20,7 @@ use myriadmesh_appliance::{
     types::DevicePreferences, ApplianceManager, CachedMessage, PairingRequest, PairingResponse,
 };
 use myriadmesh_network::{AdapterManager, AdapterStatus as NetworkAdapterStatus};
+use myriadmesh_updates::UpdateCoordinator;
 
 /// API server state
 #[derive(Clone)]
@@ -30,6 +31,7 @@ pub struct ApiState {
     heartbeat_service: Arc<HeartbeatService>,
     failover_manager: Arc<FailoverManager>,
     appliance_manager: Option<Arc<ApplianceManager>>,
+    update_coordinator: Option<Arc<UpdateCoordinator>>,
     node_id: String,
     node_name: String,
     start_time: SystemTime,
@@ -42,12 +44,14 @@ pub struct ApiServer {
 }
 
 impl ApiServer {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: ApiConfig,
         adapter_manager: Arc<RwLock<AdapterManager>>,
         heartbeat_service: Arc<HeartbeatService>,
         failover_manager: Arc<FailoverManager>,
         appliance_manager: Option<Arc<ApplianceManager>>,
+        update_coordinator: Option<Arc<UpdateCoordinator>>,
         node_id: String,
         node_name: String,
     ) -> Result<Self> {
@@ -57,6 +61,7 @@ impl ApiServer {
             heartbeat_service,
             failover_manager,
             appliance_manager,
+            update_coordinator,
             node_id,
             node_name,
             start_time: SystemTime::now(),
@@ -107,6 +112,14 @@ impl ApiServer {
             .route("/api/i2p/status", get(get_i2p_status))
             .route("/api/i2p/destination", get(get_i2p_destination))
             .route("/api/i2p/tunnels", get(get_i2p_tunnels))
+            // Update endpoints
+            .route("/api/updates/schedule", post(schedule_update))
+            .route("/api/updates/schedules", get(list_update_schedules))
+            .route("/api/updates/available", get(check_available_updates))
+            .route(
+                "/api/updates/fallbacks/:adapter_type",
+                get(get_fallback_adapters),
+            )
             // Appliance endpoints
             .route("/api/appliance/info", get(get_appliance_info))
             .route("/api/appliance/stats", get(get_appliance_stats))
@@ -167,12 +180,29 @@ struct HealthResponse {
 
 // === Node Endpoints ===
 
-async fn get_node_status(State(_state): State<Arc<ApiState>>) -> Json<NodeStatusResponse> {
+async fn get_node_status(State(state): State<Arc<ApiState>>) -> Json<NodeStatusResponse> {
+    // Calculate uptime since node start
+    let uptime_secs = state.start_time.elapsed().map(|d| d.as_secs()).unwrap_or(0);
+
+    // Count active (Ready) adapters
+    let manager = state.adapter_manager.read().await;
+    let adapter_ids = manager.adapter_ids();
+
+    let mut adapters_active = 0;
+    for id in adapter_ids {
+        if let Some(adapter_arc) = manager.get_adapter(&id) {
+            let adapter = adapter_arc.read().await;
+            if matches!(adapter.get_status(), NetworkAdapterStatus::Ready) {
+                adapters_active += 1;
+            }
+        }
+    }
+
     Json(NodeStatusResponse {
         status: "running".to_string(),
-        uptime_secs: 0, // TODO: Calculate actual uptime
-        adapters_active: 0,
-        messages_queued: 0,
+        uptime_secs,
+        adapters_active,
+        messages_queued: 0, // TODO: Implement message queue tracking
     })
 }
 
@@ -371,20 +401,35 @@ struct HeartbeatStatsResponse {
 
 async fn get_heartbeat_nodes(State(state): State<Arc<ApiState>>) -> Json<Vec<HeartbeatNodeEntry>> {
     let node_map = state.heartbeat_service.get_node_map().await;
+    let current_time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
 
     let mut entries = Vec::new();
-    for (node_id, _node_info) in node_map.iter() {
+    for (node_id, node_info) in node_map.iter() {
+        // Determine status based on how recent the last heartbeat was
+        // Consider alive if seen within last 5 minutes (300 seconds)
+        let time_since_last_seen = current_time.saturating_sub(node_info.last_seen);
+        let status = if time_since_last_seen < 300 {
+            "alive"
+        } else if time_since_last_seen < 600 {
+            "stale"
+        } else {
+            "offline"
+        };
+
         entries.push(HeartbeatNodeEntry {
             node_id: node_id.to_hex(),
-            status: "alive".to_string(), // TODO: Determine actual status
-            last_seen: 0,                // TODO: Get actual last_seen
-            rtt_ms: 0.0,                 // TODO: Get actual RTT
-            consecutive_failures: 0,     // TODO: Track failures
+            status: status.to_string(),
+            last_seen: node_info.last_seen,
+            rtt_ms: 0.0,             // TODO: Track RTT in heartbeat service
+            consecutive_failures: 0, // TODO: Track failures in heartbeat service
         });
     }
 
-    // Sort by node_id for now
-    entries.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    // Sort by last_seen (most recent first)
+    entries.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
 
     Json(entries)
 }
@@ -401,19 +446,78 @@ struct HeartbeatNodeEntry {
 // === Failover Endpoints ===
 
 async fn get_failover_events(
-    State(_state): State<Arc<ApiState>>,
+    State(state): State<Arc<ApiState>>,
 ) -> Json<Vec<FailoverEventResponse>> {
-    // TODO: Properly map FailoverEvent enum variants to response format
-    Json(vec![])
+    use crate::failover::FailoverEvent;
+
+    // Get recent failover events (last 50)
+    let events = state.failover_manager.get_recent_events(50).await;
+
+    // Map events to response format
+    let responses: Vec<FailoverEventResponse> = events
+        .into_iter()
+        .map(|event| match event {
+            FailoverEvent::AdapterSwitch { from, to, reason } => FailoverEventResponse {
+                event_type: "adapter_switch".to_string(),
+                adapter: None,
+                from_adapter: Some(from),
+                to_adapter: Some(to),
+                reason: Some(reason),
+                metric: None,
+                value: None,
+                threshold: None,
+            },
+            FailoverEvent::ThresholdViolation {
+                adapter,
+                metric,
+                value,
+                threshold,
+            } => FailoverEventResponse {
+                event_type: "threshold_violation".to_string(),
+                adapter: Some(adapter),
+                from_adapter: None,
+                to_adapter: None,
+                reason: Some(format!("{} exceeded threshold", metric)),
+                metric: Some(metric),
+                value: Some(value),
+                threshold: Some(threshold),
+            },
+            FailoverEvent::AdapterDown { adapter, reason } => FailoverEventResponse {
+                event_type: "adapter_down".to_string(),
+                adapter: Some(adapter),
+                from_adapter: None,
+                to_adapter: None,
+                reason: Some(reason),
+                metric: None,
+                value: None,
+                threshold: None,
+            },
+            FailoverEvent::AdapterRecovered { adapter } => FailoverEventResponse {
+                event_type: "adapter_recovered".to_string(),
+                adapter: Some(adapter),
+                from_adapter: None,
+                to_adapter: None,
+                reason: Some("Adapter has recovered and is available".to_string()),
+                metric: None,
+                value: None,
+                threshold: None,
+            },
+        })
+        .collect();
+
+    Json(responses)
 }
 
 #[derive(Serialize)]
 struct FailoverEventResponse {
-    timestamp: u64,
-    from_adapter: String,
-    to_adapter: String,
-    reason: String,
-    success: bool,
+    event_type: String,
+    adapter: Option<String>,
+    from_adapter: Option<String>,
+    to_adapter: Option<String>,
+    reason: Option<String>,
+    metric: Option<String>,
+    value: Option<f64>,
+    threshold: Option<f64>,
 }
 
 async fn force_failover(
@@ -870,5 +974,191 @@ async fn get_cache_stats(
     match appliance_manager.get_cache_stats(&device_id).await {
         Ok(stats) => Ok(Json(serde_json::json!(stats))),
         Err(_) => Err(StatusCode::NOT_FOUND),
+    }
+}
+// ============================================================================
+// Update System Endpoints
+// ============================================================================
+
+/// Request body for scheduling an update
+#[derive(Debug, Deserialize)]
+struct ScheduleUpdateRequest {
+    adapter_type: String,
+    target_version: String,
+    estimated_duration_secs: Option<u64>,
+}
+
+/// Response for update schedule
+#[derive(Debug, Serialize)]
+struct ScheduleUpdateResponse {
+    schedule_id: String,
+    adapter_type: String,
+    scheduled_start: u64,
+    estimated_duration_secs: u64,
+    fallback_adapters: Vec<String>,
+}
+
+/// Parse adapter type from string (case-insensitive)
+fn parse_adapter_type(s: &str) -> Result<myriadmesh_protocol::types::AdapterType, StatusCode> {
+    use myriadmesh_protocol::types::AdapterType;
+
+    match s.to_lowercase().as_str() {
+        "ethernet" => Ok(AdapterType::Ethernet),
+        "bluetooth" => Ok(AdapterType::Bluetooth),
+        "bluetooth_le" | "bluetoothle" | "ble" => Ok(AdapterType::BluetoothLE),
+        "cellular" => Ok(AdapterType::Cellular),
+        "wifi_halow" | "wifihalow" | "halow" => Ok(AdapterType::WiFiHaLoW),
+        "lorawan" | "lora" => Ok(AdapterType::LoRaWAN),
+        "meshtastic" => Ok(AdapterType::Meshtastic),
+        "frsgmrs" | "frs" | "gmrs" => Ok(AdapterType::FRSGMRS),
+        "cbradio" | "cb" => Ok(AdapterType::CBRadio),
+        "shortwave" | "sw" => Ok(AdapterType::Shortwave),
+        "aprs" => Ok(AdapterType::APRS),
+        "dialup" => Ok(AdapterType::Dialup),
+        "pppoe" => Ok(AdapterType::PPPoE),
+        "i2p" => Ok(AdapterType::I2P),
+        _ => Err(StatusCode::BAD_REQUEST),
+    }
+}
+
+/// Schedule an adapter update
+async fn schedule_update(
+    State(state): State<Arc<ApiState>>,
+    Json(request): Json<ScheduleUpdateRequest>,
+) -> Result<Json<ScheduleUpdateResponse>, StatusCode> {
+    let update_coordinator = state
+        .update_coordinator
+        .as_ref()
+        .ok_or(StatusCode::NOT_IMPLEMENTED)?;
+
+    // Parse adapter type from request
+    let adapter_type = parse_adapter_type(&request.adapter_type)?;
+
+    // Parse version
+    let version_parts: Vec<&str> = request.target_version.split('.').collect();
+    if version_parts.len() != 3 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let target_version = myriadmesh_network::version_tracking::SemanticVersion::new(
+        version_parts[0]
+            .parse()
+            .map_err(|_| StatusCode::BAD_REQUEST)?,
+        version_parts[1]
+            .parse()
+            .map_err(|_| StatusCode::BAD_REQUEST)?,
+        version_parts[2]
+            .parse()
+            .map_err(|_| StatusCode::BAD_REQUEST)?,
+    );
+
+    let duration = std::time::Duration::from_secs(request.estimated_duration_secs.unwrap_or(300));
+
+    // Schedule the update
+    match update_coordinator
+        .schedule_adapter_update(adapter_type, target_version, duration)
+        .await
+    {
+        Ok(schedule) => {
+            let response = ScheduleUpdateResponse {
+                schedule_id: format!("schedule-{}", schedule.created_at),
+                adapter_type: format!("{:?}", schedule.adapter_type),
+                scheduled_start: schedule.scheduled_start,
+                estimated_duration_secs: schedule.estimated_duration.as_secs(),
+                fallback_adapters: schedule
+                    .fallback_adapters
+                    .iter()
+                    .map(|a| format!("{:?}", a))
+                    .collect(),
+            };
+            Ok(Json(response))
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+/// List all pending update schedules
+async fn list_update_schedules(
+    State(state): State<Arc<ApiState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let update_coordinator = state
+        .update_coordinator
+        .as_ref()
+        .ok_or(StatusCode::NOT_IMPLEMENTED)?;
+
+    match update_coordinator.list_pending_schedules().await {
+        Ok(schedules) => {
+            let response: Vec<serde_json::Value> = schedules
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "adapter_type": format!("{:?}", s.adapter_type),
+                        "current_version": s.current_version.to_string(),
+                        "target_version": s.target_version.to_string(),
+                        "scheduled_start": s.scheduled_start,
+                        "estimated_duration_secs": s.estimated_duration.as_secs(),
+                        "fallback_adapters": s.fallback_adapters.iter()
+                            .map(|a| format!("{:?}", a))
+                            .collect::<Vec<_>>(),
+                        "created_at": s.created_at,
+                    })
+                })
+                .collect();
+
+            Ok(Json(serde_json::json!({
+                "schedules": response,
+                "count": schedules.len()
+            })))
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+/// Check for available updates
+async fn check_available_updates(
+    State(state): State<Arc<ApiState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let _update_coordinator = state
+        .update_coordinator
+        .as_ref()
+        .ok_or(StatusCode::NOT_IMPLEMENTED)?;
+
+    // TODO: Implement actual update checking logic
+    // For now, return a placeholder response
+    Ok(Json(serde_json::json!({
+        "available_updates": [],
+        "last_check": SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        "message": "Update checking not yet implemented - requires DHT update discovery"
+    })))
+}
+
+/// Get fallback adapters for a specific adapter type
+async fn get_fallback_adapters(
+    State(state): State<Arc<ApiState>>,
+    Path(adapter_type_str): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let update_coordinator = state
+        .update_coordinator
+        .as_ref()
+        .ok_or(StatusCode::NOT_IMPLEMENTED)?;
+
+    // Parse adapter type from path parameter
+    let adapter_type = parse_adapter_type(&adapter_type_str)?;
+
+    match update_coordinator
+        .identify_fallback_adapters(adapter_type)
+        .await
+    {
+        Ok(fallbacks) => Ok(Json(serde_json::json!({
+            "adapter_type": adapter_type_str,
+            "fallbacks": fallbacks.iter()
+                .map(|a| format!("{:?}", a))
+                .collect::<Vec<_>>(),
+            "count": fallbacks.len()
+        }))),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }
