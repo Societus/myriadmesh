@@ -176,12 +176,33 @@ struct HealthResponse {
 
 // === Node Endpoints ===
 
-async fn get_node_status(State(_state): State<Arc<ApiState>>) -> Json<NodeStatusResponse> {
+async fn get_node_status(State(state): State<Arc<ApiState>>) -> Json<NodeStatusResponse> {
+    // Calculate uptime since node start
+    let uptime_secs = state
+        .start_time
+        .elapsed()
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Count active (Ready) adapters
+    let manager = state.adapter_manager.read().await;
+    let adapter_ids = manager.adapter_ids();
+
+    let mut adapters_active = 0;
+    for id in adapter_ids {
+        if let Some(adapter_arc) = manager.get_adapter(&id) {
+            let adapter = adapter_arc.read().await;
+            if matches!(adapter.get_status(), NetworkAdapterStatus::Ready) {
+                adapters_active += 1;
+            }
+        }
+    }
+
     Json(NodeStatusResponse {
         status: "running".to_string(),
-        uptime_secs: 0, // TODO: Calculate actual uptime
-        adapters_active: 0,
-        messages_queued: 0,
+        uptime_secs,
+        adapters_active,
+        messages_queued: 0, // TODO: Implement message queue tracking
     })
 }
 
