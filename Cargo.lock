@@ -1984,6 +1984,7 @@ dependencies = [
  "myriadmesh-network",
  "myriadmesh-protocol",
  "myriadmesh-routing",
+ "myriadmesh-updates",
  "serde",
  "serde_json",
  "serde_yaml",

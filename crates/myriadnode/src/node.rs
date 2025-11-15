@@ -209,8 +209,9 @@ impl Node {
                 Arc::clone(&heartbeat_service),
                 Arc::clone(&failover_manager),
                 appliance_manager.clone(),
-                hex::encode(&config.node.id),
+                None, // TODO: Initialize UpdateCoordinator
                 config.node.name.clone(),
+                hex::encode(&config.node.id),
             )
             .await?;
             info!(

@@ -20,6 +20,7 @@ myriadmesh-routing = { path = "../myriadmesh-routing" }
 myriadmesh-network = { path = "../myriadmesh-network" }
 myriadmesh-i2p = { path = "../myriadmesh-i2p" }
 myriadmesh-appliance = { path = "../myriadmesh-appliance" }
+myriadmesh-updates = { path = "../myriadmesh-updates" }
 
 # Async runtime
 tokio.workspace = true

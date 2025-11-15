@@ -357,6 +357,12 @@ impl UpdateScheduleManager {
         schedules.remove(&adapter_type)
     }
 
+    /// List all pending schedules
+    pub async fn list_pending_schedules(&self) -> crate::Result<Vec<UpdateSchedule>> {
+        let schedules = self.pending_schedules.read().await;
+        Ok(schedules.values().cloned().collect())
+    }
+
     /// Record a sent request
     pub async fn record_sent_request(
         &self,

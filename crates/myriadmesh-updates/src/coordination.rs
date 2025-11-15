@@ -365,7 +365,7 @@ impl UpdateCoordinator {
     }
 
     /// Identify fallback adapters for a given adapter
-    async fn identify_fallback_adapters(
+    pub async fn identify_fallback_adapters(
         &self,
         adapter_type: AdapterType,
     ) -> Result<Vec<AdapterType>> {
@@ -378,6 +378,11 @@ impl UpdateCoordinator {
             .collect();
 
         Ok(fallbacks)
+    }
+
+    /// List all pending update schedules
+    pub async fn list_pending_schedules(&self) -> Result<Vec<UpdateSchedule>> {
+        self.schedule_manager.list_pending_schedules().await
     }
 
     /// Get schedule manager reference
