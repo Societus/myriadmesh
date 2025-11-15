@@ -1,6 +1,6 @@
 use anyhow::Result;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post},
     Json, Router,
@@ -160,6 +160,7 @@ impl ApiServer {
             // Ledger endpoints
             .route("/api/ledger/blocks", get(list_ledger_blocks))
             .route("/api/ledger/blocks/:height", get(get_ledger_block))
+            .route("/api/ledger/entries", get(list_ledger_entries))
             .route("/api/ledger/stats", get(get_ledger_stats))
             // Legacy v1 endpoints (for backwards compatibility)
             .route("/api/v1/node/status", get(get_node_status))
@@ -1406,5 +1407,63 @@ async fn get_ledger_stats(
             "blocks_validated": sync_stats.blocks_validated,
             "validation_errors": sync_stats.validation_errors,
         }
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct EntriesQuery {
+    #[serde(default = "default_entries_limit")]
+    limit: usize,
+}
+
+fn default_entries_limit() -> usize {
+    50
+}
+
+async fn list_ledger_entries(
+    State(state): State<Arc<ApiState>>,
+    Query(query): Query<EntriesQuery>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let ledger = state.ledger.read().await;
+    let local_height = ledger.local_height();
+
+    // Get the last 10 blocks (or fewer if chain is shorter)
+    let start_height = local_height.saturating_sub(9);
+    let mut entries = Vec::new();
+
+    for height in start_height..=local_height {
+        if let Ok(block) = ledger.storage().load_block(height) {
+            for entry in block.entries.iter() {
+                let node_id = entry.node_id();
+                let entry_type_name = match &entry.entry_type {
+                    myriadmesh_ledger::EntryType::Discovery(_) => "Discovery",
+                    myriadmesh_ledger::EntryType::Test(_) => "Test",
+                    myriadmesh_ledger::EntryType::Message(_) => "Message",
+                    myriadmesh_ledger::EntryType::KeyExchange(_) => "KeyExchange",
+                };
+
+                entries.push(serde_json::json!({
+                    "block_height": height,
+                    "timestamp": entry.timestamp.to_rfc3339(),
+                    "type": entry_type_name,
+                    "node_id": hex::encode(node_id.as_bytes()),
+                }));
+
+                // Stop if we've reached the limit
+                if entries.len() >= query.limit {
+                    break;
+                }
+            }
+
+            if entries.len() >= query.limit {
+                break;
+            }
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "entries": entries,
+        "count": entries.len(),
+        "chain_height": local_height,
     })))
 }
