@@ -16,6 +16,7 @@ use crate::storage::Storage;
 use myriadmesh_appliance::{ApplianceManager, ApplianceManagerConfig, MessageCacheConfig};
 use myriadmesh_crypto::identity::NodeIdentity;
 use myriadmesh_dht::routing_table::RoutingTable;
+use myriadmesh_ledger::ChainSync;
 use myriadmesh_network::{adapters::*, AdapterManager, NetworkAdapter};
 use myriadmesh_protocol::types::NODE_ID_SIZE;
 use myriadmesh_routing::PriorityQueue;
@@ -32,6 +33,8 @@ pub struct Node {
     message_queue: PriorityQueue,
     #[allow(dead_code)]
     dht: RoutingTable,
+    #[allow(dead_code)]
+    ledger: Arc<RwLock<ChainSync>>,
     api_server: Option<ApiServer>,
     appliance_manager: Option<Arc<ApplianceManager>>,
     monitor: NetworkMonitor,
@@ -68,6 +71,21 @@ impl Node {
         let node_id = myriadmesh_protocol::NodeId::from_bytes(node_id_bytes);
         let dht = RoutingTable::new(node_id);
         info!("✓ DHT routing table initialized");
+
+        // Initialize ledger
+        let ledger_dir = config.data_directory.join("ledger");
+        fs::create_dir_all(&ledger_dir)?;
+        let ledger_config = myriadmesh_ledger::StorageConfig::new(&ledger_dir)
+            .with_keep_blocks(config.ledger.keep_blocks);
+        let ledger_storage = myriadmesh_ledger::LedgerStorage::new(ledger_config)?;
+        let consensus_manager =
+            myriadmesh_ledger::ConsensusManager::new(config.ledger.min_reputation);
+        let chain_sync = ChainSync::new(ledger_storage, consensus_manager);
+        let ledger = Arc::new(RwLock::new(chain_sync));
+        info!(
+            "✓ Ledger initialized (keep_blocks: {})",
+            config.ledger.keep_blocks
+        );
 
         // Initialize network monitor
         let monitor = NetworkMonitor::new(
@@ -256,6 +274,7 @@ impl Node {
             adapter_manager,
             message_queue,
             dht,
+            ledger,
             api_server,
             appliance_manager,
             monitor,
