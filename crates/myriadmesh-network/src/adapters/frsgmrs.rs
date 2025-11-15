@@ -88,13 +88,13 @@ impl FrsGmrsAdapter {
         };
 
         let capabilities = AdapterCapabilities {
-            adapter_type: AdapterType::FrsGmrs,
+            adapter_type: AdapterType::FRSGMRS,
             max_message_size,
             typical_latency_ms: 100.0,
             typical_bandwidth_bps: match config.modulation {
-                ModulationType::FM => 8000.0,
-                ModulationType::AFSK => 1200.0,
-                ModulationType::FreeDV => 1600.0,
+                ModulationType::FM => 8000,
+                ModulationType::AFSK => 1200,
+                ModulationType::FreeDV => 1600,
             },
             reliability: 0.90,
             range_meters: 5000.0, // 5 km typical
@@ -105,6 +105,7 @@ impl FrsGmrsAdapter {
         };
 
         let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
+        let current_frequency_hz = config.frequency_hz;
 
         Self {
             config,
@@ -112,7 +113,7 @@ impl FrsGmrsAdapter {
             capabilities,
             state: Arc::new(RwLock::new(FrsGmrsState {
                 tx_active: false,
-                current_frequency_hz: config.frequency_hz,
+                current_frequency_hz,
                 rssi_dbm: None,
                 squelch_level: 50,
             })),
@@ -136,7 +137,7 @@ impl FrsGmrsAdapter {
     }
 
     /// Control PTT (Push-to-Talk) for transmission
-    async fn set_ptt(&self, active: bool) -> Result<()> {
+    async fn set_ptt(&self, _active: bool) -> Result<()> {
         // TODO: Phase 5 Implementation
         // If config.ptt_gpio_pin is set:
         //   - Use GPIO driver to set pin high (TX) or low (RX)
@@ -174,15 +175,19 @@ impl FrsGmrsAdapter {
 #[async_trait::async_trait]
 impl NetworkAdapter for FrsGmrsAdapter {
     async fn initialize(&mut self) -> Result<()> {
-        let mut status = self.status.write().await;
-        *status = AdapterStatus::Initializing;
+        {
+            let mut status = self.status.write().await;
+            *status = AdapterStatus::Initializing;
+        }
 
         match self.initialize_radio().await {
             Ok(_) => {
+                let mut status = self.status.write().await;
                 *status = AdapterStatus::Ready;
                 Ok(())
             }
             Err(e) => {
+                let mut status = self.status.write().await;
                 *status = AdapterStatus::Error;
                 Err(e)
             }
@@ -196,7 +201,7 @@ impl NetworkAdapter for FrsGmrsAdapter {
                 // TODO: Spawn RX listening task for audio input
                 unimplemented!("Phase 5 stub: Start audio reception")
             }
-            _ => Err("Adapter not ready".into()),
+            _ => Err(crate::error::NetworkError::AdapterNotReady.into()),
         }
     }
 
@@ -282,7 +287,7 @@ mod tests {
         let adapter = FrsGmrsAdapter::new(FrsGmrsConfig::default());
         let caps = adapter.get_capabilities();
 
-        assert_eq!(caps.adapter_type, AdapterType::FrsGmrs);
+        assert_eq!(caps.adapter_type, AdapterType::FRSGMRS);
         assert!(caps.supports_broadcast);
         assert!(!caps.supports_multicast);
     }

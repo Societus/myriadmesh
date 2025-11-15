@@ -69,10 +69,10 @@ pub struct WifiHalowAdapter {
 impl WifiHalowAdapter {
     pub fn new(config: WifiHalowConfig) -> Self {
         let capabilities = AdapterCapabilities {
-            adapter_type: AdapterType::WifiHaLow,
+            adapter_type: AdapterType::WiFiHaLoW,
             max_message_size: 1500,
             typical_latency_ms: 50.0,
-            typical_bandwidth_bps: 6_000_000.0, // 6 Mbps typical
+            typical_bandwidth_bps: 6_000_000, // 6 Mbps typical
             reliability: 0.97,
             range_meters: 5000.0, // 5 km typical
             power_consumption: PowerConsumption::Low, // With TWT: 80% less than WiFi
@@ -129,18 +129,22 @@ impl WifiHalowAdapter {
 #[async_trait::async_trait]
 impl NetworkAdapter for WifiHalowAdapter {
     async fn initialize(&mut self) -> Result<()> {
-        let mut status = self.status.write().await;
-        *status = AdapterStatus::Initializing;
+        {
+            let mut status = self.status.write().await;
+            *status = AdapterStatus::Initializing;
+        }
 
         match self.connect_to_network().await {
             Ok(_) => {
                 if self.config.power_save {
                     let _ = self.configure_twt().await;
                 }
+                let mut status = self.status.write().await;
                 *status = AdapterStatus::Ready;
                 Ok(())
             }
             Err(e) => {
+                let mut status = self.status.write().await;
                 *status = AdapterStatus::Error;
                 Err(e)
             }
@@ -154,7 +158,7 @@ impl NetworkAdapter for WifiHalowAdapter {
                 // TODO: Spawn RX listening task
                 unimplemented!("Phase 5 stub: Start RX task")
             }
-            _ => Err("Adapter not ready".into()),
+            _ => Err(crate::error::NetworkError::AdapterNotReady.into()),
         }
     }
 
@@ -236,7 +240,7 @@ mod tests {
         let adapter = WifiHalowAdapter::new(WifiHalowConfig::default());
         let caps = adapter.get_capabilities();
 
-        assert_eq!(caps.adapter_type, AdapterType::WifiHaLow);
+        assert_eq!(caps.adapter_type, AdapterType::WiFiHaLoW);
         assert_eq!(caps.max_message_size, 1500);
         assert_eq!(caps.range_meters, 5000.0);
     }

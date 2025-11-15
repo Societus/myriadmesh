@@ -96,14 +96,14 @@ impl HfRadioAdapter {
         };
 
         let capabilities = AdapterCapabilities {
-            adapter_type: AdapterType::HfRadio,
+            adapter_type: AdapterType::Shortwave,
             max_message_size,
             typical_latency_ms: 5000.0, // Long propagation delay
             typical_bandwidth_bps: match config.digital_mode {
-                DigitalMode::PSK31 => 31.0,
-                DigitalMode::RTTY => 75.0,
-                DigitalMode::FT8 => 6.25,   // 15 second symbols
-                DigitalMode::Packet => 1200.0,
+                DigitalMode::PSK31 => 31,
+                DigitalMode::RTTY => 75,
+                DigitalMode::FT8 => 6,   // 15 second symbols
+                DigitalMode::Packet => 1200,
             },
             reliability: 0.70, // Variable due to propagation
             range_meters: 20000000.0, // Worldwide (ionospheric skip)
@@ -114,6 +114,8 @@ impl HfRadioAdapter {
         };
 
         let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
+        let current_frequency_hz = config.frequency_hz;
+        let current_mode = config.digital_mode;
 
         Self {
             config,
@@ -121,8 +123,8 @@ impl HfRadioAdapter {
             capabilities,
             state: Arc::new(RwLock::new(HfRadioState {
                 connected: false,
-                current_frequency_hz: config.frequency_hz,
-                current_mode: config.digital_mode,
+                current_frequency_hz,
+                current_mode,
                 tx_active: false,
                 snr_db: None,
                 sfi: None,
@@ -197,8 +199,10 @@ impl HfRadioAdapter {
 #[async_trait::async_trait]
 impl NetworkAdapter for HfRadioAdapter {
     async fn initialize(&mut self) -> Result<()> {
-        let mut status = self.status.write().await;
-        *status = AdapterStatus::Initializing;
+        {
+            let mut status = self.status.write().await;
+            *status = AdapterStatus::Initializing;
+        }
 
         match self.connect_via_cat().await {
             Ok(_) => {
@@ -206,10 +210,12 @@ impl NetworkAdapter for HfRadioAdapter {
                 if self.config.auto_band_switching {
                     let _ = self.check_propagation().await;
                 }
+                let mut status = self.status.write().await;
                 *status = AdapterStatus::Ready;
                 Ok(())
             }
             Err(e) => {
+                let mut status = self.status.write().await;
                 *status = AdapterStatus::Error;
                 Err(e)
             }
@@ -223,7 +229,7 @@ impl NetworkAdapter for HfRadioAdapter {
                 // TODO: Spawn RX listening task
                 unimplemented!("Phase 5 stub: Start RX task")
             }
-            _ => Err("Adapter not ready".into()),
+            _ => Err(crate::error::NetworkError::AdapterNotReady.into()),
         }
     }
 
@@ -307,7 +313,7 @@ mod tests {
         let adapter = HfRadioAdapter::new(HfRadioConfig::default());
         let caps = adapter.get_capabilities();
 
-        assert_eq!(caps.adapter_type, AdapterType::HfRadio);
+        assert_eq!(caps.adapter_type, AdapterType::Shortwave);
         assert_eq!(caps.range_meters, 20000000.0); // Worldwide
     }
 

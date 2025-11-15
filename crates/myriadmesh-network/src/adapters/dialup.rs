@@ -92,9 +92,9 @@ pub struct DialupAdapter {
 impl DialupAdapter {
     pub fn new(config: DialupConfig) -> Self {
         let (typical_bandwidth_bps, typical_latency_ms, power_consumption) = match config.modem_type {
-            ModemType::SerialHayes => (2400.0, 300.0, PowerConsumption::Low),  // V.92 modem
-            ModemType::UsbModem => (56000.0, 200.0, PowerConsumption::Low),    // V.92 USB
-            ModemType::GsmModule => (115200.0, 500.0, PowerConsumption::Medium), // GSM/LTE
+            ModemType::SerialHayes => (2400, 300.0, PowerConsumption::Low),  // V.92 modem
+            ModemType::UsbModem => (56000, 200.0, PowerConsumption::Low),    // V.92 USB
+            ModemType::GsmModule => (115200, 500.0, PowerConsumption::Medium), // GSM/LTE
         };
 
         let capabilities = AdapterCapabilities {
@@ -182,7 +182,7 @@ impl DialupAdapter {
     }
 
     /// Send SMS via GSM modem (fallback for very low bandwidth)
-    async fn send_sms(&self, destination: &str, message: &str) -> Result<()> {
+    async fn send_sms(&self, _destination: &str, _message: &str) -> Result<()> {
         // TODO: Phase 5 Implementation (GSM only)
         // 1. Send "AT+CMGF=1" - Set text mode
         // 2. Send "AT+CMGS=\"<number>\"" - Start SMS
@@ -202,17 +202,21 @@ impl DialupAdapter {
 #[async_trait::async_trait]
 impl NetworkAdapter for DialupAdapter {
     async fn initialize(&mut self) -> Result<()> {
-        let mut status = self.status.write().await;
-        *status = AdapterStatus::Initializing;
+        {
+            let mut status = self.status.write().await;
+            *status = AdapterStatus::Initializing;
+        }
 
         // Initialize modem
         if let Err(e) = self.initialize_modem().await {
+            let mut status = self.status.write().await;
             *status = AdapterStatus::Error;
             return Err(e);
         }
 
         // Try to establish connection
         if let Err(e) = self.dial().await {
+            let mut status = self.status.write().await;
             *status = AdapterStatus::Error;
             return Err(e);
         }
@@ -220,11 +224,13 @@ impl NetworkAdapter for DialupAdapter {
         // Establish PPP if needed
         if self.config.modem_type != ModemType::GsmModule {
             if let Err(e) = self.establish_ppp().await {
+                let mut status = self.status.write().await;
                 *status = AdapterStatus::Error;
                 return Err(e);
             }
         }
 
+        let mut status = self.status.write().await;
         *status = AdapterStatus::Ready;
         Ok(())
     }
@@ -236,7 +242,7 @@ impl NetworkAdapter for DialupAdapter {
                 // TODO: Spawn RX listening task
                 unimplemented!("Phase 5 stub: Start RX task")
             }
-            _ => Err("Adapter not ready".into()),
+            _ => Err(crate::error::NetworkError::AdapterNotReady.into()),
         }
     }
 
@@ -333,6 +339,6 @@ mod tests {
             ..Default::default()
         };
         let adapter = DialupAdapter::new(config_hayes);
-        assert_eq!(adapter.get_capabilities().typical_bandwidth_bps, 2400.0);
+        assert_eq!(adapter.get_capabilities().typical_bandwidth_bps, 2400);
     }
 }

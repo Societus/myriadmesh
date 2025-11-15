@@ -77,10 +77,10 @@ pub struct LoRaAdapter {
 impl LoRaAdapter {
     pub fn new(config: LoRaConfig) -> Self {
         let capabilities = AdapterCapabilities {
-            adapter_type: AdapterType::LoRa,
+            adapter_type: AdapterType::LoRaWAN,
             max_message_size: 240,                // Single LoRa frame
             typical_latency_ms: 2000.0,           // ~2 seconds for SF7
-            typical_bandwidth_bps: 250.0,         // ~250 bps at SF7
+            typical_bandwidth_bps: 250,           // ~250 bps at SF7
             reliability: 0.95,                     // High reliability, LOS
             range_meters: 15000.0,                 // 15 km typical
             power_consumption: PowerConsumption::Low,
@@ -119,7 +119,7 @@ impl LoRaAdapter {
     }
 
     /// Check and enforce duty cycle limits (EU regulation)
-    async fn check_duty_cycle(&self, frame_size: usize) -> Result<()> {
+    async fn check_duty_cycle(&self, _frame_size: usize) -> Result<()> {
         // TODO: Phase 5 Implementation
         // Calculate transmission time for frame size and SF
         // Track total transmission time over 1-hour window
@@ -131,7 +131,7 @@ impl LoRaAdapter {
     fn meshtastic_encode(&self, frame: &Frame) -> Result<Vec<u8>> {
         // TODO: Phase 5 Implementation
         if !self.config.meshtastic_mode {
-            return Ok(frame.to_bytes()?);
+            return Ok(frame.serialize());
         }
 
         // Meshtastic packet format:
@@ -142,7 +142,7 @@ impl LoRaAdapter {
     fn meshtastic_decode(&self, data: &[u8]) -> Result<Frame> {
         // TODO: Phase 5 Implementation
         if !self.config.meshtastic_mode {
-            return Frame::from_bytes(data);
+            return Frame::deserialize(data).map_err(|e| crate::error::NetworkError::ReceiveFailed(format!("{}", e)).into());
         }
 
         // Parse Meshtastic header and extract payload
@@ -153,15 +153,19 @@ impl LoRaAdapter {
 #[async_trait::async_trait]
 impl NetworkAdapter for LoRaAdapter {
     async fn initialize(&mut self) -> Result<()> {
-        let mut status = self.status.write().await;
-        *status = AdapterStatus::Initializing;
+        {
+            let mut status = self.status.write().await;
+            *status = AdapterStatus::Initializing;
+        }
 
         match self.initialize_modem().await {
             Ok(_) => {
+                let mut status = self.status.write().await;
                 *status = AdapterStatus::Ready;
                 Ok(())
             }
             Err(e) => {
+                let mut status = self.status.write().await;
                 *status = AdapterStatus::Error;
                 Err(e)
             }

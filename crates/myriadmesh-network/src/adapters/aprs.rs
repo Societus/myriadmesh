@@ -85,7 +85,7 @@ impl AprsAdapter {
             adapter_type: AdapterType::APRS,
             max_message_size: 256,
             typical_latency_ms: 3000.0, // RF propagation
-            typical_bandwidth_bps: 1200.0, // 1200 bps standard
+            typical_bandwidth_bps: 1200, // 1200 bps standard
             reliability: 0.92, // Atmospheric interference
             range_meters: 30000.0, // 30 km typical
             power_consumption: PowerConsumption::Low,
@@ -170,11 +170,14 @@ impl AprsAdapter {
 #[async_trait::async_trait]
 impl NetworkAdapter for AprsAdapter {
     async fn initialize(&mut self) -> Result<()> {
-        let mut status = self.status.write().await;
-        *status = AdapterStatus::Initializing;
+        {
+            let mut status = self.status.write().await;
+            *status = AdapterStatus::Initializing;
+        }
 
         // Verify license first
         if let Err(e) = self.verify_license().await {
+            let mut status = self.status.write().await;
             *status = AdapterStatus::Error;
             return Err(e);
         }
@@ -189,12 +192,14 @@ impl NetworkAdapter for AprsAdapter {
 
         match (tnc_result, is_result) {
             (Ok(_), Ok(_)) => {
+                let mut status = self.status.write().await;
                 *status = AdapterStatus::Ready;
                 Ok(())
             }
             _ => {
+                let mut status = self.status.write().await;
                 *status = AdapterStatus::Error;
-                Err("Failed to initialize APRS adapter".into())
+                Err(crate::error::NetworkError::AdapterNotReady.into())
             }
         }
     }
@@ -206,7 +211,7 @@ impl NetworkAdapter for AprsAdapter {
                 // TODO: Spawn RX listening tasks
                 unimplemented!("Phase 5 stub: Start RX tasks")
             }
-            _ => Err("Adapter not ready".into()),
+            _ => Err(crate::error::NetworkError::AdapterNotReady.into()),
         }
     }
 
