@@ -16,6 +16,7 @@ sodiumoxide.workspace = true
 
 # Serialization
 serde.workspace = true
+serde_json = "1.0"
 bincode.workspace = true
 serde-big-array = "0.5"  # SECURITY H1: For serializing 64-byte arrays in discovery messages
 
