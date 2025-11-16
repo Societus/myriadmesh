@@ -347,12 +347,13 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn test_generate_destination() {
-        let mut conn = SamConnection::connect("127.0.0.1:7656").unwrap();
+    fn test_generate_destination() -> Result<()> {
+        let mut conn = SamConnection::connect("127.0.0.1:7656")?;
         let dest = conn.generate_destination();
         assert!(dest.is_ok());
-        let dest = dest.unwrap();
+        let dest = dest?;
         assert!(!dest.destination.is_empty());
+        Ok(())
     }
 
     #[test]

@@ -317,7 +317,7 @@ impl OnionRouter {
             RouteSelectionStrategy::HighReliability => {
                 // Sort by reliability and pick top nodes with some randomness
                 let mut sorted = candidates.to_vec();
-                sorted.sort_by(|a, b| b.reliability.partial_cmp(&a.reliability).unwrap());
+                sorted.sort_by(|a, b| b.reliability.partial_cmp(&a.reliability).unwrap_or(std::cmp::Ordering::Equal));
 
                 // Pick from top 2*num_hops to add some randomness
                 let pool_size = (num_hops * 2).min(sorted.len());
@@ -332,7 +332,7 @@ impl OnionRouter {
             RouteSelectionStrategy::LowLatency => {
                 // Sort by latency and pick top nodes with some randomness
                 let mut sorted = candidates.to_vec();
-                sorted.sort_by(|a, b| a.latency_ms.partial_cmp(&b.latency_ms).unwrap());
+                sorted.sort_by(|a, b| a.latency_ms.partial_cmp(&b.latency_ms).unwrap_or(std::cmp::Ordering::Equal));
 
                 let pool_size = (num_hops * 2).min(sorted.len());
                 let selected: Vec<NodeId> = sorted[..pool_size]
@@ -354,7 +354,7 @@ impl OnionRouter {
                     })
                     .collect();
 
-                scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
                 let pool_size = (num_hops * 2).min(scored.len());
                 let selected: Vec<NodeId> = scored[..pool_size]
