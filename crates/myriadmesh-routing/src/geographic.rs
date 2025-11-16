@@ -132,8 +132,8 @@ impl GeoRoutingTable {
             .map(|loc| (loc.node_id, loc.coordinates.distance_to(target)))
             .collect();
 
-        // Sort by distance
-        distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        // Sort by distance (NaN-safe)
+        distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Take only max_results
         distances.truncate(max_results);
@@ -172,8 +172,8 @@ impl GeoRoutingTable {
             })
             .collect();
 
-        // Sort by distance
-        candidates.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+        // Sort by distance (NaN-safe)
+        candidates.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
         // Take only max_results
         candidates.truncate(max_results);
@@ -326,5 +326,40 @@ mod tests {
         assert_eq!(nearest.len(), 2);
         // First should be NYC itself (distance ~0)
         assert!(nearest[0].1 < 1.0);
+    }
+
+    #[test]
+    fn test_nan_handling_in_sorting() {
+        // Test that NaN values in distance calculations don't cause panics
+        let mut table = GeoRoutingTable::new(3600);
+
+        // Add a node with valid coordinates
+        let mut valid_id = [0u8; 64];
+        valid_id[0] = 1;
+        let valid = NodeLocation {
+            node_id: NodeId::from_bytes(valid_id),
+            coordinates: GeoCoordinates::new(40.0, -74.0),
+            last_updated: 1000,
+            confidence: 0.95,
+        };
+        table.update_location(valid);
+
+        // Add a node with coordinates that might produce NaN
+        let mut invalid_id = [0u8; 64];
+        invalid_id[0] = 2;
+        let invalid = NodeLocation {
+            node_id: NodeId::from_bytes(invalid_id),
+            coordinates: GeoCoordinates::new(f64::NAN, f64::NAN),
+            last_updated: 1000,
+            confidence: 0.0,
+        };
+        table.update_location(invalid);
+
+        // This should not panic even with NaN coordinates
+        let target = GeoCoordinates::new(40.0, -74.0);
+        let result = table.find_nearest_nodes(&target, 5);
+
+        // Should return results without panicking
+        assert!(!result.is_empty());
     }
 }

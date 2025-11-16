@@ -99,7 +99,8 @@ impl Storage {
     }
 
     pub async fn close(&self) -> Result<()> {
-        // Pool will be closed when dropped
+        // Explicitly close the pool to ensure all connections are closed
+        self.pool.close().await;
         Ok(())
     }
 

@@ -5,10 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::{ProtocolError, Result};
-use crate::types::{NodeId, Priority};
-
-#[cfg(test)]
-use crate::types::NODE_ID_SIZE;
+use crate::types::{NodeId, Priority, NODE_ID_SIZE};
 
 /// Size of a message ID in bytes (per specification.md:128-131)
 pub const MESSAGE_ID_SIZE: usize = 16;
@@ -313,8 +310,8 @@ impl Message {
     /// Get message size in bytes (approximate)
     pub fn size(&self) -> usize {
         MESSAGE_ID_SIZE
-            + 32 // source
-            + 32 // destination
+            + NODE_ID_SIZE // source
+            + NODE_ID_SIZE // destination
             + 1  // message_type
             + 1  // priority
             + 1  // ttl
@@ -482,5 +479,21 @@ mod tests {
 
         // Invalid type
         assert!(MessageType::from_u8(0x99).is_err());
+    }
+
+    #[test]
+    fn test_message_size_calculation() {
+        let source = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+        let dest = NodeId::from_bytes([2u8; NODE_ID_SIZE]);
+        let payload = vec![0u8; 100];
+
+        let msg = Message::new(source, dest, MessageType::Data, payload).unwrap();
+
+        // Message size should be:
+        // MESSAGE_ID_SIZE (16) + NODE_ID_SIZE (64) + NODE_ID_SIZE (64)
+        // + 1 (type) + 1 (priority) + 1 (ttl) + 8 (timestamp) + 4 (sequence) + payload (100)
+        let expected_size = 16 + 64 + 64 + 1 + 1 + 1 + 8 + 4 + 100;
+        assert_eq!(msg.size(), expected_size);
+        assert_eq!(msg.size(), 259); // Explicit check
     }
 }

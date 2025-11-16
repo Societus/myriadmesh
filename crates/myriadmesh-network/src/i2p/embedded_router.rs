@@ -230,7 +230,7 @@ impl EmbeddedI2pRouter {
     }
 
     /// Wait for router to be ready
-    pub fn wait_ready(&self, timeout: Duration) -> Result<()> {
+    pub async fn wait_ready(&self, timeout: Duration) -> Result<()> {
         let start = Instant::now();
 
         while !self.ready.load(Ordering::SeqCst) {
@@ -244,7 +244,7 @@ impl EmbeddedI2pRouter {
                 return Ok(());
             }
 
-            std::thread::sleep(Duration::from_millis(500));
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
 
         Ok(())
@@ -305,7 +305,7 @@ impl I2pRouterMode {
         let router = EmbeddedI2pRouter::start(config)?;
 
         // Wait for router to be ready
-        router.wait_ready(Duration::from_secs(60))?;
+        router.wait_ready(Duration::from_secs(60)).await?;
 
         Ok(I2pRouterMode::Embedded { router })
     }
