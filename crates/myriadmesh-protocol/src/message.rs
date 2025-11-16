@@ -240,8 +240,12 @@ impl Message {
         let timestamp = match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(duration) => duration.as_millis() as u64,
             Err(e) => {
-                eprintln!("WARNING: System time error in message creation: {}. Using fallback timestamp.", e);
-                // Use fallback timestamp in milliseconds (1500000000 seconds = 1500000000000 ms)
+                eprintln!(
+                    "WARNING: System time error in message creation: {}. Using fallback timestamp.",
+                    e
+                );
+                // Use fallback timestamp in milliseconds (1500000000 seconds = 1500000000000
+                // ms)
                 1500000000000
             }
         };
@@ -325,8 +329,12 @@ impl Message {
         let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(duration) => duration.as_millis() as u64,
             Err(e) => {
-                eprintln!("WARNING: System time error in timestamp freshness check: {}. Using fallback timestamp.", e);
-                // Use fallback timestamp in milliseconds (1500000000 seconds = 1500000000000 ms)
+                eprintln!(
+                    "WARNING: System time error in timestamp freshness check: {}. Using fallback timestamp.",
+                    e
+                );
+                // Use fallback timestamp in milliseconds (1500000000 seconds = 1500000000000
+                // ms)
                 1500000000000
             }
         };

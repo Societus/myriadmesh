@@ -304,7 +304,10 @@ fn now() -> Result<u64> {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => Ok(duration.as_secs()),
         Err(e) => {
-            eprintln!("WARNING: System time error in license validation: {}. Using fallback timestamp.", e);
+            eprintln!(
+                "WARNING: System time error in license validation: {}. Using fallback timestamp.",
+                e
+            );
             // Return a reasonable fallback (1.5 billion seconds since epoch, ~2017)
             Ok(1500000000)
         }
