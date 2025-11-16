@@ -400,10 +400,14 @@ impl HfRadioAdapter {
     /// Fetch space weather data
     async fn fetch_space_weather(&self) -> Result<SpaceWeather> {
         // Mock implementation - would fetch from NOAA SWPC API
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let timestamp = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs(),
+            Err(e) => {
+                eprintln!("WARNING: System time error in space weather data collection: {}. Using fallback timestamp.", e);
+                // Return a reasonable fallback (1.5 billion seconds since epoch, ~2017)
+                1500000000
+            }
+        };
 
         // Simulated values
         Ok(SpaceWeather {
