@@ -453,10 +453,7 @@ impl EncryptedChannel {
         self.tx_key = Some(session_keys.tx_key);
         self.rx_key = Some(session_keys.rx_key);
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let timestamp = self.get_current_timestamp()?;
 
         self.established_at = Some(timestamp);
         self.state = ChannelState::Established;

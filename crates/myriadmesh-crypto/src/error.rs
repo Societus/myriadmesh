@@ -50,4 +50,7 @@ pub enum CryptoError {
 
     #[error("Invalid state: {0}")]
     InvalidState(String),
+
+    #[error("System time error: {0}")]
+    SystemTimeError(String),
 }

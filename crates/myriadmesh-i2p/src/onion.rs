@@ -139,12 +139,24 @@ pub struct OnionRoute {
 }
 
 impl OnionRoute {
+    /// Get current timestamp with graceful fallback on system time errors
+    ///
+    /// SECURITY: If system clock goes backwards or other time errors occur,
+    /// returns a fallback timestamp instead of panicking. This is better than
+    /// crashing the node during routing operations.
+    fn get_current_time() -> u64 {
+        match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs(),
+            Err(e) => {
+                eprintln!("WARNING: System time error in onion routing: {}. Using fallback timestamp.", e);
+                1500000000 // Fallback to ~2017
+            }
+        }
+    }
+
     /// Create new onion route
     pub fn new(source: NodeId, destination: NodeId, hops: Vec<NodeId>, lifetime_secs: u64) -> Self {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = Self::get_current_time();
 
         let mut rng = rand::thread_rng();
         let route_id = rng.gen();
@@ -168,11 +180,7 @@ impl OnionRoute {
 
     /// Check if route is expired
     pub fn is_expired(&self) -> bool {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
+        let now = Self::get_current_time();
         now >= self.expires_at
     }
 
