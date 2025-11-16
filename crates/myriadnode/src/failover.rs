@@ -1,7 +1,8 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
+use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration, Instant};
 use tracing::{debug, error, info, warn};
 
@@ -108,6 +109,9 @@ pub struct FailoverManager {
     adapter_health: Arc<RwLock<HashMap<String, AdapterHealth>>>,
     current_primary: Arc<RwLock<Option<String>>>,
     event_log: Arc<RwLock<Vec<FailoverEvent>>>,
+    // RESOURCE M4: Task handle management for graceful shutdown
+    shutdown_tx: broadcast::Sender<()>,
+    monitor_task: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
 impl FailoverManager {
@@ -116,6 +120,9 @@ impl FailoverManager {
         adapter_manager: Arc<RwLock<AdapterManager>>,
         scoring_weights: ScoringWeights,
     ) -> Self {
+        // RESOURCE M4: Create shutdown channel for graceful task termination
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
         Self {
             config,
             adapter_manager,
@@ -123,6 +130,8 @@ impl FailoverManager {
             adapter_health: Arc::new(RwLock::new(HashMap::new())),
             current_primary: Arc::new(RwLock::new(None)),
             event_log: Arc::new(RwLock::new(Vec::new())),
+            shutdown_tx,
+            monitor_task: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -141,29 +150,53 @@ impl FailoverManager {
         let adapter_health = Arc::clone(&self.adapter_health);
         let current_primary = Arc::clone(&self.current_primary);
         let event_log = Arc::clone(&self.event_log);
+        // RESOURCE M4: Subscribe to shutdown channel
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
 
-        tokio::spawn(async move {
+        // RESOURCE M4: Spawn monitor task with shutdown handling
+        let handle = tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(10)); // Check every 10 seconds
 
             loop {
-                ticker.tick().await;
-
-                if let Err(e) = Self::check_and_failover(
-                    &config,
-                    &adapter_manager,
-                    &scorer,
-                    &adapter_health,
-                    &current_primary,
-                    &event_log,
-                )
-                .await
-                {
-                    error!("Failover check failed: {}", e);
+                tokio::select! {
+                    _ = shutdown_rx.recv() => {
+                        info!("Failover monitor shutting down");
+                        break;
+                    }
+                    _ = ticker.tick() => {
+                        if let Err(e) = Self::check_and_failover(
+                            &config,
+                            &adapter_manager,
+                            &scorer,
+                            &adapter_health,
+                            &current_primary,
+                            &event_log,
+                        )
+                        .await
+                        {
+                            error!("Failover check failed: {}", e);
+                        }
+                    }
                 }
             }
         });
 
+        // RESOURCE M4: Store task handle
+        *self.monitor_task.write().await = Some(handle);
+
         Ok(())
+    }
+
+    /// Gracefully shutdown the failover monitor and wait for task to complete
+    /// RESOURCE M4: Prevents task handle leaks and ensures cleanup
+    pub async fn shutdown(&self) {
+        // Send shutdown signal
+        let _ = self.shutdown_tx.send(());
+
+        // Wait for monitor task to complete
+        if let Some(handle) = self.monitor_task.write().await.take() {
+            let _ = handle.await;
+        }
     }
 
     /// Check adapter health and perform failover if needed
