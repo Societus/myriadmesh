@@ -5,7 +5,8 @@
 //! receive operations.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use lru::LruCache;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
@@ -103,16 +104,31 @@ struct CacheEntry {
 }
 
 /// FCC license database client (for online validation)
+///
+/// # CONCURRENCY FIX: LRU Cache (PHASE 4)
+///
+/// Previously used unlimited HashMap which could grow without bound, causing memory issues.
+/// Now uses LruCache with automatic eviction of least-recently-used entries.
+///
+/// Cache capacity: 1000 callsigns
+/// TTL: 24 hours (86400 seconds)
 pub struct FccClient {
-    cache: Arc<RwLock<HashMap<String, CacheEntry>>>,
+    cache: Arc<RwLock<LruCache<String, CacheEntry>>>,
     cache_ttl: u64, // Cache time-to-live in seconds
 }
 
 impl FccClient {
     /// Create a new FCC client
+    ///
+    /// # CONCURRENCY FIX: LRU Cache with bounded capacity
+    ///
+    /// Initializes LRU cache with 1000-entry capacity. When full, least-recently-used
+    /// entries are automatically evicted, preventing unbounded memory growth.
     pub fn new() -> Self {
         Self {
-            cache: Arc::new(RwLock::new(HashMap::new())),
+            cache: Arc::new(RwLock::new(LruCache::new(
+                NonZeroUsize::new(1000).unwrap()
+            ))),
             cache_ttl: 86400, // 24 hours
         }
     }
@@ -121,15 +137,24 @@ impl FccClient {
     ///
     /// This is a placeholder implementation. In production, this would query
     /// the FCC ULS database API or a local mirror.
+    ///
+    /// # CONCURRENCY FIX: LRU Cache with automatic eviction
+    ///
+    /// Uses LRU cache with `.get()` and `.put()` methods. LRU automatically:
+    /// - Tracks access order (marks entries as recently-used on get)
+    /// - Evicts least-recently-used entries when capacity is reached
+    /// - Maintains bounded memory usage without manual cleanup
     pub async fn validate_callsign(&self, callsign: &str) -> Result<bool> {
-        // Check cache first
+        // Check cache first (LRU marks as recently-used)
         {
-            let cache = self.cache.read().await;
+            let mut cache = self.cache.write().await;
             if let Some(entry) = cache.get(callsign) {
                 let now = now()?;
+                // Check TTL
                 if now < entry.cached_at + self.cache_ttl {
                     return Ok(entry.valid);
                 }
+                // Entry expired, will be replaced below
             }
         }
 
@@ -137,10 +162,10 @@ impl FccClient {
         // For now, validate format only
         let valid = Self::validate_callsign_format(callsign);
 
-        // Cache result
+        // Cache result (LRU automatically evicts if at capacity)
         {
             let mut cache = self.cache.write().await;
-            cache.insert(
+            cache.put(
                 callsign.to_string(),
                 CacheEntry {
                     callsign: callsign.to_string(),

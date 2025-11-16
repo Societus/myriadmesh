@@ -1882,6 +1882,7 @@ dependencies = [
  "futures",
  "hex",
  "log",
+ "lru",
  "myriadmesh-crypto",
  "myriadmesh-protocol",
  "myriadmesh-routing",

@@ -211,14 +211,63 @@ impl MessageCache {
     }
 
     /// Store a message in the cache
+    ///
+    /// # TOCTOU Race Prevention
+    ///
+    /// This method uses a single atomic operation to check limits and insert the message.
+    /// Previously, there was a race condition where:
+    /// 1. check_limits() acquired read lock, checked, dropped lock
+    /// 2. store() acquired write lock, inserted message
+    ///
+    /// Between steps 1 and 2, another thread could insert messages, causing limits to be exceeded.
+    ///
+    /// Fixed by holding the write lock for both check and insert operations atomically.
     pub async fn store(&self, message: &CachedMessage) -> ApplianceResult<()> {
-        // Check if we've exceeded limits
-        self.check_limits(&message.device_id).await?;
-
+        // CONCURRENCY FIX: Single atomic operation (write lock held throughout)
         let mut data = self.data.write().await;
+
+        // Check device limit atomically
+        let device_count = data
+            .messages
+            .values()
+            .filter(|m| m.device_id == message.device_id)
+            .count();
+
+        if device_count >= self.config.max_messages_per_device {
+            // Try to evict delivered or low-priority messages for this device
+            Self::evict_messages_locked(&mut data, &message.device_id, &self.config);
+
+            // Re-count after eviction
+            let device_count = data
+                .messages
+                .values()
+                .filter(|m| m.device_id == message.device_id)
+                .count();
+
+            if device_count >= self.config.max_messages_per_device {
+                drop(data);
+                return Err(ApplianceError::CacheFull);
+            }
+        }
+
+        // Check total limit atomically
+        let total_count = data.messages.len();
+        if total_count >= self.config.max_total_messages {
+            // Try to evict globally
+            Self::evict_global_locked(&mut data, &self.config);
+
+            // Re-check after eviction
+            if data.messages.len() >= self.config.max_total_messages {
+                drop(data);
+                return Err(ApplianceError::CacheFull);
+            }
+        }
+
+        // Insert message atomically (still holding write lock)
         data.messages
             .insert(message.message_id.clone(), message.clone());
         drop(data);
+
         self.save().await
     }
 
@@ -320,6 +369,65 @@ impl MessageCache {
 
         drop(data);
         self.save().await
+    }
+
+    /// Evict messages for a device (lock-free version for atomic operations)
+    ///
+    /// # TOCTOU Race Prevention
+    ///
+    /// This helper operates on an already-held write lock, allowing check-and-evict
+    /// to be a single atomic operation in store().
+    fn evict_messages_locked(
+        data: &mut CacheStoreData,
+        device_id: &str,
+        config: &MessageCacheConfig,
+    ) {
+        // Remove delivered messages first
+        data.messages
+            .retain(|_, m| !(m.device_id == device_id && m.delivered));
+
+        // If still over limit, remove oldest low-priority messages
+        let mut device_messages: Vec<_> = data
+            .messages
+            .iter()
+            .filter(|(_, m)| m.device_id == device_id)
+            .map(|(id, m)| (id.clone(), m.priority, m.received_at))
+            .collect();
+
+        if device_messages.len() > config.max_messages_per_device {
+            // Sort by priority (ascending) and received_at (ascending)
+            device_messages.sort_by(|(_, a_priority, a_time), (_, b_priority, b_time)| {
+                (a_priority, a_time).cmp(&(b_priority, b_time))
+            });
+
+            // Collect IDs to remove
+            let to_remove = device_messages.len() - config.max_messages_per_device;
+            let ids_to_remove: Vec<_> = device_messages
+                .iter()
+                .take(to_remove)
+                .map(|(id, _, _)| id.clone())
+                .collect();
+
+            // Remove them
+            for id in ids_to_remove {
+                data.messages.remove(&id);
+            }
+        }
+    }
+
+    /// Global eviction across all devices (lock-free version for atomic operations)
+    ///
+    /// # TOCTOU Race Prevention
+    ///
+    /// This helper operates on an already-held write lock, allowing check-and-evict
+    /// to be a single atomic operation in store().
+    fn evict_global_locked(data: &mut CacheStoreData, _config: &MessageCacheConfig) {
+        // Remove all delivered messages
+        data.messages.retain(|_, m| !m.delivered);
+
+        // Remove expired messages
+        let now = Utc::now();
+        data.messages.retain(|_, m| m.expires_at > now);
     }
 
     /// Retrieve messages for a device
