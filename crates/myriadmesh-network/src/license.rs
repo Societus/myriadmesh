@@ -403,6 +403,7 @@ mod tests {
         // Check state is expired
         let state = manager.get_license().await;
         assert!(matches!(state, LicenseState::Expired { .. }));
+        Ok(())
     }
 
     #[tokio::test]
