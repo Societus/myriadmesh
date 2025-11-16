@@ -47,9 +47,9 @@ All MyriadMesh messages use the following frame structure:
 ├──────────────────────────────────────────────────────────┤
 │  Message ID (16 bytes): Unique message identifier        │
 ├──────────────────────────────────────────────────────────┤
-│  Source Node ID (32 bytes): Sender's node ID             │
+│  Source Node ID (64 bytes): Sender's node ID             │
 ├──────────────────────────────────────────────────────────┤
-│  Dest Node ID (32 bytes): Recipient's node ID            │
+│  Dest Node ID (64 bytes): Recipient's node ID            │
 ├──────────────────────────────────────────────────────────┤
 │  Timestamp (8 bytes): Unix timestamp in milliseconds     │
 ├──────────────────────────────────────────────────────────┤
@@ -58,7 +58,8 @@ All MyriadMesh messages use the following frame structure:
 │  Signature (64 bytes): Ed25519 signature of header+payload│
 └──────────────────────────────────────────────────────────┘
 
-Total header size: 162 bytes
+Total header size: 227 bytes
+(4 magic + 1 version + 1 flags + 1 type + 1 priority + 1 TTL + 2 payload_len + 16 message_id + 64 source_id + 64 dest_id + 8 timestamp + 64 signature)
 ```
 
 ### Field Descriptions
@@ -119,7 +120,7 @@ Bit 7: Reserved
 - Time-to-live: maximum number of hops
 - Decremented by each relay node
 - Message discarded when TTL reaches 0
-- Default: 10 hops
+- Default: 32 hops (updated from 10 to support larger network topologies)
 
 #### Payload Length (2 bytes)
 - Length of payload in bytes (0-65535)
@@ -127,14 +128,16 @@ Bit 7: Reserved
 
 #### Message ID (16 bytes)
 - Unique identifier for this message
-- Generated using: `BLAKE2b(timestamp + source_id + random_nonce)[0:16]`
+- Generated using: `BLAKE2b-512(timestamp + source_id + random_nonce)[0:16]`
+- First 16 bytes of BLAKE2b-512 hash
 - Used for deduplication and tracking
 
-#### Source Node ID (32 bytes)
+#### Source Node ID (64 bytes)
 - Public key hash of sending node
-- Derived from: `BLAKE2b(node_public_key)`
+- Derived from: `BLAKE2b-512(node_public_key)` (64 bytes)
+- Uses full 512-bit hash for enhanced collision resistance
 
-#### Destination Node ID (32 bytes)
+#### Destination Node ID (64 bytes)
 - Public key hash of recipient node
 - Special values:
   - `0xFF...FF` (all F's): Broadcast to all nodes
@@ -211,7 +214,7 @@ DHT lookup operations.
 ┌──────────────────────────────────────┐
 │  Query Type (1 byte)                 │
 ├──────────────────────────────────────┤
-│  Key (32 bytes)                      │
+│  Key (64 bytes)                      │
 └──────────────────────────────────────┘
 ```
 
@@ -242,7 +245,7 @@ Store value in DHT.
 **Payload:**
 ```
 ┌──────────────────────────────────────┐
-│  Key (32 bytes)                      │
+│  Key (64 bytes)                      │
 ├──────────────────────────────────────┤
 │  Value Length (2 bytes)              │
 ├──────────────────────────────────────┤
@@ -588,7 +591,7 @@ Messages with timestamps >5 minutes off may be rejected.
 ### Buffer Sizes
 
 Implementations should support:
-- Minimum message size: 162 bytes (header only)
+- Minimum message size: 227 bytes (header only)
 - Recommended max message size: 1024 bytes
 - Absolute max message size: 65535 bytes
 

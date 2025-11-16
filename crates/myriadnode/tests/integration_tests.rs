@@ -621,3 +621,186 @@ async fn test_heartbeat_service_thread_safety() {
         handle.await.expect("Task should complete");
     }
 }
+
+// =========================================
+// Phase 1-4 Bug Fix Integration Tests
+// =========================================
+
+// ==========================
+// Phase 3: Graceful Shutdown Tests
+// ==========================
+
+#[tokio::test]
+async fn test_failover_manager_graceful_shutdown() {
+    // RESOURCE M4: Test graceful shutdown of failover manager monitor task
+    let config = FailoverConfig {
+        auto_failover: true,
+        latency_threshold_multiplier: 3.0,
+        loss_threshold: 0.3,
+        retry_attempts: 3,
+    };
+
+    let adapter_manager = Arc::new(RwLock::new(AdapterManager::new()));
+    let weights = ScoringWeights::default();
+    let failover_manager = FailoverManager::new(config, adapter_manager, weights);
+
+    // Start the monitor task
+    failover_manager.start().await.expect("Failed to start");
+
+    // Give it a moment to actually start
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Shutdown gracefully
+    failover_manager.shutdown().await;
+
+    // If we get here without hanging, graceful shutdown worked
+}
+
+#[tokio::test]
+async fn test_heartbeat_service_graceful_shutdown() {
+    // RESOURCE M4: Test graceful shutdown of heartbeat broadcast and cleanup tasks
+    let config = HeartbeatConfig {
+        enabled: true,
+        interval_secs: 30,
+        timeout_secs: 120,
+        include_geolocation: false,
+        store_remote_geolocation: false,
+        max_nodes: 1000,
+    };
+
+    let node_id = create_test_node_id(10);
+    let service = create_test_heartbeat_service(config, node_id);
+
+    // Start the service (spawns background tasks)
+    service.start().await.expect("Failed to start");
+
+    // Give tasks time to start
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Shutdown gracefully
+    service.stop().await;
+
+    // If we get here without hanging, graceful shutdown worked
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_concurrent_shutdown_no_deadlock() {
+    // Test that multiple components can shutdown concurrently without deadlocking
+    let failover_config = FailoverConfig {
+        auto_failover: true,
+        latency_threshold_multiplier: 3.0,
+        loss_threshold: 0.3,
+        retry_attempts: 3,
+    };
+
+    let heartbeat_config = HeartbeatConfig {
+        enabled: true,
+        interval_secs: 30,
+        timeout_secs: 120,
+        include_geolocation: false,
+        store_remote_geolocation: false,
+        max_nodes: 1000,
+    };
+
+    let adapter_manager = Arc::new(RwLock::new(AdapterManager::new()));
+    let weights = ScoringWeights::default();
+
+    // Create and start failover manager
+    let failover = FailoverManager::new(failover_config, Arc::clone(&adapter_manager), weights);
+    failover.start().await.expect("Failed to start failover");
+
+    // Create and start heartbeat service
+    let node_id = create_test_node_id(11);
+    let heartbeat = create_test_heartbeat_service(heartbeat_config, node_id);
+    heartbeat.start().await.expect("Failed to start heartbeat");
+
+    // Give tasks time to start
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Shutdown both concurrently
+    let failover_shutdown = failover.shutdown();
+    let heartbeat_shutdown = heartbeat.stop();
+
+    tokio::join!(failover_shutdown, heartbeat_shutdown);
+
+    // If we get here, no deadlock occurred
+}
+
+// ==========================
+// Phase 2: Failover Scenarios with Graceful Shutdown
+// ==========================
+
+#[tokio::test]
+async fn test_failover_scenario_with_restart() {
+    // Test that failover manager can be stopped and restarted
+    let config = FailoverConfig {
+        auto_failover: true,
+        latency_threshold_multiplier: 3.0,
+        loss_threshold: 0.3,
+        retry_attempts: 3,
+    };
+
+    let adapter_manager = Arc::new(RwLock::new(AdapterManager::new()));
+    let weights = ScoringWeights::default();
+    let failover = FailoverManager::new(config, adapter_manager, weights);
+
+    // Start
+    failover.start().await.expect("Failed to start");
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    // Stop
+    failover.shutdown().await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    // Restart
+    failover.start().await.expect("Failed to restart");
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    // Stop again
+    failover.shutdown().await;
+}
+
+// ==========================
+// Phase 4: Lock Ordering Verification
+// ==========================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn test_failover_lock_ordering_stress() {
+    // Stress test the failover manager to ensure lock ordering doesn't cause deadlocks
+    let config = FailoverConfig {
+        auto_failover: true,
+        latency_threshold_multiplier: 3.0,
+        loss_threshold: 0.3,
+        retry_attempts: 3,
+    };
+
+    let adapter_manager = Arc::new(RwLock::new(AdapterManager::new()));
+    let weights = ScoringWeights::default();
+    let failover = Arc::new(FailoverManager::new(config, adapter_manager, weights));
+
+    // Start the failover manager
+    failover.start().await.expect("Failed to start");
+
+    // Spawn multiple tasks that concurrently access failover manager
+    let mut handles = vec![];
+
+    for _ in 0..20 {
+        let fm_clone = Arc::clone(&failover);
+        let handle = tokio::spawn(async move {
+            // Repeatedly query events (acquires event_log lock)
+            for _ in 0..10 {
+                let _events = fm_clone.get_recent_events(10).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+            }
+        });
+        handles.push(handle);
+    }
+
+    // Wait for all tasks to complete
+    for handle in handles {
+        handle.await.expect("Task should complete without deadlock");
+    }
+
+    // Shutdown
+    failover.shutdown().await;
+}
