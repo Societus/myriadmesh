@@ -23,7 +23,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 
-type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+type FrameReceiver = Arc<RwLock<Option<mpsc::Receiver<(Address, Frame)>>>>;
 
 /// HF radio configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -331,7 +331,7 @@ pub struct HfRadioAdapter {
     capabilities: AdapterCapabilities,
     state: Arc<RwLock<HfRadioState>>,
     rx: FrameReceiver,
-    incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
+    incoming_tx: mpsc::Sender<(Address, Frame)>,
     rx_task: Arc<RwLock<Option<JoinHandle<()>>>>,
     cat: Arc<RwLock<Box<dyn CatControl>>>,
     psk31_codec: Arc<Psk31Codec>,
@@ -373,7 +373,9 @@ impl HfRadioAdapter {
             supports_multicast: false,
         };
 
-        let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
+        // RESOURCE M3: Bounded channel to prevent memory exhaustion
+        // LoRa/Radio: 1,000 capacity (low throughput)
+        let (incoming_tx, incoming_rx) = mpsc::channel(1000);
 
         Self {
             config: config.clone(),

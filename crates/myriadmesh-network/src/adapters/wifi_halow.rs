@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 
-type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+type FrameReceiver = Arc<RwLock<Option<mpsc::Receiver<(Address, Frame)>>>>;
 
 /// WiFi HaLoW adapter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -240,7 +240,7 @@ pub struct WifiHalowAdapter {
     capabilities: AdapterCapabilities,
     state: Arc<RwLock<WifiHalowState>>,
     rx: FrameReceiver,
-    incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
+    incoming_tx: mpsc::Sender<(Address, Frame)>,
     rx_task: Arc<RwLock<Option<JoinHandle<()>>>>,
     network_stack: Arc<RwLock<Box<dyn NetworkStack>>>,
     twt_session: Arc<RwLock<Option<TwtSession>>>,
@@ -267,7 +267,9 @@ impl WifiHalowAdapter {
             supports_multicast: true,
         };
 
-        let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
+        // RESOURCE M3: Bounded channel to prevent memory exhaustion
+        // Ethernet/Wi-Fi: 10,000 capacity (high throughput)
+        let (incoming_tx, incoming_rx) = mpsc::channel(10000);
 
         Self {
             config,
@@ -377,7 +379,16 @@ impl NetworkAdapter for WifiHalowAdapter {
                 if let Ok(Some(data)) = network_stack.write().await.receive_frame() {
                     if let Ok(frame) = bincode::deserialize::<Frame>(&data) {
                         let addr = Address::WifiHaLow("00:00:00:00:00:00".to_string());
-                        let _ = incoming_tx.send((addr, frame));
+                        match incoming_tx.try_send((addr, frame)) {
+                            Ok(_) => {}
+                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                log::warn!("WiFi HaLow incoming channel full, dropping frame");
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                log::warn!("WiFi HaLow incoming channel closed, stopping RX task");
+                                break;
+                            }
+                        }
                     }
                 }
             }

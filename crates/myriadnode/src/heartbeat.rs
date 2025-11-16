@@ -5,7 +5,8 @@ use sodiumoxide::crypto::sign::ed25519;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
+use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 use tracing::{debug, info, warn};
 
@@ -208,6 +209,10 @@ pub struct HeartbeatService {
     backhaul_detector: Arc<BackhaulDetector>,
     rate_limiter: Arc<RwLock<HeartbeatRateLimiter>>,
     adapter_configs: HashMap<String, AdapterConfig>,
+    // RESOURCE M4: Task handle management for graceful shutdown
+    shutdown_tx: broadcast::Sender<()>,
+    broadcast_task: Arc<RwLock<Option<JoinHandle<()>>>>,
+    cleanup_task: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
 impl HeartbeatService {
@@ -221,6 +226,8 @@ impl HeartbeatService {
     ) -> Self {
         // Create rate limiter (30 second minimum per node, 100/sec global)
         let rate_limiter = Arc::new(RwLock::new(HeartbeatRateLimiter::new(30, 100)));
+        // RESOURCE M4: Create shutdown channel for graceful task termination
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
         Self {
             config,
@@ -231,6 +238,9 @@ impl HeartbeatService {
             backhaul_detector,
             rate_limiter,
             adapter_configs,
+            shutdown_tx,
+            broadcast_task: Arc::new(RwLock::new(None)),
+            cleanup_task: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -380,16 +390,27 @@ impl HeartbeatService {
             backhaul_detector: Arc::clone(&backhaul_detector),
             rate_limiter: Arc::clone(&self.rate_limiter),
             adapter_configs: adapter_configs.clone(),
+            shutdown_tx: self.shutdown_tx.clone(),
+            broadcast_task: Arc::new(RwLock::new(None)),
+            cleanup_task: Arc::new(RwLock::new(None)),
         };
 
-        tokio::spawn(async move {
+        // RESOURCE M4: Subscribe to shutdown channel
+        let mut shutdown_rx1 = self.shutdown_tx.subscribe();
+
+        // RESOURCE M4: Spawn broadcast task with shutdown handling
+        let handle1 = tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(config.interval_secs));
 
             loop {
-                ticker.tick().await;
-
-                // Collect adapter information
-                match service.collect_adapter_info().await {
+                tokio::select! {
+                    _ = shutdown_rx1.recv() => {
+                        info!("Heartbeat broadcast task shutting down");
+                        break;
+                    }
+                    _ = ticker.tick() => {
+                        // Collect adapter information
+                        match service.collect_adapter_info().await {
                     Ok(adapters) => {
                         if adapters.is_empty() {
                             debug!("No adapters available for heartbeat broadcast");
@@ -432,32 +453,67 @@ impl HeartbeatService {
                         warn!("Failed to collect adapter info: {}", e);
                     }
                 }
-            }
-        });
-
-        // Start NodeMap cleanup task (remove stale nodes)
-        let node_map = Arc::clone(&self.node_map);
-        let timeout_secs = self.config.timeout_secs;
-        tokio::spawn(async move {
-            let mut ticker = interval(Duration::from_secs(60)); // Check every minute
-
-            loop {
-                ticker.tick().await;
-
-                let mut map = node_map.write().await;
-                let before = map.len();
-
-                // Remove stale nodes
-                map.retain(|_, node_info| !node_info.is_stale(timeout_secs));
-
-                let after = map.len();
-                if before != after {
-                    debug!("Cleaned up {} stale nodes from NodeMap", before - after);
+                    }
                 }
             }
         });
 
+        // RESOURCE M4: Store broadcast task handle
+        *self.broadcast_task.write().await = Some(handle1);
+
+        // RESOURCE M4: Start NodeMap cleanup task with shutdown handling
+        let node_map = Arc::clone(&self.node_map);
+        let timeout_secs = self.config.timeout_secs;
+        let mut shutdown_rx2 = self.shutdown_tx.subscribe();
+
+        let handle2 = tokio::spawn(async move {
+            let mut ticker = interval(Duration::from_secs(60)); // Check every minute
+
+            loop {
+                tokio::select! {
+                    _ = shutdown_rx2.recv() => {
+                        info!("Heartbeat cleanup task shutting down");
+                        break;
+                    }
+                    _ = ticker.tick() => {
+                        let mut map = node_map.write().await;
+                        let before = map.len();
+
+                        // Remove stale nodes
+                        map.retain(|_, node_info| !node_info.is_stale(timeout_secs));
+
+                        let after = map.len();
+                        if before != after {
+                            debug!("Cleaned up {} stale nodes from NodeMap", before - after);
+                        }
+                    }
+                }
+            }
+        });
+
+        // RESOURCE M4: Store cleanup task handle
+        *self.cleanup_task.write().await = Some(handle2);
+
         Ok(())
+    }
+
+    /// Gracefully shutdown the heartbeat service and wait for tasks to complete
+    /// RESOURCE M4: Prevents task handle leaks and ensures cleanup
+    pub async fn stop(&self) {
+        info!("Stopping heartbeat service...");
+
+        // Send shutdown signal to all tasks
+        let _ = self.shutdown_tx.send(());
+
+        // Wait for broadcast task to complete
+        if let Some(handle) = self.broadcast_task.write().await.take() {
+            let _ = handle.await;
+        }
+
+        // Wait for cleanup task to complete
+        if let Some(handle) = self.cleanup_task.write().await.take() {
+            let _ = handle.await;
+        }
     }
 
     /// Handle an incoming heartbeat from another node
@@ -720,7 +776,10 @@ fn current_timestamp() -> u64 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs(),
         Err(e) => {
-            eprintln!("WARNING: System time error in heartbeat processing: {}. Using fallback timestamp.", e);
+            eprintln!(
+                "WARNING: System time error in heartbeat processing: {}. Using fallback timestamp.",
+                e
+            );
             // Return a reasonable fallback (1.5 billion seconds since epoch, ~2017)
             1500000000
         }

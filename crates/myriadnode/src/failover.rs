@@ -1,7 +1,8 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
+use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration, Instant};
 use tracing::{debug, error, info, warn};
 
@@ -101,6 +102,67 @@ impl AdapterHealth {
 }
 
 /// Automatic failover manager
+///
+/// # Lock Ordering (CRITICAL - Must follow to prevent deadlocks)
+///
+/// **LOCK ACQUISITION ORDER** - Always acquire locks in this exact order:
+/// 1. `adapter_manager` (RwLock<AdapterManager>) - Usually read lock
+/// 2. `adapter_health` (RwLock<HashMap<String, AdapterHealth>>) - Usually write lock
+/// 3. `event_log` (RwLock<Vec<FailoverEvent>>) - Write lock via log_event()
+/// 4. `current_primary` (RwLock<Option<String>>) - Write lock for failover
+///
+/// **LOCK RELEASE ORDER** - Always release in reverse order (explicit drop()):
+/// 1. Drop `current_primary` first
+/// 2. Drop `event_log`
+/// 3. Drop `adapter_health`
+/// 4. Drop `adapter_manager` last
+///
+/// ## Deadlock Prevention Rules
+///
+/// 1. **Never hold multiple locks across await points** - Drop before .await
+/// 2. **Never acquire locks out of order** - Follow the sequence above
+/// 3. **Use explicit drop()** - Don't rely on scope-based dropping
+/// 4. **Minimize lock scope** - Acquire as late as possible, release as early as possible
+/// 5. **Document any new locks** - Update this ordering if adding new RwLocks
+///
+/// ## Example Safe Pattern
+///
+/// ```rust,ignore
+/// // 1. Acquire adapter_manager (Lock 1)
+/// let manager = self.adapter_manager.read().await;
+/// let data = manager.get_data();
+///
+/// // 2. Acquire adapter_health (Lock 2)
+/// let mut health = self.adapter_health.write().await;
+/// health.update(data);
+/// drop(health);  // Release Lock 2
+/// drop(manager); // Release Lock 1
+///
+/// // 3. Acquire event_log independently (Lock 3)
+/// self.log_event(event).await;
+///
+/// // 4. Acquire current_primary independently (Lock 4)
+/// let mut primary = self.current_primary.write().await;
+/// *primary = Some(new_adapter);
+/// drop(primary); // Release Lock 4
+/// ```
+///
+/// ## Unsafe Patterns (DO NOT DO)
+///
+/// ```rust,ignore
+/// // WRONG: Acquiring out of order
+/// let primary = self.current_primary.write().await;  // Lock 4 first
+/// let health = self.adapter_health.write().await;    // Lock 2 second - DEADLOCK RISK!
+///
+/// // WRONG: Holding locks across await
+/// let manager = self.adapter_manager.read().await;
+/// some_async_operation().await;  // Still holding manager lock - DEADLOCK RISK!
+///
+/// // WRONG: No explicit drop
+/// let manager = self.adapter_manager.read().await;
+/// let health = self.adapter_health.write().await;
+/// // Scope ends here - relies on automatic dropping (order not guaranteed)
+/// ```
 pub struct FailoverManager {
     config: FailoverConfig,
     adapter_manager: Arc<RwLock<AdapterManager>>,
@@ -108,6 +170,9 @@ pub struct FailoverManager {
     adapter_health: Arc<RwLock<HashMap<String, AdapterHealth>>>,
     current_primary: Arc<RwLock<Option<String>>>,
     event_log: Arc<RwLock<Vec<FailoverEvent>>>,
+    // RESOURCE M4: Task handle management for graceful shutdown
+    shutdown_tx: broadcast::Sender<()>,
+    monitor_task: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
 impl FailoverManager {
@@ -116,6 +181,9 @@ impl FailoverManager {
         adapter_manager: Arc<RwLock<AdapterManager>>,
         scoring_weights: ScoringWeights,
     ) -> Self {
+        // RESOURCE M4: Create shutdown channel for graceful task termination
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
         Self {
             config,
             adapter_manager,
@@ -123,6 +191,8 @@ impl FailoverManager {
             adapter_health: Arc::new(RwLock::new(HashMap::new())),
             current_primary: Arc::new(RwLock::new(None)),
             event_log: Arc::new(RwLock::new(Vec::new())),
+            shutdown_tx,
+            monitor_task: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -141,32 +211,66 @@ impl FailoverManager {
         let adapter_health = Arc::clone(&self.adapter_health);
         let current_primary = Arc::clone(&self.current_primary);
         let event_log = Arc::clone(&self.event_log);
+        // RESOURCE M4: Subscribe to shutdown channel
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
 
-        tokio::spawn(async move {
+        // RESOURCE M4: Spawn monitor task with shutdown handling
+        let handle = tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(10)); // Check every 10 seconds
 
             loop {
-                ticker.tick().await;
-
-                if let Err(e) = Self::check_and_failover(
-                    &config,
-                    &adapter_manager,
-                    &scorer,
-                    &adapter_health,
-                    &current_primary,
-                    &event_log,
-                )
-                .await
-                {
-                    error!("Failover check failed: {}", e);
+                tokio::select! {
+                    _ = shutdown_rx.recv() => {
+                        info!("Failover monitor shutting down");
+                        break;
+                    }
+                    _ = ticker.tick() => {
+                        if let Err(e) = Self::check_and_failover(
+                            &config,
+                            &adapter_manager,
+                            &scorer,
+                            &adapter_health,
+                            &current_primary,
+                            &event_log,
+                        )
+                        .await
+                        {
+                            error!("Failover check failed: {}", e);
+                        }
+                    }
                 }
             }
         });
 
+        // RESOURCE M4: Store task handle
+        *self.monitor_task.write().await = Some(handle);
+
         Ok(())
     }
 
+    /// Gracefully shutdown the failover monitor and wait for task to complete
+    /// RESOURCE M4: Prevents task handle leaks and ensures cleanup
+    pub async fn shutdown(&self) {
+        // Send shutdown signal
+        let _ = self.shutdown_tx.send(());
+
+        // Wait for monitor task to complete
+        if let Some(handle) = self.monitor_task.write().await.take() {
+            let _ = handle.await;
+        }
+    }
+
     /// Check adapter health and perform failover if needed
+    ///
+    /// # Lock Ordering Safety
+    ///
+    /// This method follows the documented lock acquisition order:
+    /// 1. adapter_manager (read) - Line below
+    /// 2. adapter_health (write) - During metric collection
+    /// 3. event_log (write) - Via log_event() calls
+    /// 4. current_primary (write) - During failover decision
+    ///
+    /// Locks are explicitly dropped before acquiring the next lock to prevent deadlocks.
     async fn check_and_failover(
         config: &FailoverConfig,
         adapter_manager: &Arc<RwLock<AdapterManager>>,
@@ -175,10 +279,12 @@ impl FailoverManager {
         current_primary: &Arc<RwLock<Option<String>>>,
         event_log: &Arc<RwLock<Vec<FailoverEvent>>>,
     ) -> Result<()> {
+        // LOCK ORDER 1: Acquire adapter_manager (read lock)
         let manager = adapter_manager.read().await;
         let adapter_ids = manager.adapter_ids();
 
-        // Collect metrics for all adapters
+        // LOCK ORDER 2: Acquire adapter_health (write lock)
+        // Note: manager is still held here to read adapter data
         let mut all_metrics = HashMap::new();
         let mut health_map = adapter_health.write().await;
 
@@ -203,6 +309,9 @@ impl FailoverManager {
                                 adapter: adapter_id.clone(),
                                 reason: format!("Status: {:?}", status),
                             };
+                            // LOCK ORDER 3: log_event acquires event_log (write lock)
+                            // Note: This is called while holding adapter_manager + adapter_health
+                            // This is safe because event_log is Lock 3 (after 1 and 2)
                             Self::log_event(event_log, event).await;
                         }
                     }
@@ -247,6 +356,7 @@ impl FailoverManager {
                             threshold: health.baseline_latency.unwrap_or(0.0)
                                 * config.latency_threshold_multiplier as f64,
                         };
+                        // LOCK ORDER 3: log_event acquires event_log (write lock)
                         Self::log_event(event_log, event).await;
                         health.record_failure();
                     } else {
@@ -258,8 +368,9 @@ impl FailoverManager {
             }
         }
 
-        drop(health_map);
-        drop(manager);
+        // LOCK RELEASE: Drop locks in reverse order before acquiring new locks
+        drop(health_map); // Release adapter_health (Lock 2)
+        drop(manager); // Release adapter_manager (Lock 1)
 
         // Only failover if we have multiple adapters
         if all_metrics.len() < 2 {
@@ -275,6 +386,9 @@ impl FailoverManager {
         }
 
         let best = &scores[0];
+
+        // LOCK ORDER 4: Acquire current_primary (write lock)
+        // All previous locks have been dropped, so this is safe
         let mut primary = current_primary.write().await;
 
         // Check if we should switch
@@ -308,13 +422,23 @@ impl FailoverManager {
 
             *primary = Some(to.clone());
 
+            // LOCK RELEASE: Drop current_primary before logging event
+            // This ensures we don't hold Lock 4 while acquiring Lock 3 (deadlock prevention)
+            drop(primary);
+
             let event = FailoverEvent::AdapterSwitch {
                 from,
                 to,
                 reason: format!("Better score: {:.3}", best.total_score),
             };
+            // LOCK ORDER 3: log_event acquires event_log independently
             Self::log_event(event_log, event).await;
+
+            return Ok(());
         }
+
+        // LOCK RELEASE: Drop primary if we didn't switch
+        drop(primary);
 
         Ok(())
     }

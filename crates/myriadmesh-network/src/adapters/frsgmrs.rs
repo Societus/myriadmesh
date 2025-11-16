@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 
-type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+type FrameReceiver = Arc<RwLock<Option<mpsc::Receiver<(Address, Frame)>>>>;
 
 /// FRS/GMRS radio configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -334,7 +334,7 @@ pub struct FrsGmrsAdapter {
     capabilities: AdapterCapabilities,
     state: Arc<RwLock<FrsGmrsState>>,
     rx: FrameReceiver,
-    incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
+    incoming_tx: mpsc::Sender<(Address, Frame)>,
     rx_task: Arc<RwLock<Option<JoinHandle<()>>>>,
     radio: Arc<RwLock<Box<dyn RadioInterface>>>,
     modem: Arc<AfskModem>,
@@ -374,7 +374,9 @@ impl FrsGmrsAdapter {
             supports_multicast: false,
         };
 
-        let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
+        // RESOURCE M3: Bounded channel to prevent memory exhaustion
+        // LoRa/Radio: 1,000 capacity (low throughput)
+        let (incoming_tx, incoming_rx) = mpsc::channel(1000);
         let modem = Arc::new(AfskModem::new(config.audio_sample_rate));
         let ctcss = config
             .ctcss_frequency_hz
@@ -518,7 +520,16 @@ impl NetworkAdapter for FrsGmrsAdapter {
 
                 if let Ok(frame) = bincode::deserialize::<Frame>(&data) {
                     let addr = Address::FrsGmrs(config.frequency_hz.to_string());
-                    let _ = incoming_tx.send((addr, frame));
+                    match incoming_tx.try_send((addr, frame)) {
+                        Ok(_) => {}
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            log::warn!("FRS/GMRS incoming channel full, dropping frame");
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            log::warn!("FRS/GMRS incoming channel closed, stopping RX task");
+                            break;
+                        }
+                    }
                 }
             }
         });

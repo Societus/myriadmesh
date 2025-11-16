@@ -1014,8 +1014,9 @@ mod tests {
 
         // Verify timing variance is small (normalized successfully)
         let times_ms: Vec<u128> = build_times.iter().map(|d| d.as_millis()).collect();
-        let min_time = times_ms.iter().min().unwrap();
-        let max_time = times_ms.iter().max().unwrap();
+        assert!(!times_ms.is_empty(), "No build times recorded");
+        let min_time = times_ms.iter().min().expect("times_ms should not be empty");
+        let max_time = times_ms.iter().max().expect("times_ms should not be empty");
         let variance = max_time - min_time;
 
         // Variance should be small due to normalization (allow up to 40% due to jitter)

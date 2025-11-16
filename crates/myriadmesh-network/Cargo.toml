@@ -38,6 +38,9 @@ chrono = "0.4"
 futures = "0.3"
 log = "0.4"
 
+# CONCURRENCY: LRU cache for license validation (PHASE 4)
+lru = "0.12"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 myriadmesh-routing = { path = "../myriadmesh-routing" }

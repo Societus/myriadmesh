@@ -22,8 +22,8 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
 
-/// Type alias for incoming frame receiver
-type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+/// Type alias for incoming frame receiver (bounded)
+type FrameReceiver = Arc<RwLock<Option<mpsc::Receiver<(Address, Frame)>>>>;
 
 /// Cellular adapter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,7 +73,7 @@ struct ConnectionState {
 struct TcpConnection {
     #[allow(dead_code)]
     remote_address: String,
-    tx: mpsc::UnboundedSender<Vec<u8>>,
+    tx: mpsc::Sender<Vec<u8>>,
     #[allow(dead_code)]
     connected_at: u64,
 }
@@ -87,8 +87,8 @@ pub struct CellularAdapter {
     local_ip: Option<String>,
     /// Receive channel for incoming frames
     rx: FrameReceiver,
-    /// Send channel for incoming frames
-    incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
+    /// Send channel for incoming frames (bounded to prevent memory exhaustion)
+    incoming_tx: mpsc::Sender<(Address, Frame)>,
 }
 
 impl CellularAdapter {
@@ -106,7 +106,9 @@ impl CellularAdapter {
             supports_multicast: false,
         };
 
-        let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
+        // RESOURCE M3: Bounded channel to prevent memory exhaustion
+        // Cellular: 5,000 capacity (medium throughput)
+        let (incoming_tx, incoming_rx) = mpsc::channel(5000);
 
         Self {
             config,
@@ -181,8 +183,8 @@ impl CellularAdapter {
             .map_err(|_| NetworkError::Timeout)?
             .map_err(|e| NetworkError::SendFailed(format!("TCP connect failed: {}", e)))?;
 
-        // Create channel for this connection
-        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        // RESOURCE M3: Bounded channel to prevent memory exhaustion per connection
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(1000);
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -219,7 +221,17 @@ impl CellularAdapter {
                 match bincode::deserialize::<Frame>(&data) {
                     Ok(frame) => {
                         let source_addr = Address::Cellular(addr.clone());
-                        let _ = incoming_tx.send((source_addr, frame));
+                        // RESOURCE M3: Handle backpressure with try_send
+                        match incoming_tx.try_send((source_addr, frame)) {
+                            Ok(_) => {}
+                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                log::warn!("Cellular incoming channel full, dropping frame");
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                // Channel closed, exit loop
+                                break;
+                            }
+                        }
                     }
                     Err(_) => continue,
                 }
@@ -325,7 +337,8 @@ impl NetworkAdapter for CellularAdapter {
             NetworkError::SendFailed("Connection lost after establishment".to_string())
         })?;
 
-        connection.tx.send(frame_data).map_err(|_| {
+        // RESOURCE M3: Bounded channel send is async
+        connection.tx.send(frame_data).await.map_err(|_| {
             NetworkError::SendFailed("Failed to send to connection channel".to_string())
         })?;
 

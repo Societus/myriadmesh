@@ -26,7 +26,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 
-type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+type FrameReceiver = Arc<RwLock<Option<mpsc::Receiver<(Address, Frame)>>>>;
 
 /// LoRaWAN/Meshtastic adapter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -387,7 +387,7 @@ pub struct LoRaAdapter {
     modem: Arc<RwLock<Box<dyn LoRaModem>>>,
     duty_cycle: Arc<DutyCycleTracker>,
     rx: FrameReceiver,
-    incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
+    incoming_tx: mpsc::Sender<(Address, Frame)>,
     rx_task: Arc<RwLock<Option<JoinHandle<()>>>>,
     running: Arc<AtomicBool>,
 }
@@ -407,7 +407,9 @@ impl LoRaAdapter {
             supports_multicast: true, // Supports group addressing
         };
 
-        let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
+        // RESOURCE M3: Bounded channel to prevent memory exhaustion
+        // LoRa/Radio: 1,000 capacity (low throughput)
+        let (incoming_tx, incoming_rx) = mpsc::channel(1000);
 
         let modem: Box<dyn LoRaModem> = Box::new(MockLoRaModem::new());
 
@@ -481,11 +483,17 @@ impl LoRaAdapter {
                     state_guard.snr_db = modem_guard.get_snr();
                     drop(state_guard);
 
-                    // Queue for application
+                    // RESOURCE M3: Handle backpressure with try_send
                     let addr = Address::LoRa(format!("lora://unknown@{}", config.frequency_hz));
-                    if incoming_tx.send((addr, frame)).is_err() {
-                        log::warn!("Failed to queue received frame - channel closed");
-                        break;
+                    match incoming_tx.try_send((addr, frame)) {
+                        Ok(_) => {}
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            log::warn!("LoRa incoming channel full, dropping frame");
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            log::warn!("LoRa incoming channel closed, stopping RX task");
+                            break;
+                        }
                     }
                 }
             }

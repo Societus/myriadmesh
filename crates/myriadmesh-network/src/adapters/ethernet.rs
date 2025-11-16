@@ -226,41 +226,6 @@ impl EthernetAdapter {
         Ok((public_key, frame_data.to_vec()))
     }
 
-    /// Setup multicast socket for peer discovery
-    fn setup_multicast(&mut self) -> Result<()> {
-        if !self.config.enable_multicast {
-            return Ok(());
-        }
-
-        let multicast_addr: Ipv4Addr = self.config.multicast_addr.parse().map_err(|e| {
-            NetworkError::InvalidAddress(format!("Invalid multicast address: {}", e))
-        })?;
-
-        let socket =
-            UdpSocket::bind(format!("0.0.0.0:{}", self.config.multicast_port)).map_err(|e| {
-                NetworkError::InitializationFailed(format!(
-                    "Failed to bind multicast socket: {}",
-                    e
-                ))
-            })?;
-
-        socket
-            .join_multicast_v4(&multicast_addr, &Ipv4Addr::UNSPECIFIED)
-            .map_err(|e| {
-                NetworkError::InitializationFailed(format!("Failed to join multicast group: {}", e))
-            })?;
-
-        socket
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .map_err(|e| {
-                NetworkError::InitializationFailed(format!("Failed to set timeout: {}", e))
-            })?;
-
-        *self.multicast_socket.blocking_lock() = Some(socket);
-
-        Ok(())
-    }
-
     /// SECURITY H1: Send authenticated multicast discovery announcement
     async fn send_discovery_announcement(&self) -> Result<()> {
         if !self.config.enable_multicast {
@@ -435,8 +400,48 @@ impl NetworkAdapter for EthernetAdapter {
 
         *self.socket.lock().await = Some(socket);
 
-        // Setup multicast
-        self.setup_multicast()?;
+        // Setup multicast (in blocking context to avoid blocking async runtime)
+        if self.config.enable_multicast {
+            let multicast_addr = self.config.multicast_addr.clone();
+            let multicast_port = self.config.multicast_port;
+            let multicast_socket = self.multicast_socket.clone();
+
+            tokio::task::spawn_blocking(move || -> Result<()> {
+                let addr: Ipv4Addr = multicast_addr.parse().map_err(|e| {
+                    NetworkError::InvalidAddress(format!("Invalid multicast address: {}", e))
+                })?;
+
+                let socket =
+                    UdpSocket::bind(format!("0.0.0.0:{}", multicast_port)).map_err(|e| {
+                        NetworkError::InitializationFailed(format!(
+                            "Failed to bind multicast socket: {}",
+                            e
+                        ))
+                    })?;
+
+                socket
+                    .join_multicast_v4(&addr, &Ipv4Addr::UNSPECIFIED)
+                    .map_err(|e| {
+                        NetworkError::InitializationFailed(format!(
+                            "Failed to join multicast group: {}",
+                            e
+                        ))
+                    })?;
+
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(1)))
+                    .map_err(|e| {
+                        NetworkError::InitializationFailed(format!("Failed to set timeout: {}", e))
+                    })?;
+
+                *multicast_socket.blocking_lock() = Some(socket);
+                Ok(())
+            })
+            .await
+            .map_err(|e| {
+                NetworkError::InitializationFailed(format!("Multicast setup task failed: {}", e))
+            })??;
+        }
 
         {
             let mut status = self.status.write().await;

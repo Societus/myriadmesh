@@ -1,14 +1,26 @@
 use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 mod node;
 use node::AndroidNode;
+
+// SECURITY C10: Global handle registry for safe JNI pointer management
+// Prevents use-after-free, double-free, and memory leaks
+static ANDROID_NODES: Lazy<Mutex<HashMap<u64, Arc<Mutex<AndroidNode>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
 
 /// Initialize the MyriadNode for Android.
 ///
 /// # Safety
 /// This function is called from JNI and must handle all errors safely.
+/// Uses handle registry to prevent memory leaks and use-after-free bugs.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeInit(
     mut env: JNIEnv,
@@ -48,9 +60,20 @@ pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeInit(
     // Create the node
     match AndroidNode::new(config_path, data_dir) {
         Ok(node) => {
-            let node_ptr = Box::into_raw(Box::new(node));
-            log::info!("MyriadNode initialized successfully");
-            node_ptr as jlong
+            // SECURITY C10: Use handle registry instead of raw pointers
+            let handle = NEXT_HANDLE.fetch_add(1, Ordering::SeqCst);
+
+            match ANDROID_NODES.lock() {
+                Ok(mut nodes) => {
+                    nodes.insert(handle, Arc::new(Mutex::new(node)));
+                    log::info!("MyriadNode initialized successfully (handle: {})", handle);
+                    handle as jlong
+                }
+                Err(e) => {
+                    log::error!("Failed to acquire lock on node registry: {:?}", e);
+                    0
+                }
+            }
         }
         Err(e) => {
             log::error!("Failed to initialize node: {:?}", e);
@@ -63,26 +86,50 @@ pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeInit(
 ///
 /// # Safety
 /// This function is called from JNI and must handle all errors safely.
+/// SECURITY C10: Uses handle validation to prevent use-after-free.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeStart(
     _env: JNIEnv,
     _class: JClass,
-    node_ptr: jlong,
+    handle: jlong,
 ) -> jboolean {
-    if node_ptr == 0 {
-        log::error!("Null node pointer");
+    if handle == 0 {
+        log::error!("Invalid handle (0)");
         return JNI_FALSE;
     }
 
-    let node = &mut *(node_ptr as *mut AndroidNode);
-
-    match node.start() {
-        Ok(_) => {
-            log::info!("MyriadNode started successfully");
-            JNI_TRUE
-        }
+    // SECURITY C10: Validate handle and get node from registry
+    let nodes = match ANDROID_NODES.lock() {
+        Ok(nodes) => nodes,
         Err(e) => {
-            log::error!("Failed to start node: {:?}", e);
+            log::error!("Failed to acquire lock on node registry: {:?}", e);
+            return JNI_FALSE;
+        }
+    };
+
+    match nodes.get(&(handle as u64)) {
+        Some(node_arc) => {
+            let mut node = match node_arc.lock() {
+                Ok(node) => node,
+                Err(e) => {
+                    log::error!("Failed to lock node: {:?}", e);
+                    return JNI_FALSE;
+                }
+            };
+
+            match node.start() {
+                Ok(_) => {
+                    log::info!("MyriadNode started successfully");
+                    JNI_TRUE
+                }
+                Err(e) => {
+                    log::error!("Failed to start node: {:?}", e);
+                    JNI_FALSE
+                }
+            }
+        }
+        None => {
+            log::error!("Invalid handle: {}", handle);
             JNI_FALSE
         }
     }
@@ -92,26 +139,49 @@ pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeStart
 ///
 /// # Safety
 /// This function is called from JNI and must handle all errors safely.
+/// SECURITY C10: Uses handle validation to prevent use-after-free.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeStop(
     _env: JNIEnv,
     _class: JClass,
-    node_ptr: jlong,
+    handle: jlong,
 ) -> jboolean {
-    if node_ptr == 0 {
-        log::error!("Null node pointer");
+    if handle == 0 {
+        log::error!("Invalid handle (0)");
         return JNI_FALSE;
     }
 
-    let node = &mut *(node_ptr as *mut AndroidNode);
-
-    match node.stop() {
-        Ok(_) => {
-            log::info!("MyriadNode stopped successfully");
-            JNI_TRUE
-        }
+    let nodes = match ANDROID_NODES.lock() {
+        Ok(nodes) => nodes,
         Err(e) => {
-            log::error!("Failed to stop node: {:?}", e);
+            log::error!("Failed to acquire lock on node registry: {:?}", e);
+            return JNI_FALSE;
+        }
+    };
+
+    match nodes.get(&(handle as u64)) {
+        Some(node_arc) => {
+            let mut node = match node_arc.lock() {
+                Ok(node) => node,
+                Err(e) => {
+                    log::error!("Failed to lock node: {:?}", e);
+                    return JNI_FALSE;
+                }
+            };
+
+            match node.stop() {
+                Ok(_) => {
+                    log::info!("MyriadNode stopped successfully");
+                    JNI_TRUE
+                }
+                Err(e) => {
+                    log::error!("Failed to stop node: {:?}", e);
+                    JNI_FALSE
+                }
+            }
+        }
+        None => {
+            log::error!("Invalid handle: {}", handle);
             JNI_FALSE
         }
     }
@@ -121,21 +191,20 @@ pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeStop(
 ///
 /// # Safety
 /// This function is called from JNI and must handle all errors safely.
+/// SECURITY C10: Uses handle validation to prevent use-after-free.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeSendMessage(
     mut env: JNIEnv,
     _class: JClass,
-    node_ptr: jlong,
+    handle: jlong,
     destination: JString,
     payload: JByteArray,
     priority: jint,
 ) -> jboolean {
-    if node_ptr == 0 {
-        log::error!("Null node pointer");
+    if handle == 0 {
+        log::error!("Invalid handle (0)");
         return JNI_FALSE;
     }
-
-    let node = &mut *(node_ptr as *mut AndroidNode);
 
     // Convert destination
     let destination: String = match env.get_string(&destination) {
@@ -155,13 +224,37 @@ pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeSendM
         }
     };
 
-    match node.send_message(&destination, &payload_bytes, priority as u8) {
-        Ok(_) => {
-            log::debug!("Message queued for delivery to {}", destination);
-            JNI_TRUE
-        }
+    let nodes = match ANDROID_NODES.lock() {
+        Ok(nodes) => nodes,
         Err(e) => {
-            log::error!("Failed to send message: {:?}", e);
+            log::error!("Failed to acquire lock on node registry: {:?}", e);
+            return JNI_FALSE;
+        }
+    };
+
+    match nodes.get(&(handle as u64)) {
+        Some(node_arc) => {
+            let node = match node_arc.lock() {
+                Ok(node) => node,
+                Err(e) => {
+                    log::error!("Failed to lock node: {:?}", e);
+                    return JNI_FALSE;
+                }
+            };
+
+            match node.send_message(&destination, &payload_bytes, priority as u8) {
+                Ok(_) => {
+                    log::debug!("Message queued for delivery to {}", destination);
+                    JNI_TRUE
+                }
+                Err(e) => {
+                    log::error!("Failed to send message: {:?}", e);
+                    JNI_FALSE
+                }
+            }
+        }
+        None => {
+            log::error!("Invalid handle: {}", handle);
             JNI_FALSE
         }
     }
@@ -171,30 +264,53 @@ pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeSendM
 ///
 /// # Safety
 /// This function is called from JNI and must handle all errors safely.
+/// SECURITY C10: Uses handle validation to prevent use-after-free.
 #[no_mangle]
 #[allow(unused_mut)] // env.new_string() requires mutable borrow
 pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeGetNodeId(
     mut env: JNIEnv,
     _class: JClass,
-    node_ptr: jlong,
+    handle: jlong,
 ) -> jstring {
-    if node_ptr == 0 {
-        log::error!("Null node pointer");
+    if handle == 0 {
+        log::error!("Invalid handle (0)");
         return std::ptr::null_mut();
     }
 
-    let node = &*(node_ptr as *const AndroidNode);
-
-    match node.get_node_id() {
-        Ok(node_id) => match env.new_string(&node_id) {
-            Ok(s) => s.into_raw(),
-            Err(e) => {
-                log::error!("Failed to create JString: {:?}", e);
-                std::ptr::null_mut()
-            }
-        },
+    let nodes = match ANDROID_NODES.lock() {
+        Ok(nodes) => nodes,
         Err(e) => {
-            log::error!("Failed to get node ID: {:?}", e);
+            log::error!("Failed to acquire lock on node registry: {:?}", e);
+            return std::ptr::null_mut();
+        }
+    };
+
+    match nodes.get(&(handle as u64)) {
+        Some(node_arc) => {
+            let node = match node_arc.lock() {
+                Ok(node) => node,
+                Err(e) => {
+                    log::error!("Failed to lock node: {:?}", e);
+                    return std::ptr::null_mut();
+                }
+            };
+
+            match node.get_node_id() {
+                Ok(node_id) => match env.new_string(&node_id) {
+                    Ok(s) => s.into_raw(),
+                    Err(e) => {
+                        log::error!("Failed to create JString: {:?}", e);
+                        std::ptr::null_mut()
+                    }
+                },
+                Err(e) => {
+                    log::error!("Failed to get node ID: {:?}", e);
+                    std::ptr::null_mut()
+                }
+            }
+        }
+        None => {
+            log::error!("Invalid handle: {}", handle);
             std::ptr::null_mut()
         }
     }
@@ -204,30 +320,53 @@ pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeGetNo
 ///
 /// # Safety
 /// This function is called from JNI and must handle all errors safely.
+/// SECURITY C10: Uses handle validation to prevent use-after-free.
 #[no_mangle]
 #[allow(unused_mut)] // env.new_string() requires mutable borrow
 pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeGetStatus(
     mut env: JNIEnv,
     _class: JClass,
-    node_ptr: jlong,
+    handle: jlong,
 ) -> jstring {
-    if node_ptr == 0 {
-        log::error!("Null node pointer");
+    if handle == 0 {
+        log::error!("Invalid handle (0)");
         return std::ptr::null_mut();
     }
 
-    let node = &*(node_ptr as *const AndroidNode);
-
-    match node.get_status() {
-        Ok(status) => match env.new_string(&status) {
-            Ok(s) => s.into_raw(),
-            Err(e) => {
-                log::error!("Failed to create JString: {:?}", e);
-                std::ptr::null_mut()
-            }
-        },
+    let nodes = match ANDROID_NODES.lock() {
+        Ok(nodes) => nodes,
         Err(e) => {
-            log::error!("Failed to get status: {:?}", e);
+            log::error!("Failed to acquire lock on node registry: {:?}", e);
+            return std::ptr::null_mut();
+        }
+    };
+
+    match nodes.get(&(handle as u64)) {
+        Some(node_arc) => {
+            let node = match node_arc.lock() {
+                Ok(node) => node,
+                Err(e) => {
+                    log::error!("Failed to lock node: {:?}", e);
+                    return std::ptr::null_mut();
+                }
+            };
+
+            match node.get_status() {
+                Ok(status) => match env.new_string(&status) {
+                    Ok(s) => s.into_raw(),
+                    Err(e) => {
+                        log::error!("Failed to create JString: {:?}", e);
+                        std::ptr::null_mut()
+                    }
+                },
+                Err(e) => {
+                    log::error!("Failed to get status: {:?}", e);
+                    std::ptr::null_mut()
+                }
+            }
+        }
+        None => {
+            log::error!("Invalid handle: {}", handle);
             std::ptr::null_mut()
         }
     }
@@ -237,18 +376,30 @@ pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeGetSt
 ///
 /// # Safety
 /// This function is called from JNI and must handle all errors safely.
+/// SECURITY C10: Removes node from handle registry, Arc cleanup is automatic.
+/// Prevents double-free and memory leaks.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_myriadmesh_android_core_MyriadNode_nativeDestroy(
     _env: JNIEnv,
     _class: JClass,
-    node_ptr: jlong,
+    handle: jlong,
 ) {
-    if node_ptr == 0 {
-        log::warn!("Attempted to destroy null node pointer");
+    if handle == 0 {
+        log::warn!("Attempted to destroy invalid handle (0)");
         return;
     }
 
-    let node = Box::from_raw(node_ptr as *mut AndroidNode);
-    drop(node);
-    log::info!("MyriadNode destroyed");
+    // SECURITY C10: Remove from registry, Arc will drop when last reference is gone
+    match ANDROID_NODES.lock() {
+        Ok(mut nodes) => {
+            if nodes.remove(&(handle as u64)).is_some() {
+                log::info!("MyriadNode destroyed (handle: {})", handle);
+            } else {
+                log::warn!("Attempted to destroy non-existent handle: {}", handle);
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to acquire lock on node registry: {:?}", e);
+        }
+    }
 }

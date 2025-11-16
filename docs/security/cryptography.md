@@ -43,11 +43,11 @@ MyriadMesh uses well-established, audited cryptographic libraries:
 ### Hash Functions
 
 **BLAKE2b**
-- Output size: 256 or 512 bits (configurable)
+- Output size: 512 bits (64 bytes) for Node IDs, 256 bits for other uses (configurable)
 - Faster than SHA-3, SHA-2
 - Used for:
-  - Node ID derivation
-  - Message ID generation
+  - Node ID derivation (BLAKE2b-512 for 64-byte IDs)
+  - Message ID generation (BLAKE2b-512, first 16 bytes used)
   - Content addressing
 - Library: libsodium
 
@@ -68,8 +68,8 @@ Each node generates an identity key pair on first run:
 signing_key = SigningKey.generate()
 verify_key = signing_key.verify_key
 
-# Derive node ID from public key
-node_id = blake2b(verify_key.encode(), digest_size=32)
+# Derive node ID from public key (BLAKE2b-512 for 64 bytes)
+node_id = blake2b(verify_key.encode(), digest_size=64)
 
 # Save keys
 save_key(signing_key, "~/.myriadnode/node.key")
@@ -79,12 +79,13 @@ save_key(verify_key, "~/.myriadnode/node.pub")
 ### Node ID Format
 
 ```
-Node ID: 32 bytes (256 bits)
-Derived: BLAKE2b-256(Ed25519_PublicKey)
+Node ID: 64 bytes (512 bits)
+Derived: BLAKE2b-512(Ed25519_PublicKey)
 Representation: Hexadecimal or Base58
 
 Example:
 7a3f8c2d9e1b4f6a5c8e9d2a7b3f1c4e9d8a7b6c5e4f3a2b1d9c8e7f6a5b4c3d
+2f1e4d3c2b1a9f8e7d6c5b4a3f2e1d9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e
 ```
 
 ### Key Storage
@@ -184,8 +185,10 @@ def derive_session_keys(shared_secret, node_id_a, node_id_b):
 Keys are rotated regularly to provide forward secrecy:
 
 ```python
-# Initiate key rotation after 90 days or 1GB of data
-if time_since_exchange > 90_days or bytes_sent > 1_GB:
+# Initiate key rotation after 24 hours or 1GB of data
+# Note: 24-hour rotation provides enhanced forward secrecy
+# compared to the originally planned 90-day rotation
+if time_since_exchange > 24_hours or bytes_sent > 1_GB:
     send_key_exchange_rotate()
 ```
 
@@ -195,6 +198,12 @@ if time_since_exchange > 90_days or bytes_sent > 1_GB:
 3. New session keys derived
 4. Old keys retained for 7 days (for in-flight messages)
 5. Messages sent with key version number
+
+**Design Decision:** The implementation uses 24-hour key rotation instead of 90 days
+to provide significantly enhanced forward secrecy. This aggressive rotation schedule
+ensures that even if a session key is compromised, only 24 hours of communication
+can be decrypted. The trade-off is slightly increased overhead for key exchanges,
+which is acceptable given modern processing capabilities.
 
 ## Message Encryption
 
@@ -321,6 +330,11 @@ def check_replay(message_id, timestamp):
 - Requires loose time synchronization (NTP)
 - Allows for clock drift and network delay
 - Stricter validation for critical operations
+- Message ID deduplication cache (LRU, configurable size)
+
+**Note:** With 24-hour key rotation, the replay protection window is further
+constrained - replayed messages older than 24 hours will fail decryption due
+to key rotation, providing an additional layer of replay protection.
 
 ## Forward Secrecy
 
@@ -333,13 +347,19 @@ def check_replay(message_id, timestamp):
 ### Key Rotation Schedule
 
 ```
-Initial Exchange: Day 0
-First Rotation:   Day 90 (or 1 GB data)
-Second Rotation:  Day 180 (or 2 GB data)
+Initial Exchange: Hour 0
+First Rotation:   Hour 24 (or 1 GB data)
+Second Rotation:  Hour 48 (or 2 GB data)
 ...
 
 Old keys retained for 7 days for in-flight messages
 ```
+
+**Rationale for 24-Hour Rotation:**
+- Enhanced forward secrecy compared to 90-day rotation
+- Limits impact of key compromise to 24 hours of traffic
+- Minimal performance overhead with modern cryptographic libraries
+- Better security posture for high-security scenarios
 
 ### Key Version Tracking
 

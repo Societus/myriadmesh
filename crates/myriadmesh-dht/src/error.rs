@@ -25,7 +25,7 @@ pub enum DhtError {
         "Node quota exceeded: {current_keys}/{max_keys} keys, {current_bytes}/{max_bytes} bytes"
     )]
     NodeQuotaExceeded {
-        publisher: [u8; 32],
+        publisher: [u8; 64],
         current_keys: usize,
         current_bytes: usize,
         max_keys: usize,

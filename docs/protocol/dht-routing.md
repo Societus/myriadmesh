@@ -14,11 +14,11 @@ MyriadMesh uses a Distributed Hash Table (DHT) based on Kademlia for:
 ### Node ID Space
 
 ```
-ID Space: 256-bit (32 bytes)
-Total nodes: 2^256 possible IDs
+ID Space: 512-bit (64 bytes)
+Total nodes: 2^512 possible IDs
 Distance metric: XOR (Exclusive OR)
 
-Node ID derived from: BLAKE2b-256(Ed25519_PublicKey)
+Node ID derived from: BLAKE2b-512(Ed25519_PublicKey)
 ```
 
 ### Distance Metric
@@ -41,13 +41,13 @@ def distance(node_id_a, node_id_b):
 
 ### K-Buckets
 
-Each node maintains a routing table with 256 k-buckets (one per bit):
+Each node maintains a routing table with 512 k-buckets (one per bit):
 
 ```
-Bucket 0: Nodes with 255 common prefix bits (distance 2^0 to 2^1 - 1)
-Bucket 1: Nodes with 254 common prefix bits (distance 2^1 to 2^2 - 1)
+Bucket 0: Nodes with 511 common prefix bits (distance 2^0 to 2^1 - 1)
+Bucket 1: Nodes with 510 common prefix bits (distance 2^1 to 2^2 - 1)
 ...
-Bucket 255: Nodes with 0 common prefix bits (distance 2^255 to 2^256 - 1)
+Bucket 511: Nodes with 0 common prefix bits (distance 2^511 to 2^512 - 1)
 
 Each bucket stores up to k nodes (k=20 recommended)
 ```
@@ -61,7 +61,7 @@ class KBucket:
         self.replacement_cache = []  # Cache for potential replacements
 
 class NodeInfo:
-    node_id: bytes32             # Node identifier
+    node_id: bytes64             # Node identifier (64 bytes, BLAKE2b-512)
     public_key: bytes32          # Ed25519 public key
     adapters: List[AdapterInfo]  # Available network adapters
     last_seen: timestamp         # Last communication
@@ -332,7 +332,7 @@ Stored in DHT for node discovery:
 
 ```python
 NodeRecord = {
-    "node_id": bytes32,
+    "node_id": bytes64,  # 64-byte Node ID (BLAKE2b-512)
     "public_key": bytes32,
     "adapters": [
         {
@@ -358,7 +358,7 @@ NodeRecord = {
     "signature": bytes64  # Signed by node's private key
 }
 
-Key: BLAKE2b-256("node:" + node_id)
+Key: BLAKE2b-512("node:" + node_id)
 ```
 
 ### Route Records
@@ -367,8 +367,8 @@ Performance metrics for routes between node pairs:
 
 ```python
 RouteRecord = {
-    "source_node": bytes32,
-    "dest_node": bytes32,
+    "source_node": bytes64,  # 64-byte Node ID
+    "dest_node": bytes64,    # 64-byte Node ID
     "adapter": "lora",
     "metrics": {
         "latency_ms": 245.5,
@@ -381,7 +381,7 @@ RouteRecord = {
     "signature": bytes64  # Signed by source node
 }
 
-Key: BLAKE2b-256("route:" + source_node + dest_node + adapter)
+Key: BLAKE2b-512("route:" + source_node + dest_node + adapter)
 ```
 
 ### Cached Messages
@@ -391,15 +391,15 @@ Messages for offline nodes:
 ```python
 CachedMessage = {
     "message_id": bytes16,
-    "dest_node": bytes32,
+    "dest_node": bytes64,  # 64-byte Node ID
     "encrypted_payload": bytes,
     "priority": 128,
     "expires_at": 1636807634567,
-    "cache_node": bytes32,  # Node storing this cache
+    "cache_node": bytes64,  # Node storing this cache (64 bytes)
     "timestamp": 1636721234567
 }
 
-Key: BLAKE2b-256("cache:" + dest_node + message_id)
+Key: BLAKE2b-512("cache:" + dest_node + message_id)
 ```
 
 ## Routing Algorithms
