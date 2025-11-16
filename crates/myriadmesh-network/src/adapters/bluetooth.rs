@@ -23,8 +23,8 @@ use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
 
-/// Type alias for incoming frame receiver
-type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+/// Type alias for incoming frame receiver (bounded)
+type FrameReceiver = Arc<RwLock<Option<mpsc::Receiver<(Address, Frame)>>>>;
 
 /// Bluetooth Classic adapter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,7 +71,7 @@ struct BluetoothPeer {
 struct RfcommConnection {
     #[allow(dead_code)]
     remote_address: String,
-    tx: mpsc::UnboundedSender<Vec<u8>>,
+    tx: mpsc::Sender<Vec<u8>>,
     #[allow(dead_code)]
     connected_at: u64,
 }
@@ -87,7 +87,7 @@ pub struct BluetoothAdapter {
     /// Receive channel for incoming frames
     rx: FrameReceiver,
     /// Send channel for incoming frames (cloned for connection handlers)
-    incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
+    incoming_tx: mpsc::Sender<(Address, Frame)>,
 }
 
 impl BluetoothAdapter {
@@ -106,8 +106,9 @@ impl BluetoothAdapter {
             supports_multicast: false,
         };
 
-        // Create channel for receiving frames
-        let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
+        // RESOURCE M3: Bounded channel to prevent memory exhaustion
+        // Bluetooth: 500 capacity (very low throughput)
+        let (incoming_tx, incoming_rx) = mpsc::channel(500);
 
         Self {
             config,
@@ -180,8 +181,8 @@ impl BluetoothAdapter {
         // On macOS: Use IOBluetooth framework
         // On Windows: Use Windows Bluetooth RFCOMM API
 
-        // Create channel for this connection
-        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        // RESOURCE M3: Bounded channel per connection
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(100);
 
         let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
             Ok(duration) => duration.as_secs(),
@@ -214,7 +215,16 @@ impl BluetoothAdapter {
                 match bincode::deserialize::<Frame>(&data) {
                     Ok(frame) => {
                         let source_addr = Address::Bluetooth(addr.clone());
-                        let _ = incoming_tx.send((source_addr, frame));
+                        // RESOURCE M3: Handle backpressure with try_send
+                        match incoming_tx.try_send((source_addr, frame)) {
+                            Ok(_) => {}
+                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                log::warn!("Bluetooth incoming channel full, dropping frame");
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                break; // Channel closed, exit loop
+                            }
+                        }
                     }
                     Err(_) => {
                         // Invalid frame, ignore
@@ -368,7 +378,8 @@ impl NetworkAdapter for BluetoothAdapter {
             NetworkError::SendFailed("Connection lost after establishment".to_string())
         })?;
 
-        connection.tx.send(frame_data).map_err(|_| {
+        // Async send for bounded channels
+        connection.tx.send(frame_data).await.map_err(|_| {
             NetworkError::SendFailed("Failed to send to connection channel".to_string())
         })?;
 

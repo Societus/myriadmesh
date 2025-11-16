@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock};
 
-type FrameReceiver = Arc<RwLock<Option<mpsc::UnboundedReceiver<(Address, Frame)>>>>;
+type FrameReceiver = Arc<RwLock<Option<mpsc::Receiver<(Address, Frame)>>>>;
 
 /// Dial-up adapter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -357,7 +357,7 @@ pub struct DialupAdapter {
     modem: Arc<RwLock<Box<dyn ModemController>>>,
     ppp_session: Arc<RwLock<Option<PppSession>>>,
     rx: FrameReceiver,
-    incoming_tx: mpsc::UnboundedSender<(Address, Frame)>,
+    incoming_tx: mpsc::Sender<(Address, Frame)>,
     call_start_time: Arc<RwLock<Option<Instant>>>,
 }
 
@@ -383,7 +383,9 @@ impl DialupAdapter {
             supports_multicast: false,
         };
 
-        let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
+        // RESOURCE M3: Bounded channel to prevent memory exhaustion
+        // LoRa/Radio: 1,000 capacity (low throughput)
+        let (incoming_tx, incoming_rx) = mpsc::channel(1000);
 
         // Create mock modem controller
         let modem: Box<dyn ModemController> = Box::new(MockModemController::new());
