@@ -9,12 +9,15 @@ use serde::{Deserialize, Serialize};
 use sodiumoxide::crypto::sign::ed25519;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Get current Unix timestamp
+/// Get current Unix timestamp with graceful fallback on system time errors
 fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs(),
+        Err(e) => {
+            eprintln!("WARNING: System time error in I2P capability token: {}. Using fallback timestamp.", e);
+            1500000000
+        }
+    }
 }
 
 /// i2p destination address (base32 format)

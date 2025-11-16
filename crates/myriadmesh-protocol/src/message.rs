@@ -237,10 +237,14 @@ impl Message {
         }
 
         // Timestamp in milliseconds (per specification.md:143-146)
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let timestamp = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_millis() as u64,
+            Err(e) => {
+                eprintln!("WARNING: System time error in message creation: {}. Using fallback timestamp.", e);
+                // Use fallback timestamp in milliseconds (1500000000 seconds = 1500000000000 ms)
+                1500000000000
+            }
+        };
 
         let sequence = 0; // Should be managed by higher layers
         let id = MessageId::generate(&source, &destination, &payload, timestamp, sequence);
@@ -318,10 +322,14 @@ impl Message {
     /// Check if timestamp is fresh (within acceptable time window)
     /// Per specification.md:486-488: timestamp must be within ±5 minutes
     pub fn is_timestamp_fresh(&self) -> bool {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_millis() as u64,
+            Err(e) => {
+                eprintln!("WARNING: System time error in timestamp freshness check: {}. Using fallback timestamp.", e);
+                // Use fallback timestamp in milliseconds (1500000000 seconds = 1500000000000 ms)
+                1500000000000
+            }
+        };
 
         let age_ms = (now as i64 - self.timestamp as i64).abs();
         age_ms <= 300_000 // 5 minutes in milliseconds

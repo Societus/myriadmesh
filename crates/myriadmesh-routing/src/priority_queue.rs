@@ -64,10 +64,13 @@ impl QueuedMessage {
     /// Create a new queued message
     pub fn new(message: Message) -> Self {
         use std::time::{SystemTime, UNIX_EPOCH};
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs(),
+            Err(e) => {
+                eprintln!("WARNING: System time error in priority queue message: {}. Using fallback timestamp.", e);
+                1500000000
+            }
+        };
 
         QueuedMessage {
             message,
