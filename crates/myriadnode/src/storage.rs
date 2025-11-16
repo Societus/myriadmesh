@@ -19,7 +19,10 @@ impl Storage {
         match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(duration) => Ok(duration.as_secs() as i64),
             Err(e) => {
-                eprintln!("WARNING: System time error in metrics storage: {}. Using fallback timestamp.", e);
+                eprintln!(
+                    "WARNING: System time error in metrics storage: {}. Using fallback timestamp.",
+                    e
+                );
                 // Return a reasonable fallback (1.5 billion seconds since epoch, ~2017)
                 Ok(1500000000)
             }

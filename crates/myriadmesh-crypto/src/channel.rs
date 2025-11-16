@@ -1250,7 +1250,9 @@ fn test_key_exchange_with_system_time_available() {
     let mut bob_channel = EncryptedChannel::new(bob_node_id, bob_kp);
 
     // Alice creates request (uses get_current_timestamp internally)
-    let request = alice_channel.create_key_exchange_request(bob_node_id).unwrap();
+    let request = alice_channel
+        .create_key_exchange_request(bob_node_id)
+        .unwrap();
     assert!(request.timestamp > 0);
     assert!(request.timestamp < u64::MAX / 2); // Reasonable time range
 
@@ -1260,7 +1262,9 @@ fn test_key_exchange_with_system_time_available() {
     assert!(response.timestamp < u64::MAX / 2);
 
     // Alice completes exchange
-    alice_channel.process_key_exchange_response(&response).unwrap();
+    alice_channel
+        .process_key_exchange_response(&response)
+        .unwrap();
 
     // Both should be established
     assert_eq!(alice_channel.state(), ChannelState::Established);
@@ -1287,5 +1291,8 @@ fn test_system_time_fallback_graceful() {
     let timestamp = timestamp_result.unwrap();
     // Fallback would be 1500000000 (~2017), real timestamps should be larger
     // But we accept both to be resilient
-    assert!(timestamp > 1000000000, "Timestamp should be in reasonable range");
+    assert!(
+        timestamp > 1000000000,
+        "Timestamp should be in reasonable range"
+    );
 }

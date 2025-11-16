@@ -16,7 +16,10 @@ fn now() -> u64 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs(),
         Err(e) => {
-            eprintln!("WARNING: System time error in DHT storage: {}. Using fallback timestamp.", e);
+            eprintln!(
+                "WARNING: System time error in DHT storage: {}. Using fallback timestamp.",
+                e
+            );
             // Return a reasonable fallback (1.5 billion seconds since epoch, ~2017)
             1500000000
         }
@@ -89,10 +92,10 @@ impl StorageEntry {
         // SECURITY H7: Verify that the NodeID matches the public key
         // NodeID = BLAKE2b-512(Ed25519_PublicKey)
         let mut hasher = Blake2b512::new();
-        hasher.update(&self.publisher_public_key);
+        hasher.update(self.publisher_public_key);
         let computed_node_id = hasher.finalize();
 
-        if &self.publisher_node_id[..] != &computed_node_id[..] {
+        if self.publisher_node_id[..] != computed_node_id[..] {
             return Err(DhtError::InvalidPublicKey);
         }
 
@@ -211,7 +214,12 @@ impl DhtStorage {
     }
 
     /// SECURITY M2: Check if node has quota available
-    fn node_has_quota(&self, publisher_node_id: &[u8; 64], value_size: usize, is_update: bool) -> bool {
+    fn node_has_quota(
+        &self,
+        publisher_node_id: &[u8; 64],
+        value_size: usize,
+        is_update: bool,
+    ) -> bool {
         let quota = self.node_quotas.get(publisher_node_id);
 
         match quota {
@@ -236,10 +244,13 @@ impl DhtStorage {
 
     /// SECURITY M2: Update node quota
     fn update_node_quota(&mut self, publisher_node_id: [u8; 64], key_delta: i32, bytes_delta: i64) {
-        let quota = self.node_quotas.entry(publisher_node_id).or_insert(NodeQuota {
-            key_count: 0,
-            bytes_used: 0,
-        });
+        let quota = self
+            .node_quotas
+            .entry(publisher_node_id)
+            .or_insert(NodeQuota {
+                key_count: 0,
+                bytes_used: 0,
+            });
 
         // Update key count
         if key_delta > 0 {
@@ -478,7 +489,11 @@ mod tests {
 
     /// Helper to create a keypair and sign a value
     /// Returns (publisher_public_key, publisher_node_id, signature)
-    fn create_signed_value(key: [u8; 32], value: Vec<u8>, ttl_secs: u64) -> ([u8; 32], [u8; 64], [u8; 64]) {
+    fn create_signed_value(
+        key: [u8; 32],
+        value: Vec<u8>,
+        ttl_secs: u64,
+    ) -> ([u8; 32], [u8; 64], [u8; 64]) {
         use blake2::{Blake2b512, Digest};
 
         init_sodiumoxide();
@@ -492,7 +507,7 @@ mod tests {
 
         // Derive NodeID from public key using BLAKE2b-512
         let mut hasher = Blake2b512::new();
-        hasher.update(&pk_bytes);
+        hasher.update(pk_bytes);
         let hash = hasher.finalize();
         let mut node_id = [0u8; 64];
         node_id.copy_from_slice(&hash);
@@ -512,10 +527,18 @@ mod tests {
         let mut storage = DhtStorage::new();
         let key = [1u8; 32];
         let value = b"test value".to_vec();
-        let (publisher_public_key, publisher_node_id, signature) = create_signed_value(key, value.clone(), 3600);
+        let (publisher_public_key, publisher_node_id, signature) =
+            create_signed_value(key, value.clone(), 3600);
 
         storage
-            .store(key, value.clone(), 3600, publisher_public_key, publisher_node_id, signature)
+            .store(
+                key,
+                value.clone(),
+                3600,
+                publisher_public_key,
+                publisher_node_id,
+                signature,
+            )
             .unwrap();
 
         assert_eq!(storage.key_count(), 1);
@@ -530,9 +553,17 @@ mod tests {
         let mut storage = DhtStorage::new();
         let key = [1u8; 32];
         let value = vec![0u8; MAX_VALUE_SIZE + 1];
-        let (publisher_public_key, publisher_node_id, signature) = create_signed_value(key, value.clone(), 3600);
+        let (publisher_public_key, publisher_node_id, signature) =
+            create_signed_value(key, value.clone(), 3600);
 
-        let result = storage.store(key, value, 3600, publisher_public_key, publisher_node_id, signature);
+        let result = storage.store(
+            key,
+            value,
+            3600,
+            publisher_public_key,
+            publisher_node_id,
+            signature,
+        );
         assert!(result.is_err());
     }
 
@@ -541,9 +572,17 @@ mod tests {
         let mut storage = DhtStorage::with_limits(100, 5);
         let key = [1u8; 32];
         let value = vec![0u8; 101]; // Too large for capacity
-        let (publisher_public_key, publisher_node_id, signature) = create_signed_value(key, value.clone(), 3600);
+        let (publisher_public_key, publisher_node_id, signature) =
+            create_signed_value(key, value.clone(), 3600);
 
-        let result = storage.store(key, value, 3600, publisher_public_key, publisher_node_id, signature);
+        let result = storage.store(
+            key,
+            value,
+            3600,
+            publisher_public_key,
+            publisher_node_id,
+            signature,
+        );
         assert!(result.is_err());
     }
 
@@ -575,10 +614,18 @@ mod tests {
         let mut storage = DhtStorage::new();
         let key = [1u8; 32];
         let value = b"test".to_vec();
-        let (publisher_public_key, publisher_node_id, signature) = create_signed_value(key, value.clone(), 3600);
+        let (publisher_public_key, publisher_node_id, signature) =
+            create_signed_value(key, value.clone(), 3600);
 
         storage
-            .store(key, value, 3600, publisher_public_key, publisher_node_id, signature)
+            .store(
+                key,
+                value,
+                3600,
+                publisher_public_key,
+                publisher_node_id,
+                signature,
+            )
             .unwrap();
         assert_eq!(storage.key_count(), 1);
 
@@ -593,10 +640,20 @@ mod tests {
         let mut storage = DhtStorage::new();
         let key = [1u8; 32];
         let value = b"test".to_vec();
-        let (publisher_public_key, publisher_node_id, signature) = create_signed_value(key, value.clone(), 0);
+        let (publisher_public_key, publisher_node_id, signature) =
+            create_signed_value(key, value.clone(), 0);
 
         // Store with 0 TTL (immediately expired)
-        storage.store(key, value, 0, publisher_public_key, publisher_node_id, signature).unwrap();
+        storage
+            .store(
+                key,
+                value,
+                0,
+                publisher_public_key,
+                publisher_node_id,
+                signature,
+            )
+            .unwrap();
 
         // Should not be retrievable
         assert!(storage.get(&key).is_none());
@@ -634,10 +691,18 @@ mod tests {
         let mut storage = DhtStorage::new();
         let key = [1u8; 32];
         let value = b"test".to_vec();
-        let (publisher_public_key, publisher_node_id, signature) = create_signed_value(key, value.clone(), 3600);
+        let (publisher_public_key, publisher_node_id, signature) =
+            create_signed_value(key, value.clone(), 3600);
 
         storage
-            .store(key, value, 3600, publisher_public_key, publisher_node_id, signature)
+            .store(
+                key,
+                value,
+                3600,
+                publisher_public_key,
+                publisher_node_id,
+                signature,
+            )
             .unwrap();
         assert_eq!(storage.key_count(), 1);
 
@@ -657,7 +722,7 @@ mod tests {
 
         // Derive NodeID from public key
         let mut hasher = Blake2b512::new();
-        hasher.update(&pk_bytes);
+        hasher.update(pk_bytes);
         let hash = hasher.finalize();
         let mut node_id = [0u8; 64];
         node_id.copy_from_slice(&hash);
@@ -692,7 +757,7 @@ mod tests {
 
         // Derive NodeID
         let mut hasher = Blake2b512::new();
-        hasher.update(&pk_bytes);
+        hasher.update(pk_bytes);
         let hash = hasher.finalize();
         let mut node_id = [0u8; 64];
         node_id.copy_from_slice(&hash);
@@ -713,10 +778,18 @@ mod tests {
         let tampered_value = b"tampered value".to_vec();
 
         // Sign the original value
-        let (publisher_public_key, publisher_node_id, signature) = create_signed_value(key, original_value.clone(), 3600);
+        let (publisher_public_key, publisher_node_id, signature) =
+            create_signed_value(key, original_value.clone(), 3600);
 
         // Try to store tampered value with original signature
-        let result = storage.store(key, tampered_value, 3600, publisher_public_key, publisher_node_id, signature);
+        let result = storage.store(
+            key,
+            tampered_value,
+            3600,
+            publisher_public_key,
+            publisher_node_id,
+            signature,
+        );
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), DhtError::InvalidSignature));
     }
@@ -727,9 +800,17 @@ mod tests {
         let mut storage = DhtStorage::new();
         let key = [1u8; 32];
         let value = b"test value".to_vec();
-        let (publisher_public_key, publisher_node_id, signature) = create_signed_value(key, value.clone(), 3600);
+        let (publisher_public_key, publisher_node_id, signature) =
+            create_signed_value(key, value.clone(), 3600);
 
-        let result = storage.store(key, value, 3600, publisher_public_key, publisher_node_id, signature);
+        let result = storage.store(
+            key,
+            value,
+            3600,
+            publisher_public_key,
+            publisher_node_id,
+            signature,
+        );
         assert!(result.is_ok());
         assert_eq!(storage.key_count(), 1);
     }
@@ -743,10 +824,18 @@ mod tests {
         let value = b"test value".to_vec();
 
         // Sign with key1
-        let (publisher_public_key, publisher_node_id, signature) = create_signed_value(key1, value.clone(), 3600);
+        let (publisher_public_key, publisher_node_id, signature) =
+            create_signed_value(key1, value.clone(), 3600);
 
         // Try to store with key2 but signature for key1
-        let result = storage.store(key2, value, 3600, publisher_public_key, publisher_node_id, signature);
+        let result = storage.store(
+            key2,
+            value,
+            3600,
+            publisher_public_key,
+            publisher_node_id,
+            signature,
+        );
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), DhtError::InvalidSignature));
     }
@@ -767,7 +856,7 @@ mod tests {
 
         // Derive NodeID
         let mut hasher = Blake2b512::new();
-        hasher.update(&pk_bytes);
+        hasher.update(pk_bytes);
         let hash = hasher.finalize();
         let mut node_id = [0u8; 64];
         node_id.copy_from_slice(&hash);
@@ -813,7 +902,7 @@ mod tests {
 
         // Derive NodeID
         let mut hasher = Blake2b512::new();
-        hasher.update(&pk_bytes);
+        hasher.update(pk_bytes);
         let hash = hasher.finalize();
         let mut node_id = [0u8; 64];
         node_id.copy_from_slice(&hash);
@@ -822,12 +911,16 @@ mod tests {
         let value1 = vec![0u8; 500];
         let key1 = [1u8; 32];
         let sig1 = sign_value(&key1, &value1, now() + 3600, &sk);
-        assert!(storage.store(key1, value1, 3600, pk_bytes, node_id, sig1).is_ok());
+        assert!(storage
+            .store(key1, value1, 3600, pk_bytes, node_id, sig1)
+            .is_ok());
 
         let value2 = vec![0u8; 500];
         let key2 = [2u8; 32];
         let sig2 = sign_value(&key2, &value2, now() + 3600, &sk);
-        assert!(storage.store(key2, value2, 3600, pk_bytes, node_id, sig2).is_ok());
+        assert!(storage
+            .store(key2, value2, 3600, pk_bytes, node_id, sig2)
+            .is_ok());
 
         // Verify quota tracking
         let (keys, bytes) = storage.get_node_usage(&node_id);
@@ -853,11 +946,19 @@ mod tests {
 
         let value = b"test value".to_vec();
         let key = [1u8; 32];
-        let (publisher_public_key, publisher_node_id, signature) = create_signed_value(key, value.clone(), 3600);
+        let (publisher_public_key, publisher_node_id, signature) =
+            create_signed_value(key, value.clone(), 3600);
 
         // Store a value
         storage
-            .store(key, value.clone(), 3600, publisher_public_key, publisher_node_id, signature)
+            .store(
+                key,
+                value.clone(),
+                3600,
+                publisher_public_key,
+                publisher_node_id,
+                signature,
+            )
             .unwrap();
 
         // Check quota
@@ -881,11 +982,19 @@ mod tests {
 
         let value = b"test value".to_vec();
         let key = [1u8; 32];
-        let (publisher_public_key, publisher_node_id, signature) = create_signed_value(key, value.clone(), 0); // Immediate expiration
+        let (publisher_public_key, publisher_node_id, signature) =
+            create_signed_value(key, value.clone(), 0); // Immediate expiration
 
         // Store with 0 TTL
         storage
-            .store(key, value.clone(), 0, publisher_public_key, publisher_node_id, signature)
+            .store(
+                key,
+                value.clone(),
+                0,
+                publisher_public_key,
+                publisher_node_id,
+                signature,
+            )
             .unwrap();
 
         // Check quota before cleanup
@@ -915,7 +1024,7 @@ mod tests {
         let mut publisher1 = [0u8; 32];
         publisher1.copy_from_slice(&pk1[..]);
         let mut hasher1 = Blake2b512::new();
-        hasher1.update(&publisher1);
+        hasher1.update(publisher1);
         let hash1 = hasher1.finalize();
         let mut node_id1 = [0u8; 64];
         node_id1.copy_from_slice(&hash1);
@@ -925,7 +1034,7 @@ mod tests {
         let mut publisher2 = [0u8; 32];
         publisher2.copy_from_slice(&pk2[..]);
         let mut hasher2 = Blake2b512::new();
-        hasher2.update(&publisher2);
+        hasher2.update(publisher2);
         let hash2 = hasher2.finalize();
         let mut node_id2 = [0u8; 64];
         node_id2.copy_from_slice(&hash2);
@@ -981,7 +1090,7 @@ mod tests {
 
         // Derive NodeID
         let mut hasher = Blake2b512::new();
-        hasher.update(&publisher);
+        hasher.update(publisher);
         let hash = hasher.finalize();
         let mut publisher_node_id = [0u8; 64];
         publisher_node_id.copy_from_slice(&hash);
@@ -991,13 +1100,22 @@ mod tests {
         // Store initial value
         let value1 = b"first value".to_vec();
         let sig1 = sign_value(&key, &value1, now() + 3600, &sk);
-        assert!(storage.store(key, value1, 3600, publisher, publisher_node_id, sig1).is_ok());
+        assert!(storage
+            .store(key, value1, 3600, publisher, publisher_node_id, sig1)
+            .is_ok());
 
         // Update with different value (should succeed even though quota is 1 key)
         let value2 = b"second value".to_vec();
         let sig2 = sign_value(&key, &value2, now() + 3600, &sk);
         assert!(storage
-            .store(key, value2.clone(), 3600, publisher, publisher_node_id, sig2)
+            .store(
+                key,
+                value2.clone(),
+                3600,
+                publisher,
+                publisher_node_id,
+                sig2
+            )
             .is_ok());
 
         // Verify still only 1 key in quota

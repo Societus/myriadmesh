@@ -411,14 +411,13 @@ impl NetworkAdapter for EthernetAdapter {
                     NetworkError::InvalidAddress(format!("Invalid multicast address: {}", e))
                 })?;
 
-                let socket = UdpSocket::bind(format!("0.0.0.0:{}", multicast_port)).map_err(
-                    |e| {
+                let socket =
+                    UdpSocket::bind(format!("0.0.0.0:{}", multicast_port)).map_err(|e| {
                         NetworkError::InitializationFailed(format!(
                             "Failed to bind multicast socket: {}",
                             e
                         ))
-                    },
-                )?;
+                    })?;
 
                 socket
                     .join_multicast_v4(&addr, &Ipv4Addr::UNSPECIFIED)

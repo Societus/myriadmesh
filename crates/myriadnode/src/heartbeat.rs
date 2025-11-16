@@ -776,7 +776,10 @@ fn current_timestamp() -> u64 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs(),
         Err(e) => {
-            eprintln!("WARNING: System time error in heartbeat processing: {}. Using fallback timestamp.", e);
+            eprintln!(
+                "WARNING: System time error in heartbeat processing: {}. Using fallback timestamp.",
+                e
+            );
             // Return a reasonable fallback (1.5 billion seconds since epoch, ~2017)
             1500000000
         }

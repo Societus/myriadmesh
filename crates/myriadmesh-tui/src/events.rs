@@ -25,8 +25,11 @@ pub struct EventHandler {
     tx: mpsc::UnboundedSender<Event>,
     rx: mpsc::UnboundedReceiver<Event>,
     // RESOURCE M4: Task handle management for graceful shutdown
+    #[allow(dead_code)]
     shutdown_tx: broadcast::Sender<()>,
+    #[allow(dead_code)]
     keyboard_task: JoinHandle<()>,
+    #[allow(dead_code)]
     tick_task: JoinHandle<()>,
 }
 
@@ -94,6 +97,7 @@ impl EventHandler {
 
     /// Gracefully shutdown event handler and wait for tasks to complete
     /// RESOURCE M4: Prevents task handle leaks and ensures cleanup
+    #[allow(dead_code)]
     pub async fn shutdown(self) {
         // Send shutdown signal
         let _ = self.shutdown_tx.send(());

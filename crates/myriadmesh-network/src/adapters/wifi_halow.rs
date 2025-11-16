@@ -379,7 +379,16 @@ impl NetworkAdapter for WifiHalowAdapter {
                 if let Ok(Some(data)) = network_stack.write().await.receive_frame() {
                     if let Ok(frame) = bincode::deserialize::<Frame>(&data) {
                         let addr = Address::WifiHaLow("00:00:00:00:00:00".to_string());
-                        let _ = incoming_tx.send((addr, frame));
+                        match incoming_tx.try_send((addr, frame)) {
+                            Ok(_) => {}
+                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                log::warn!("WiFi HaLow incoming channel full, dropping frame");
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                log::warn!("WiFi HaLow incoming channel closed, stopping RX task");
+                                break;
+                            }
+                        }
                     }
                 }
             }

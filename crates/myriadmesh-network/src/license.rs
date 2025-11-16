@@ -4,8 +4,8 @@
 //! (APRS, HF Radio, GMRS). Blocks transmission without valid license but allows
 //! receive operations.
 
-use serde::{Deserialize, Serialize};
 use lru::LruCache;
+use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -126,9 +126,7 @@ impl FccClient {
     /// entries are automatically evicted, preventing unbounded memory growth.
     pub fn new() -> Self {
         Self {
-            cache: Arc::new(RwLock::new(LruCache::new(
-                NonZeroUsize::new(1000).unwrap()
-            ))),
+            cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(1000).unwrap()))),
             cache_ttl: 86400, // 24 hours
         }
     }

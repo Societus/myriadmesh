@@ -369,8 +369,8 @@ impl FailoverManager {
         }
 
         // LOCK RELEASE: Drop locks in reverse order before acquiring new locks
-        drop(health_map);  // Release adapter_health (Lock 2)
-        drop(manager);     // Release adapter_manager (Lock 1)
+        drop(health_map); // Release adapter_health (Lock 2)
+        drop(manager); // Release adapter_manager (Lock 1)
 
         // Only failover if we have multiple adapters
         if all_metrics.len() < 2 {

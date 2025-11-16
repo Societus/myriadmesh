@@ -272,6 +272,7 @@ impl MessageCache {
     }
 
     /// Check if storage limits would be exceeded
+    #[allow(dead_code)]
     async fn check_limits(&self, device_id: &str) -> ApplianceResult<()> {
         let data = self.data.read().await;
 
@@ -317,6 +318,7 @@ impl MessageCache {
     }
 
     /// Evict messages for a specific device
+    #[allow(dead_code)]
     async fn evict_messages(&self, device_id: &str) -> ApplianceResult<()> {
         let mut data = self.data.write().await;
 
@@ -357,6 +359,7 @@ impl MessageCache {
     }
 
     /// Global eviction across all devices
+    #[allow(dead_code)]
     async fn evict_global(&self) -> ApplianceResult<()> {
         let mut data = self.data.write().await;
 

@@ -14,7 +14,10 @@ fn now() -> u64 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs(),
         Err(e) => {
-            eprintln!("WARNING: System time error in I2P capability token: {}. Using fallback timestamp.", e);
+            eprintln!(
+                "WARNING: System time error in I2P capability token: {}. Using fallback timestamp.",
+                e
+            );
             1500000000
         }
     }
