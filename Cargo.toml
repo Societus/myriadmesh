@@ -14,6 +14,10 @@ members = [
     "crates/myriadmesh-android",
     "crates/myriadmesh-updates",
 ]
+exclude = [
+    "crates/myriadmesh-protocol/fuzz",
+    "crates/myriadmesh-dht/fuzz",
+]
 resolver = "2"
 
 [workspace.package]
