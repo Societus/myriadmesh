@@ -1751,6 +1751,7 @@ dependencies = [
  "myriadmesh-protocol",
  "myriadmesh-routing",
  "myriadnode",
+ "once_cell",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
