@@ -157,10 +157,13 @@ impl BleAdapter {
 
         // Return cached peers for now
         let peers = self.peers.read().await;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs(),
+            Err(e) => {
+                eprintln!("WARNING: System time error in BLE peer scanning: {}. Using fallback timestamp.", e);
+                1500000000
+            }
+        };
 
         Ok(peers
             .values()
@@ -187,10 +190,13 @@ impl BleAdapter {
 
         let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs(),
+            Err(e) => {
+                eprintln!("WARNING: System time error in BLE GATT connection: {}. Using fallback timestamp.", e);
+                1500000000
+            }
+        };
 
         // Store connection
         {
@@ -371,10 +377,13 @@ impl NetworkAdapter for BleAdapter {
 
         // Update peer cache
         let mut peers = self.peers.write().await;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs(),
+            Err(e) => {
+                eprintln!("WARNING: System time error in BLE peer discovery: {}. Using fallback timestamp.", e);
+                1500000000
+            }
+        };
 
         for peer in discovered {
             peers.insert(peer.address.clone(), peer);

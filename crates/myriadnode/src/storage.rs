@@ -10,6 +10,22 @@ pub struct Storage {
 }
 
 impl Storage {
+    /// Get current Unix timestamp with graceful fallback on system time errors
+    ///
+    /// SECURITY: If system clock goes backwards or other time errors occur,
+    /// returns a fallback timestamp instead of panicking. This is better than
+    /// crashing the node during metrics recording.
+    fn get_current_timestamp() -> Result<i64> {
+        match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => Ok(duration.as_secs() as i64),
+            Err(e) => {
+                eprintln!("WARNING: System time error in metrics storage: {}. Using fallback timestamp.", e);
+                // Return a reasonable fallback (1.5 billion seconds since epoch, ~2017)
+                Ok(1500000000)
+            }
+        }
+    }
+
     pub async fn new(data_dir: &Path) -> Result<Self> {
         let db_path = data_dir.join("myriadnode.db");
         let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
@@ -100,10 +116,7 @@ impl Storage {
         bandwidth_bps: Option<f64>,
         reliability: Option<f64>,
     ) -> Result<()> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
+        let timestamp = Self::get_current_timestamp()?;
 
         sqlx::query(
             r#"
@@ -148,11 +161,8 @@ impl Storage {
 
     /// Clean up old metrics (older than specified days)
     pub async fn cleanup_old_metrics(&self, days: i64) -> Result<u64> {
-        let cutoff = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64
-            - (days * 86400);
+        let current_timestamp = Self::get_current_timestamp()?;
+        let cutoff = current_timestamp - (days * 86400);
 
         let result = sqlx::query(
             r#"

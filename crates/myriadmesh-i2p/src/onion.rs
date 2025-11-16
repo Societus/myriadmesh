@@ -139,12 +139,27 @@ pub struct OnionRoute {
 }
 
 impl OnionRoute {
+    /// Get current timestamp with graceful fallback on system time errors
+    ///
+    /// SECURITY: If system clock goes backwards or other time errors occur,
+    /// returns a fallback timestamp instead of panicking. This is better than
+    /// crashing the node during routing operations.
+    fn get_current_time() -> u64 {
+        match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs(),
+            Err(e) => {
+                eprintln!(
+                    "WARNING: System time error in onion routing: {}. Using fallback timestamp.",
+                    e
+                );
+                1500000000 // Fallback to ~2017
+            }
+        }
+    }
+
     /// Create new onion route
     pub fn new(source: NodeId, destination: NodeId, hops: Vec<NodeId>, lifetime_secs: u64) -> Self {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = Self::get_current_time();
 
         let mut rng = rand::thread_rng();
         let route_id = rng.gen();
@@ -168,11 +183,7 @@ impl OnionRoute {
 
     /// Check if route is expired
     pub fn is_expired(&self) -> bool {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
+        let now = Self::get_current_time();
         now >= self.expires_at
     }
 
@@ -309,7 +320,11 @@ impl OnionRouter {
             RouteSelectionStrategy::HighReliability => {
                 // Sort by reliability and pick top nodes with some randomness
                 let mut sorted = candidates.to_vec();
-                sorted.sort_by(|a, b| b.reliability.partial_cmp(&a.reliability).unwrap());
+                sorted.sort_by(|a, b| {
+                    b.reliability
+                        .partial_cmp(&a.reliability)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
 
                 // Pick from top 2*num_hops to add some randomness
                 let pool_size = (num_hops * 2).min(sorted.len());
@@ -324,7 +339,11 @@ impl OnionRouter {
             RouteSelectionStrategy::LowLatency => {
                 // Sort by latency and pick top nodes with some randomness
                 let mut sorted = candidates.to_vec();
-                sorted.sort_by(|a, b| a.latency_ms.partial_cmp(&b.latency_ms).unwrap());
+                sorted.sort_by(|a, b| {
+                    a.latency_ms
+                        .partial_cmp(&b.latency_ms)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
 
                 let pool_size = (num_hops * 2).min(sorted.len());
                 let selected: Vec<NodeId> = sorted[..pool_size]
@@ -346,7 +365,7 @@ impl OnionRouter {
                     })
                     .collect();
 
-                scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
                 let pool_size = (num_hops * 2).min(scored.len());
                 let selected: Vec<NodeId> = scored[..pool_size]
@@ -387,15 +406,16 @@ impl OnionRouter {
 
     /// Build onion layers with timing protection (async)
     ///
-    /// SECURITY C5: Normalizes processing time regardless of hop count to prevent
-    /// hop count leakage through timing analysis. This is the RECOMMENDED method
-    /// for production use.
+    /// SECURITY C5: Normalizes processing time regardless of hop count to
+    /// prevent hop count leakage through timing analysis. This is the
+    /// RECOMMENDED method for production use.
     ///
-    /// SECURITY H10: Enforces route expiration - will fail if route is expired or
-    /// has exceeded maximum use count.
+    /// SECURITY H10: Enforces route expiration - will fail if route is expired
+    /// or has exceeded maximum use count.
     ///
     /// Creates encrypted layers for each hop in the route.
-    /// Each layer is encrypted with the hop's public key using X25519 key exchange.
+    /// Each layer is encrypted with the hop's public key using X25519 key
+    /// exchange.
     pub async fn build_onion_layers_with_timing_protection(
         &self,
         route: &OnionRoute,
@@ -440,12 +460,14 @@ impl OnionRouter {
 
     /// Build onion layers (synchronous, no timing protection)
     ///
-    /// WARNING: This method does NOT include timing protection and processing time
-    /// is proportional to hop count, potentially leaking route information.
-    /// For production use, prefer `build_onion_layers_with_timing_protection()`.
+    /// WARNING: This method does NOT include timing protection and processing
+    /// time is proportional to hop count, potentially leaking route
+    /// information. For production use, prefer
+    /// `build_onion_layers_with_timing_protection()`.
     ///
     /// Creates encrypted layers for each hop in the route.
-    /// Each layer is encrypted with the hop's public key using X25519 key exchange.
+    /// Each layer is encrypted with the hop's public key using X25519 key
+    /// exchange.
     pub fn build_onion_layers_sync(
         &self,
         route: &OnionRoute,
@@ -529,11 +551,13 @@ impl OnionRouter {
 
     /// Peel one layer from onion with timing protection (async)
     ///
-    /// SECURITY C5: Adds random delay before forwarding to prevent timing correlation.
-    /// This is the RECOMMENDED method for production use to prevent de-anonymization.
+    /// SECURITY C5: Adds random delay before forwarding to prevent timing
+    /// correlation. This is the RECOMMENDED method for production use to
+    /// prevent de-anonymization.
     ///
-    /// Decrypts outer layer and returns next hop info and remaining onion payload.
-    /// Returns (next_hop, decrypted_payload) where decrypted_payload is the inner layers.
+    /// Decrypts outer layer and returns next hop info and remaining onion
+    /// payload. Returns (next_hop, decrypted_payload) where
+    /// decrypted_payload is the inner layers.
     pub async fn peel_layer_with_timing_protection(
         &self,
         layer: &OnionLayer,
@@ -551,12 +575,13 @@ impl OnionRouter {
 
     /// Peel one layer from onion (synchronous, no timing protection)
     ///
-    /// WARNING: This method does NOT include timing protection and should only be
-    /// used for testing or non-privacy-critical operations. For production use,
-    /// prefer `peel_layer_with_timing_protection()`.
+    /// WARNING: This method does NOT include timing protection and should only
+    /// be used for testing or non-privacy-critical operations. For
+    /// production use, prefer `peel_layer_with_timing_protection()`.
     ///
-    /// Decrypts outer layer and returns next hop info and remaining onion payload.
-    /// Returns (next_hop, decrypted_payload) where decrypted_payload is the inner layers.
+    /// Decrypts outer layer and returns next hop info and remaining onion
+    /// payload. Returns (next_hop, decrypted_payload) where
+    /// decrypted_payload is the inner layers.
     pub fn peel_layer_sync(&self, layer: &OnionLayer) -> Result<(Option<NodeId>, Vec<u8>), String> {
         use myriadmesh_crypto::encryption::Nonce;
         use myriadmesh_crypto::keyexchange::server_session_keys;
@@ -910,8 +935,8 @@ mod tests {
             elapsed
         );
 
-        // Should not exceed MAX_FORWARD_JITTER_MS + processing time (generous allowance for CI)
-        // We allow 500ms headroom for CI environments under heavy load
+        // Should not exceed MAX_FORWARD_JITTER_MS + processing time (generous allowance
+        // for CI) We allow 500ms headroom for CI environments under heavy load
         assert!(
             elapsed <= Duration::from_millis(MAX_FORWARD_JITTER_MS + 500),
             "Expected delay <= {}ms, got {:?}",

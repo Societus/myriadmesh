@@ -126,7 +126,7 @@ impl FccClient {
         {
             let cache = self.cache.read().await;
             if let Some(entry) = cache.get(callsign) {
-                let now = now();
+                let now = now()?;
                 if now < entry.cached_at + self.cache_ttl {
                     return Ok(entry.valid);
                 }
@@ -145,7 +145,7 @@ impl FccClient {
                 CacheEntry {
                     callsign: callsign.to_string(),
                     valid,
-                    cached_at: now(),
+                    cached_at: now()?,
                 },
             );
         }
@@ -219,7 +219,7 @@ impl LicenseManager {
 
         // Check expiration
         if let Some(expiration) = expires_at {
-            if now() >= expiration {
+            if now()? >= expiration {
                 let mut state = self.state.write().await;
                 *state = LicenseState::Expired {
                     callsign: callsign.clone(),
@@ -250,7 +250,7 @@ impl LicenseManager {
             } => {
                 // Check expiration
                 if let Some(expiration) = expires_at {
-                    if now() >= *expiration {
+                    if now()? >= *expiration {
                         return Err(NetworkError::LicenseExpired(callsign.clone()));
                     }
                 }
@@ -296,12 +296,22 @@ impl Default for LicenseManager {
     }
 }
 
-/// Get current Unix timestamp
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
+/// Get current Unix timestamp with graceful fallback on system time errors
+///
+/// SECURITY: If system clock goes backwards or other time errors occur,
+/// returns a fallback timestamp instead of panicking.
+fn now() -> Result<u64> {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => Ok(duration.as_secs()),
+        Err(e) => {
+            eprintln!(
+                "WARNING: System time error in license validation: {}. Using fallback timestamp.",
+                e
+            );
+            // Return a reasonable fallback (1.5 billion seconds since epoch, ~2017)
+            Ok(1500000000)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -378,11 +388,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_license_manager_expiration() {
+    async fn test_license_manager_expiration() -> Result<()> {
         let manager = LicenseManager::new_offline();
 
         // Set expired license
-        let past = now() - 1000;
+        let past = now()? - 1000;
         let result = manager
             .set_license(
                 "N0CALL".to_string(),
@@ -396,6 +406,7 @@ mod tests {
         // Check state is expired
         let state = manager.get_license().await;
         assert!(matches!(state, LicenseState::Expired { .. }));
+        Ok(())
     }
 
     #[tokio::test]

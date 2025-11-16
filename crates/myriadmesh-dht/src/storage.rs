@@ -7,12 +7,20 @@ use serde_big_array::BigArray;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Get current timestamp
+/// Get current timestamp with graceful fallback on system time errors
+///
+/// SECURITY: If system clock goes backwards or other time errors occur,
+/// returns a fallback timestamp instead of panicking. This is better than
+/// crashing the DHT during storage operations.
 fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs(),
+        Err(e) => {
+            eprintln!("WARNING: System time error in DHT storage: {}. Using fallback timestamp.", e);
+            // Return a reasonable fallback (1.5 billion seconds since epoch, ~2017)
+            1500000000
+        }
+    }
 }
 
 /// A stored value with metadata

@@ -711,12 +711,20 @@ pub struct NodeMapStats {
     pub adapter_counts: HashMap<String, usize>,
 }
 
-/// Get current Unix timestamp (seconds)
+/// Get current Unix timestamp (seconds) with graceful fallback on system time errors
+///
+/// SECURITY: If system clock goes backwards or other time errors occur,
+/// returns a fallback timestamp instead of panicking. This is better than
+/// crashing the node during heartbeat processing.
 fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs(),
+        Err(e) => {
+            eprintln!("WARNING: System time error in heartbeat processing: {}. Using fallback timestamp.", e);
+            // Return a reasonable fallback (1.5 billion seconds since epoch, ~2017)
+            1500000000
+        }
+    }
 }
 
 /// Estimate privacy level for an adapter type
@@ -867,9 +875,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_heartbeat() {
+    async fn test_handle_heartbeat() -> Result<()> {
         myriadmesh_crypto::init().ok();
-        let identity = NodeIdentity::generate().unwrap();
+        let identity = NodeIdentity::generate()?;
         let remote_node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
 
         let config = HeartbeatConfig::default();
@@ -895,11 +903,11 @@ mod tests {
         let mut message = Vec::new();
         message.extend_from_slice(remote_node_id.as_bytes());
         message.extend_from_slice(&timestamp.to_be_bytes());
-        message.extend_from_slice(&serde_json::to_vec(&adapters).unwrap());
+        message.extend_from_slice(&serde_json::to_vec(&adapters)?);
         message.extend_from_slice(&public_key_bytes);
 
         // Sign message
-        let signature = sign_message(&identity, &message).unwrap();
+        let signature = sign_message(&identity, &message)?;
 
         let heartbeat = HeartbeatMessage {
             node_id: remote_node_id,
@@ -910,7 +918,7 @@ mod tests {
             signature: signature.as_bytes().to_vec(),
         };
 
-        service.handle_heartbeat(heartbeat).await.unwrap();
+        service.handle_heartbeat(heartbeat).await?;
 
         // Verify node was added to map
         let node_info = service.get_node_info(&remote_node_id).await;
@@ -919,13 +927,14 @@ mod tests {
         let info = node_info.unwrap();
         assert_eq!(info.adapters.len(), 1);
         assert_eq!(info.heartbeat_count, 1);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_privacy_location_filtering() {
+    async fn test_privacy_location_filtering() -> Result<()> {
         // Config that doesn't store remote geolocation
         myriadmesh_crypto::init().ok();
-        let identity = NodeIdentity::generate().unwrap();
+        let identity = NodeIdentity::generate()?;
         let remote_node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
 
         let config = HeartbeatConfig {
@@ -952,12 +961,12 @@ mod tests {
         let mut message = Vec::new();
         message.extend_from_slice(remote_node_id.as_bytes());
         message.extend_from_slice(&timestamp.to_be_bytes());
-        message.extend_from_slice(&serde_json::to_vec(&Vec::<AdapterInfo>::new()).unwrap());
-        message.extend_from_slice(&serde_json::to_vec(&geolocation).unwrap());
+        message.extend_from_slice(&serde_json::to_vec(&Vec::<AdapterInfo>::new())?);
+        message.extend_from_slice(&serde_json::to_vec(&geolocation)?);
         message.extend_from_slice(&public_key_bytes);
 
         // Sign message
-        let signature = sign_message(&identity, &message).unwrap();
+        let signature = sign_message(&identity, &message)?;
 
         let heartbeat = HeartbeatMessage {
             node_id: remote_node_id,
@@ -968,12 +977,13 @@ mod tests {
             signature: signature.as_bytes().to_vec(),
         };
 
-        service.handle_heartbeat(heartbeat).await.unwrap();
+        service.handle_heartbeat(heartbeat).await?;
 
         // Verify geolocation was NOT stored due to privacy settings
         let node_info = service.get_node_info(&remote_node_id).await;
         assert!(node_info.is_some());
         assert!(node_info.unwrap().geolocation.is_none());
+        Ok(())
     }
 
     // SECURITY H3: Route poisoning prevention tests
@@ -1005,10 +1015,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_heartbeat_invalid_signature_rejected() {
+    async fn test_heartbeat_invalid_signature_rejected() -> Result<()> {
         // SECURITY H3: Verify heartbeats with invalid signatures are rejected
         myriadmesh_crypto::init().ok();
-        let identity = NodeIdentity::generate().unwrap();
+        let identity = NodeIdentity::generate()?;
         let node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
 
         let config = HeartbeatConfig::default();
@@ -1031,14 +1041,15 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Signature verification failed"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_heartbeat_public_key_derivation_mismatch() {
+    async fn test_heartbeat_public_key_derivation_mismatch() -> Result<()> {
         // SECURITY H3: Verify heartbeats with wrong public key are rejected
         myriadmesh_crypto::init().ok();
-        let identity1 = NodeIdentity::generate().unwrap();
-        let identity2 = NodeIdentity::generate().unwrap();
+        let identity1 = NodeIdentity::generate()?;
+        let identity2 = NodeIdentity::generate()?;
 
         let config = HeartbeatConfig::default();
         let local_node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
@@ -1051,11 +1062,11 @@ mod tests {
         let mut message = Vec::new();
         message.extend_from_slice(node_id1.as_bytes());
         message.extend_from_slice(&current_timestamp().to_be_bytes());
-        message.extend_from_slice(&serde_json::to_vec(&Vec::<AdapterInfo>::new()).unwrap());
+        message.extend_from_slice(&serde_json::to_vec(&Vec::<AdapterInfo>::new())?);
         message.extend_from_slice(identity2.public_key.as_ref());
 
         // Sign with identity2 but claim to be identity1
-        let signature = sign_message(&identity2, &message).unwrap();
+        let signature = sign_message(&identity2, &message)?;
 
         let heartbeat = HeartbeatMessage {
             node_id: node_id1, // Claim to be identity1
@@ -1072,13 +1083,14 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Public key derivation mismatch"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_heartbeat_tampered_data_rejected() {
+    async fn test_heartbeat_tampered_data_rejected() -> Result<()> {
         // SECURITY H3: Verify tampered heartbeats are rejected
         myriadmesh_crypto::init().ok();
-        let identity = NodeIdentity::generate().unwrap();
+        let identity = NodeIdentity::generate()?;
         let node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
 
         let config = HeartbeatConfig::default();
@@ -1105,11 +1117,11 @@ mod tests {
         let mut message = Vec::new();
         message.extend_from_slice(node_id.as_bytes());
         message.extend_from_slice(&timestamp.to_be_bytes());
-        message.extend_from_slice(&serde_json::to_vec(&original_adapters).unwrap());
+        message.extend_from_slice(&serde_json::to_vec(&original_adapters)?);
         message.extend_from_slice(&public_key_bytes);
 
         // Sign original message
-        let signature = sign_message(&identity, &message).unwrap();
+        let signature = sign_message(&identity, &message)?;
 
         // Tamper with adapters after signing
         let tampered_adapters = vec![AdapterInfo {
@@ -1138,13 +1150,14 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Signature verification failed"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_valid_signed_heartbeat_accepted() {
+    async fn test_valid_signed_heartbeat_accepted() -> Result<()> {
         // SECURITY H3: Verify properly signed heartbeats are accepted
         myriadmesh_crypto::init().ok();
-        let identity = NodeIdentity::generate().unwrap();
+        let identity = NodeIdentity::generate()?;
         let node_id = NodeId::from_bytes(*identity.node_id.as_bytes());
 
         let config = HeartbeatConfig::default();
@@ -1171,11 +1184,11 @@ mod tests {
         let mut message = Vec::new();
         message.extend_from_slice(node_id.as_bytes());
         message.extend_from_slice(&timestamp.to_be_bytes());
-        message.extend_from_slice(&serde_json::to_vec(&adapters).unwrap());
+        message.extend_from_slice(&serde_json::to_vec(&adapters)?);
         message.extend_from_slice(&public_key_bytes);
 
         // Sign message
-        let signature = sign_message(&identity, &message).unwrap();
+        let signature = sign_message(&identity, &message)?;
 
         let heartbeat = HeartbeatMessage {
             node_id,
@@ -1193,5 +1206,6 @@ mod tests {
         // Verify node was added to map
         let node_info = service.get_node_info(&node_id).await;
         assert!(node_info.is_some());
+        Ok(())
     }
 }
