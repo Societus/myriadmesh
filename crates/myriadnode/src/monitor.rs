@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration, Instant};
 use tracing::{debug, info, warn};
@@ -14,6 +14,8 @@ pub struct NetworkMonitor {
     config: MonitoringConfig,
     adapter_manager: Arc<RwLock<AdapterManager>>,
     storage: Arc<RwLock<Storage>>,
+    // RESOURCE M4: Task handle management for graceful shutdown
+    shutdown_tx: broadcast::Sender<()>,
     ping_task: Option<JoinHandle<()>>,
     throughput_task: Option<JoinHandle<()>>,
     reliability_task: Option<JoinHandle<()>>,
@@ -25,10 +27,14 @@ impl NetworkMonitor {
         adapter_manager: Arc<RwLock<AdapterManager>>,
         storage: Arc<RwLock<Storage>>,
     ) -> Self {
+        // RESOURCE M4: Create shutdown channel for graceful task termination
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
         Self {
             config,
             adapter_manager,
             storage,
+            shutdown_tx,
             ping_task: None,
             throughput_task: None,
             reliability_task: None,
@@ -38,31 +44,47 @@ impl NetworkMonitor {
     pub async fn start(&mut self) -> Result<()> {
         info!("Starting network monitoring tasks...");
 
-        // Start ping monitor
+        // RESOURCE M4: Start ping monitor with shutdown handling
         let ping_interval = self.config.ping_interval_secs;
         let adapter_manager = Arc::clone(&self.adapter_manager);
         let storage = Arc::clone(&self.storage);
+        let mut shutdown_rx1 = self.shutdown_tx.subscribe();
         self.ping_task = Some(tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(ping_interval));
             loop {
-                ticker.tick().await;
-                if let Err(e) = Self::run_ping_tests(&adapter_manager, &storage).await {
-                    warn!("Ping test failed: {}", e);
+                tokio::select! {
+                    _ = shutdown_rx1.recv() => {
+                        debug!("Ping monitor shutting down");
+                        break;
+                    }
+                    _ = ticker.tick() => {
+                        if let Err(e) = Self::run_ping_tests(&adapter_manager, &storage).await {
+                            warn!("Ping test failed: {}", e);
+                        }
+                    }
                 }
             }
         }));
         debug!("Ping monitor started (interval: {}s)", ping_interval);
 
-        // Start throughput monitor
+        // RESOURCE M4: Start throughput monitor with shutdown handling
         let throughput_interval = self.config.throughput_interval_secs;
         let adapter_manager = Arc::clone(&self.adapter_manager);
         let storage = Arc::clone(&self.storage);
+        let mut shutdown_rx2 = self.shutdown_tx.subscribe();
         self.throughput_task = Some(tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(throughput_interval));
             loop {
-                ticker.tick().await;
-                if let Err(e) = Self::run_throughput_tests(&adapter_manager, &storage).await {
-                    warn!("Throughput test failed: {}", e);
+                tokio::select! {
+                    _ = shutdown_rx2.recv() => {
+                        debug!("Throughput monitor shutting down");
+                        break;
+                    }
+                    _ = ticker.tick() => {
+                        if let Err(e) = Self::run_throughput_tests(&adapter_manager, &storage).await {
+                            warn!("Throughput test failed: {}", e);
+                        }
+                    }
                 }
             }
         }));
@@ -71,16 +93,24 @@ impl NetworkMonitor {
             throughput_interval
         );
 
-        // Start reliability monitor
+        // RESOURCE M4: Start reliability monitor with shutdown handling
         let reliability_interval = self.config.reliability_interval_secs;
         let adapter_manager = Arc::clone(&self.adapter_manager);
         let storage = Arc::clone(&self.storage);
+        let mut shutdown_rx3 = self.shutdown_tx.subscribe();
         self.reliability_task = Some(tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(reliability_interval));
             loop {
-                ticker.tick().await;
-                if let Err(e) = Self::run_reliability_tests(&adapter_manager, &storage).await {
-                    warn!("Reliability test failed: {}", e);
+                tokio::select! {
+                    _ = shutdown_rx3.recv() => {
+                        debug!("Reliability monitor shutting down");
+                        break;
+                    }
+                    _ = ticker.tick() => {
+                        if let Err(e) = Self::run_reliability_tests(&adapter_manager, &storage).await {
+                            warn!("Reliability test failed: {}", e);
+                        }
+                    }
                 }
             }
         }));
@@ -92,19 +122,25 @@ impl NetworkMonitor {
         Ok(())
     }
 
+    /// Gracefully shutdown all monitoring tasks and wait for completion
+    /// RESOURCE M4: Prevents task handle leaks and ensures cleanup
     pub async fn stop(&mut self) -> Result<()> {
         info!("Stopping network monitoring tasks...");
 
+        // Send shutdown signal to all tasks
+        let _ = self.shutdown_tx.send(());
+
+        // Wait for each task to complete
         if let Some(task) = self.ping_task.take() {
-            task.abort();
+            let _ = task.await;
         }
 
         if let Some(task) = self.throughput_task.take() {
-            task.abort();
+            let _ = task.await;
         }
 
         if let Some(task) = self.reliability_task.take() {
-            task.abort();
+            let _ = task.await;
         }
 
         Ok(())
