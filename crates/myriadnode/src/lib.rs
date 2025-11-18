@@ -6,6 +6,7 @@
 pub mod api;
 pub mod backhaul;
 pub mod config;
+pub mod diagnostics;
 pub mod failover;
 pub mod heartbeat;
 pub mod monitor;
@@ -15,5 +16,6 @@ pub mod storage;
 
 // Re-export commonly used types for convenience
 pub use config::Config;
+pub use diagnostics::DiagnosticsCollector;
 pub use node::Node;
 pub use scoring::{AdapterScorer, ScoringWeights};

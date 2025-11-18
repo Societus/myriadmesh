@@ -27,5 +27,8 @@ anyhow.workspace = true
 blake2.workspace = true
 rand.workspace = true
 
+# Logging
+tracing = "0.1"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

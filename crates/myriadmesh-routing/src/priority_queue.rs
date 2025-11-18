@@ -195,6 +195,64 @@ impl PriorityQueue {
             total: self.total_messages,
         }
     }
+
+    /// Re-enqueue a message with updated retry metadata
+    /// Used for implementing exponential backoff on failed transmissions
+    pub fn requeue_with_retry(
+        &mut self,
+        mut queued_msg: QueuedMessage,
+        retry_delay_secs: u64,
+    ) -> Result<(), String> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        queued_msg.retry_count += 1;
+        queued_msg.next_retry = Some(now + retry_delay_secs);
+
+        let priority = PriorityLevel::from(queued_msg.message.priority);
+        let queue_idx = priority.queue_index();
+        let queue = &mut self.queues[queue_idx];
+
+        if queue.len() >= self.max_per_queue {
+            return Err(format!(
+                "Priority queue {} is full (max {})",
+                priority.queue_index(),
+                self.max_per_queue
+            ));
+        }
+
+        queue.push_back(queued_msg);
+        self.total_messages += 1;
+        Ok(())
+    }
+
+    /// Dequeue messages that are ready for retry (past their next_retry time)
+    /// Returns None if no messages are ready
+    pub fn dequeue_ready_for_retry(&mut self) -> Option<QueuedMessage> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // Check queues from highest to lowest priority
+        for queue in self.queues.iter_mut().rev() {
+            // Find first message that's ready (either no retry time or past retry time)
+            if let Some(pos) = queue
+                .iter()
+                .position(|msg| msg.next_retry.is_none_or(|retry_time| now >= retry_time))
+            {
+                let msg = queue.remove(pos).unwrap();
+                self.total_messages -= 1;
+                return Some(msg);
+            }
+        }
+
+        None
+    }
 }
 
 impl Default for PriorityQueue {

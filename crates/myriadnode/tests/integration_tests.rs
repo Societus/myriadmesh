@@ -804,3 +804,324 @@ async fn test_failover_lock_ordering_stress() {
     // Shutdown
     failover.shutdown().await;
 }
+
+// ==========================
+// P0.1: Router Integration Tests
+// ==========================
+// TODO: Update these tests to use the new Config API (Config::create_default())
+// and updated Router callback signatures (Pin<Box<dyn Future>>)
+// These tests are temporarily commented out while we complete P0.1.3 diagnostics work.
+
+/*
+#[tokio::test]
+async fn test_router_initialization_in_node() {
+    // P0.1.1: Verify Router is properly initialized within Node
+    use myriadnode::config::{Config, NodeConfig, NetworkConfig, LedgerConfig};
+    use tempfile::TempDir;
+
+    // Create a temporary directory for node data
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+    let config = Config {
+        node: NodeConfig {
+            id: vec![42u8; NODE_ID_SIZE],
+            name: "test-node".to_string(),
+        },
+        data_directory: temp_dir.path().to_path_buf(),
+        network: NetworkConfig::default(),
+        ledger: LedgerConfig::default(),
+    };
+
+    // Initialize node (this should initialize Router with callbacks)
+    let node = myriadnode::Node::new(config).await;
+    assert!(node.is_ok(), "Node initialization should succeed");
+
+    // Node creation succeeds means Router was properly initialized with:
+    // - Local delivery channel
+    // - Confirmation callback
+    // - DHT integration
+    // - Message sender callback
+}
+
+#[tokio::test]
+async fn test_router_message_routing() {
+    // P0.1.2: Test message routing with different priorities
+    use myriadmesh_routing::Router;
+    use myriadmesh_protocol::{Message, MessageType, NodeId};
+    use myriadmesh_protocol::types::{Priority, NODE_ID_SIZE};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    let node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+    let mut router = Router::new(
+        node_id,
+        1000,  // per-node limit
+        10000, // global limit
+        1000,  // queue capacity
+    );
+
+    // Set up message sender callback to track calls
+    let call_count = Arc::new(AtomicU32::new(0));
+    let call_count_clone = Arc::clone(&call_count);
+
+    router.set_message_sender(Arc::new(move |_msg, _next_hop| {
+        call_count_clone.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }));
+
+    // Route messages with different priorities
+    let emergency_msg = Message::new(
+        NodeId::from_bytes([1u8; NODE_ID_SIZE]),
+        NodeId::from_bytes([2u8; NODE_ID_SIZE]),
+        MessageType::Data,
+        b"emergency".to_vec(),
+    )
+    .unwrap()
+    .with_priority(Priority::emergency());
+
+    let normal_msg = Message::new(
+        NodeId::from_bytes([1u8; NODE_ID_SIZE]),
+        NodeId::from_bytes([2u8; NODE_ID_SIZE]),
+        MessageType::Data,
+        b"normal".to_vec(),
+    )
+    .unwrap()
+    .with_priority(Priority::normal());
+
+    // Route messages (they should be queued)
+    router.route_message(emergency_msg).await.expect("Should route emergency");
+    router.route_message(normal_msg).await.expect("Should route normal");
+
+    // Verify routing worked (messages were queued)
+    let stats = router.get_stats().await;
+    assert!(stats.messages_routed >= 0, "Stats should track routed messages");
+}
+
+#[tokio::test]
+async fn test_router_dos_protection() {
+    // P0.1.2: Verify DOS protection rate limiting
+    use myriadmesh_routing::Router;
+    use myriadmesh_protocol::{Message, MessageType, NodeId};
+    use myriadmesh_protocol::types::{Priority, NODE_ID_SIZE};
+
+    let node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+    let router = Router::new(
+        node_id,
+        5,     // Very low per-node limit (5 msg/min)
+        100,   // global limit
+        1000,  // queue capacity
+    );
+
+    let sender = NodeId::from_bytes([99u8; NODE_ID_SIZE]);
+
+    // Try to queue 10 messages from same sender rapidly
+    let mut accepted = 0;
+    let mut rejected = 0;
+
+    for i in 0..10 {
+        let msg = Message::new(
+            sender,
+            NodeId::from_bytes([2u8; NODE_ID_SIZE]),
+            MessageType::Data,
+            format!("msg_{}", i).into_bytes(),
+        )
+        .unwrap()
+        .with_priority(Priority::normal());
+
+        match router.route_message(msg).await {
+            Ok(_) => accepted += 1,
+            Err(_) => rejected += 1,
+        }
+    }
+
+    // With per-node limit of 5, some messages should be rejected
+    // Note: Rate limiting is per minute, so in fast test some may get through
+    assert!(accepted + rejected == 10, "All messages should be processed");
+}
+
+#[tokio::test]
+async fn test_router_queue_capacity() {
+    // P0.1.2: Verify queue capacity limits
+    use myriadmesh_routing::Router;
+    use myriadmesh_protocol::{Message, MessageType, NodeId};
+    use myriadmesh_protocol::types::{Priority, NODE_ID_SIZE};
+    use std::sync::Arc;
+
+    let node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+    let mut router = Router::new(
+        node_id,
+        10000, // high per-node limit
+        100000, // high global limit
+        2,     // Very low queue capacity (2 per priority level)
+    );
+
+    // Set message sender to fail (forces queueing)
+    router.set_message_sender(Arc::new(|_msg, _next_hop| {
+        Err(anyhow::anyhow!("Simulated failure to force queueing"))
+    }));
+
+    // Try to route 5 normal priority messages (will queue when send fails)
+    let mut results = vec![];
+    for i in 0..5 {
+        let msg = Message::new(
+            NodeId::from_bytes([i as u8; NODE_ID_SIZE]),
+            NodeId::from_bytes([2u8; NODE_ID_SIZE]),
+            MessageType::Data,
+            format!("msg_{}", i).into_bytes(),
+        )
+        .unwrap()
+        .with_priority(Priority::normal());
+
+        results.push(router.route_message(msg).await);
+    }
+
+    // First 2 should succeed (queued), rest may fail due to capacity
+    let succeeded = results.iter().filter(|r| r.is_ok()).count();
+    assert!(succeeded <= 2, "Should respect queue capacity of 2");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_router_queue_processor_retry() {
+    // P0.1.3: Test queue processor with exponential backoff
+    use myriadmesh_routing::Router;
+    use myriadmesh_protocol::{Message, MessageType, NodeId};
+    use myriadmesh_protocol::types::{Priority, NODE_ID_SIZE};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    let node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+    let mut router = Router::new(
+        node_id,
+        1000,
+        10000,
+        1000,
+    );
+
+    // Set up message sender that fails first 2 times, then succeeds
+    let attempt_count = Arc::new(AtomicU32::new(0));
+    let attempt_count_clone = Arc::clone(&attempt_count);
+
+    router.set_message_sender(Arc::new(move |_msg, _next_hop| {
+        let count = attempt_count_clone.fetch_add(1, Ordering::SeqCst);
+        if count < 2 {
+            Err(anyhow::anyhow!("Simulated network failure"))
+        } else {
+            Ok(())
+        }
+    }));
+
+    // Route a message (will queue when send fails)
+    let msg = Message::new(
+        NodeId::from_bytes([1u8; NODE_ID_SIZE]),
+        NodeId::from_bytes([2u8; NODE_ID_SIZE]),
+        MessageType::Data,
+        b"test retry".to_vec(),
+    )
+    .unwrap()
+    .with_priority(Priority::normal());
+
+    router.route_message(msg).await.expect("Should route message");
+
+    // Start queue processor in background
+    let router = Arc::new(router);
+    let processor = Arc::clone(&router);
+    let processor_handle = tokio::spawn(async move {
+        // Run processor for limited time
+        tokio::select! {
+            _ = processor.run_queue_processor() => {},
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {},
+        }
+    });
+
+    // Wait a bit for retries to happen
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Check that message was attempted multiple times
+    let attempts = attempt_count.load(Ordering::SeqCst);
+    assert!(attempts >= 2, "Message should be retried (attempts: {})", attempts);
+
+    // Cleanup
+    processor_handle.abort();
+}
+
+#[tokio::test]
+async fn test_router_stats_tracking() {
+    // P0.1: Verify router statistics tracking
+    use myriadmesh_routing::Router;
+    use myriadmesh_protocol::{Message, MessageType, NodeId};
+    use myriadmesh_protocol::types::{Priority, NODE_ID_SIZE};
+    use std::sync::Arc;
+
+    let node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+    let mut router = Router::new(node_id, 1000, 10000, 1000);
+
+    // Get initial stats
+    let initial_stats = router.get_stats().await;
+    assert_eq!(initial_stats.messages_routed, 0);
+
+    // Set up message sender callback
+    router.set_message_sender(Arc::new(|_msg, _next_hop| Ok(())));
+
+    // Route some messages
+    for i in 0..5 {
+        let msg = Message::new(
+            NodeId::from_bytes([i as u8; NODE_ID_SIZE]),
+            NodeId::from_bytes([2u8; NODE_ID_SIZE]),
+            MessageType::Data,
+            format!("msg_{}", i).into_bytes(),
+        )
+        .unwrap()
+        .with_priority(Priority::normal());
+
+        let _ = router.route_message(msg).await;
+    }
+
+    // Verify stats updated
+    let final_stats = router.get_stats().await;
+    assert!(final_stats.messages_routed > 0, "Should have routed messages");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_router_concurrent_operations() {
+    // P0.1: Test router thread safety with concurrent operations
+    use myriadmesh_routing::Router;
+    use myriadmesh_protocol::{Message, MessageType, NodeId};
+    use myriadmesh_protocol::types::{Priority, NODE_ID_SIZE};
+    use std::sync::Arc;
+
+    let node_id = NodeId::from_bytes([1u8; NODE_ID_SIZE]);
+    let router = Arc::new(Router::new(node_id, 10000, 100000, 1000));
+
+    // Spawn multiple tasks that concurrently route messages
+    let mut handles = vec![];
+
+    for task_id in 0..10 {
+        let router_clone = Arc::clone(&router);
+        let handle = tokio::spawn(async move {
+            for i in 0..10 {
+                let msg = Message::new(
+                    NodeId::from_bytes([task_id as u8; NODE_ID_SIZE]),
+                    NodeId::from_bytes([2u8; NODE_ID_SIZE]),
+                    MessageType::Data,
+                    format!("task_{}_msg_{}", task_id, i).into_bytes(),
+                )
+                .unwrap()
+                .with_priority(Priority::normal());
+
+                let _ = router_clone.route_message(msg).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+            }
+        });
+        handles.push(handle);
+    }
+
+    // All concurrent operations should complete without deadlock
+    for handle in handles {
+        handle.await.expect("Task should complete successfully");
+    }
+
+    // Verify some messages were processed
+    let stats = router.get_stats().await;
+    assert!(stats.messages_routed > 0, "Should have processed messages");
+}
+*/

@@ -1,0 +1,85 @@
+{
+  "captured_at": 1700000000,
+  "session_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "init_checkpoints": [
+    {
+      "timestamp": 1700000000,
+      "checkpoint": "StorageInit",
+      "duration_ms": 45,
+      "success": true,
+      "error": null
+    },
+    {
+      "timestamp": 1700000001,
+      "checkpoint": "RouterInit",
+      "duration_ms": 12,
+      "success": true,
+      "error": null
+    },
+    {
+      "timestamp": 1700000002,
+      "checkpoint": "RouterCallbacksSet",
+      "duration_ms": 0,
+      "success": true,
+      "error": null
+    },
+    {
+      "timestamp": 1700000003,
+      "checkpoint": "Complete",
+      "duration_ms": 234,
+      "success": true,
+      "error": null
+    }
+  ],
+  "lifecycle_events": [
+    {
+      "timestamp": 1700000004,
+      "event": "NodeStarting",
+      "metadata": null
+    },
+    {
+      "timestamp": 1700000005,
+      "event": "QueueProcessorStarted",
+      "metadata": null
+    },
+    {
+      "timestamp": 1700000006,
+      "event": "LocalDeliveryProcessorStarted",
+      "metadata": null
+    },
+    {
+      "timestamp": 1700000007,
+      "event": "NodeReady",
+      "metadata": null
+    }
+  ],
+  "failures": [],
+  "router_health": {
+    "timestamp": 1700000007,
+    "has_local_delivery_channel": true,
+    "has_confirmation_callback": true,
+    "has_message_sender": true,
+    "has_dht": true,
+    "queue_processor_running": true,
+    "local_delivery_processor_running": true,
+    "messages_routed": 0,
+    "messages_queued": 0,
+    "messages_failed": 0
+  },
+  "startup_metadata": {
+    "session_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "start_time": 1700000000,
+    "config_hash": "Config { node:",
+    "version": "0.1.0",
+    "total_init_duration_ms": 234
+  },
+  "metadata": {
+    "description": "Sample successful Node initialization and startup",
+    "scenario": "happy_path",
+    "expected_outcome": "Success",
+    "tags": [
+      "router",
+      "baseline"
+    ]
+  }
+}

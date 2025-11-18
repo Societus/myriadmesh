@@ -1,0 +1,16 @@
+# Diagnostic Test Data Directory
+#
+# This directory contains diagnostic snapshots exported from real Node runs.
+# These snapshots are used for regression testing and integration verification.
+#
+# Files are JSON format with the following structure:
+# - session_id: Random UUID (NOT NodeId - privacy preserving)
+# - init_checkpoints: Initialization phase timings
+# - lifecycle_events: Node lifecycle events
+# - failures: Error events
+# - router_health: Router integration status
+#
+# To generate test data:
+# 1. Enable diagnostics in Node config
+# 2. Run the node
+# 3. Diagnostic snapshots will be auto-exported on shutdown

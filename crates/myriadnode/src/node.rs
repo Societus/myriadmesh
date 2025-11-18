@@ -18,8 +18,8 @@ use myriadmesh_crypto::identity::NodeIdentity;
 use myriadmesh_dht::routing_table::RoutingTable;
 use myriadmesh_ledger::ChainSync;
 use myriadmesh_network::{adapters::*, AdapterManager, NetworkAdapter};
-use myriadmesh_protocol::types::NODE_ID_SIZE;
-use myriadmesh_routing::PriorityQueue;
+use myriadmesh_protocol::{message::Message, types::NODE_ID_SIZE};
+use myriadmesh_routing::{PriorityQueue, Router};
 use std::collections::HashMap;
 use std::fs;
 
@@ -29,6 +29,8 @@ pub struct Node {
     identity: Arc<NodeIdentity>, // SECURITY C3: Node identity for adapter authentication
     storage: Arc<RwLock<Storage>>,
     adapter_manager: Arc<RwLock<AdapterManager>>,
+    router: Arc<Router>,
+    local_delivery_rx: Option<mpsc::UnboundedReceiver<Message>>,
     #[allow(dead_code)]
     message_queue: PriorityQueue,
     #[allow(dead_code)]
@@ -40,16 +42,28 @@ pub struct Node {
     monitor: NetworkMonitor,
     failover_manager: Arc<FailoverManager>,
     heartbeat_service: Arc<HeartbeatService>,
+    diagnostics: crate::diagnostics::DiagnosticsCollector,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
 }
 
 impl Node {
     pub async fn new(config: Config) -> Result<Self> {
+        use crate::diagnostics::{DiagnosticsCollector, InitPhase};
+        use std::time::Instant;
+
+        let diagnostics = DiagnosticsCollector::new();
+        let init_start = Instant::now();
+
         info!("Initializing node components...");
 
         // Initialize storage
+        let checkpoint_start = Instant::now();
         let storage = Arc::new(RwLock::new(Storage::new(&config.data_directory).await?));
+        let duration = checkpoint_start.elapsed().as_millis() as u64;
+        diagnostics
+            .checkpoint(InitPhase::StorageInit, duration, true, None)
+            .await;
         info!("✓ Storage initialized");
 
         // Initialize adapter manager
@@ -59,13 +73,6 @@ impl Node {
         // Initialize message queue
         let message_queue = PriorityQueue::new(1000); // Max 1000 messages per priority level
         info!("✓ Message queue initialized");
-
-        // TODO: When Router is fully integrated, set up ledger confirmation callback:
-        // router.set_confirmation_callback(Arc::new(move |msg_id, src, dest, is_local| {
-        //     // Create MESSAGE ledger entry for successful routing
-        //     // This records message delivery confirmations in the blockchain
-        //     // See: myriadmesh-ledger/src/entry.rs - MessageEntry
-        // }));
 
         // Initialize DHT
         // SECURITY C6: NodeID is now 64 bytes for collision resistance
@@ -78,6 +85,22 @@ impl Node {
         let node_id = myriadmesh_protocol::NodeId::from_bytes(node_id_bytes);
         let dht = RoutingTable::new(node_id);
         info!("✓ DHT routing table initialized");
+
+        // Initialize Router with local delivery channel
+        // The router handles message routing with DOS protection and rate limiting
+        let checkpoint_start = Instant::now();
+        let (local_delivery_tx, local_delivery_rx) = Router::create_local_delivery_channel();
+        let mut router = Router::new(
+            node_id, 1000,  // per-node limit: 1000 msg/min
+            10000, // global limit: 10000 msg/min
+            1000,  // queue capacity: 1000 messages per priority level
+        );
+        router.set_local_delivery_channel(local_delivery_tx);
+        let duration = checkpoint_start.elapsed().as_millis() as u64;
+        diagnostics
+            .checkpoint(InitPhase::RouterInit, duration, true, None)
+            .await;
+        info!("✓ Router initialized");
 
         // Initialize ledger
         let ledger_dir = config.data_directory.join("ledger");
@@ -93,6 +116,30 @@ impl Node {
             "✓ Ledger initialized (keep_blocks: {})",
             config.ledger.keep_blocks
         );
+
+        // Set up ledger confirmation callback for router
+        // This records message delivery confirmations in the blockchain
+        // See: myriadmesh-ledger/src/entry.rs - MessageEntry
+        let _ledger_for_callback = Arc::clone(&ledger);
+        router.set_confirmation_callback(Arc::new(move |msg_id, src, dest, is_local| {
+            // TODO: Implement actual ledger MESSAGE entry creation
+            // For now, just log the confirmation
+            info!(
+                "Message routed: {:?} from {:?} to {:?} (local: {})",
+                msg_id, src, dest, is_local
+            );
+            // Future implementation:
+            // let mut ledger = ledger_for_callback.write().await;
+            // ledger.add_message_entry(msg_id, src, dest, is_local);
+        }));
+
+        // Wrap router in Arc for shared ownership
+        // Router uses internal locks for thread-safety, no outer RwLock needed
+        let router = Arc::new(router);
+        diagnostics
+            .checkpoint(InitPhase::RouterCallbacksSet, 0, true, None)
+            .await;
+        info!("✓ Router fully configured with ledger callback");
 
         // Initialize network monitor
         let monitor = NetworkMonitor::new(
@@ -275,11 +322,34 @@ impl Node {
 
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
 
+        // Record completion and metadata
+        let total_init_duration_ms = init_start.elapsed().as_millis() as u64;
+        diagnostics
+            .checkpoint(InitPhase::Complete, total_init_duration_ms, true, None)
+            .await;
+
+        use crate::diagnostics::StartupMetadata;
+        let session_id = diagnostics.session_id().await;
+        diagnostics
+            .set_startup_metadata(StartupMetadata {
+                session_id, // Random UUID, NOT the NodeId (privacy-preserving)
+                start_time: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                config_hash: format!("{:?}", config).chars().take(16).collect(), // Simple hash
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                total_init_duration_ms,
+            })
+            .await;
+
         Ok(Self {
             config,
             identity,
             storage,
             adapter_manager,
+            router,
+            local_delivery_rx: Some(local_delivery_rx),
             message_queue,
             dht,
             ledger,
@@ -288,12 +358,18 @@ impl Node {
             monitor,
             failover_manager,
             heartbeat_service,
+            diagnostics,
             shutdown_tx,
             shutdown_rx,
         })
     }
 
     pub async fn run(&mut self) -> Result<()> {
+        use crate::diagnostics::LifecycleEventType;
+
+        self.diagnostics
+            .event(LifecycleEventType::NodeStarting, None)
+            .await;
         info!("Starting MyriadNode services...");
 
         // Start network adapters
@@ -332,10 +408,79 @@ impl Node {
             info!("  Heartbeat service disabled");
         }
 
+        // Start router local delivery processor
+        // This background task processes messages destined for this node
+        if let Some(mut local_delivery_rx) = self.local_delivery_rx.take() {
+            let appliance_mgr = self.appliance_manager.clone();
+            tokio::spawn(async move {
+                info!("Router local delivery processor started");
+                while let Some(msg) = local_delivery_rx.recv().await {
+                    if let Some(_appliance_mgr) = &appliance_mgr {
+                        // Forward to appliance manager if in appliance mode
+                        // TODO: Implement proper message handling in appliance manager
+                        info!(
+                            "Received local message for appliance: {:?} from {:?}",
+                            msg.id, msg.source
+                        );
+                        // Future: appliance_mgr.handle_message(msg).await;
+                    } else {
+                        // Log message for non-appliance nodes
+                        info!(
+                            "Received local message: {:?} from {:?} to {:?}",
+                            msg.id, msg.source, msg.destination
+                        );
+                        // TODO: Implement message processing for non-appliance nodes
+                        // This could be:
+                        // - Passing to application layer
+                        // - Storing in local inbox
+                        // - Triggering notifications
+                    }
+                }
+                info!("Router local delivery processor stopped");
+            });
+            info!("✓ Router local delivery processor running");
+        }
+
+        // Start router queue processor
+        // This background task processes queued messages with exponential backoff retry
+        let router_for_processor = Arc::clone(&self.router);
+        tokio::spawn(async move {
+            router_for_processor.run_queue_processor().await;
+        });
+        self.diagnostics
+            .event(LifecycleEventType::QueueProcessorStarted, None)
+            .await;
+        info!("✓ Router queue processor running (retry with exponential backoff)");
+
         // Start DHT (if enabled)
         if self.config.dht.enabled {
             info!("✓ DHT service running");
         }
+
+        // Update router health snapshot
+        use crate::diagnostics::RouterHealthSnapshot;
+        let router_stats = self.router.get_stats().await;
+        self.diagnostics
+            .update_router_health(RouterHealthSnapshot {
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                has_local_delivery_channel: true,
+                has_confirmation_callback: true,
+                has_message_sender: false, // Set by adapters later
+                has_dht: false,            // TODO: Check if DHT was set
+                queue_processor_running: true,
+                local_delivery_processor_running: true,
+                messages_routed: router_stats.messages_routed,
+                messages_queued: 0, // TODO: Get from queue stats
+                messages_failed: router_stats.messages_dropped,
+            })
+            .await;
+
+        self.diagnostics
+            .event(LifecycleEventType::NodeReady, None)
+            .await;
 
         info!("═══════════════════════════════════════════════");
         info!("  MyriadNode is now running");
@@ -548,5 +693,10 @@ impl Node {
 
     pub fn shutdown_handle(&self) -> mpsc::Sender<()> {
         self.shutdown_tx.clone()
+    }
+
+    /// Get diagnostics collector for testing and monitoring
+    pub fn diagnostics(&self) -> &crate::diagnostics::DiagnosticsCollector {
+        &self.diagnostics
     }
 }

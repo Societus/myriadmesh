@@ -8,12 +8,16 @@
 //! - Reputation-based throttling
 
 use crate::{
-    deduplication::DeduplicationCache, offline_cache::OfflineMessageCache,
-    priority_queue::PriorityQueue, rate_limiter::RateLimiter, RoutingError,
+    adaptive::AdaptiveRoutingTable, deduplication::DeduplicationCache, geographic::GeoRoutingTable,
+    multipath::MultiPathRouter, offline_cache::OfflineMessageCache, priority_queue::PriorityQueue,
+    rate_limiter::RateLimiter, RoutingError,
 };
+use myriadmesh_dht::routing_table::RoutingTable;
 use myriadmesh_protocol::{message::Message, NodeId};
 use std::{
     collections::HashMap,
+    future::Future,
+    pin::Pin,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -52,6 +56,15 @@ use myriadmesh_protocol::message::MessageId;
 /// Called when a message is successfully routed (delivered locally or forwarded)
 /// Arguments: (message_id, source, destination, was_delivered_locally)
 pub type MessageConfirmationCallback = Arc<dyn Fn(MessageId, NodeId, NodeId, bool) + Send + Sync>;
+
+/// Callback type for sending messages via network adapters
+/// Arguments: (destination_node_id, message) -> Result<(), error_string>
+/// The callback should select an appropriate adapter and transmit the message
+pub type MessageSenderCallback = Arc<
+    dyn Fn(NodeId, Message) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// Router statistics
 #[derive(Debug, Default, Clone)]
@@ -106,6 +119,26 @@ pub struct Router {
     /// Message confirmation callback (for ledger integration)
     /// Called when messages are successfully routed
     confirmation_callback: Option<MessageConfirmationCallback>,
+
+    /// DHT routing table for destination lookup
+    /// Used to find next hops and check if destinations are reachable
+    dht: Option<Arc<RwLock<RoutingTable>>>,
+
+    /// Message sender callback for actual transmission
+    /// Called to send messages via network adapters
+    message_sender: Option<MessageSenderCallback>,
+
+    /// Multi-path router for high-priority messages (Emergency/High)
+    /// Provides redundancy and anonymity through parallel paths
+    multipath_router: Option<Arc<RwLock<MultiPathRouter>>>,
+
+    /// Geographic router for normal-priority messages
+    /// Uses location-based greedy forwarding for efficiency
+    geo_router: Option<Arc<RwLock<GeoRoutingTable>>>,
+
+    /// Adaptive router for low-priority messages (Low/Background)
+    /// Optimizes for cost and power efficiency
+    adaptive_router: Option<Arc<RwLock<AdaptiveRoutingTable>>>,
 }
 
 impl Router {
@@ -133,6 +166,11 @@ impl Router {
             local_delivery_tx: None,
             offline_cache: Arc::new(RwLock::new(OfflineMessageCache::new())),
             confirmation_callback: None,
+            dht: None,
+            message_sender: None,
+            multipath_router: None,
+            geo_router: None,
+            adaptive_router: None,
         }
     }
 
@@ -161,6 +199,70 @@ impl Router {
     /// ```
     pub fn set_confirmation_callback(&mut self, callback: MessageConfirmationCallback) {
         self.confirmation_callback = Some(callback);
+    }
+
+    /// Set the DHT routing table
+    ///
+    /// The DHT is used to look up destination nodes and find next hops.
+    ///
+    /// # Arguments
+    /// * `dht` - Arc-wrapped routing table
+    pub fn set_dht(&mut self, dht: Arc<RwLock<RoutingTable>>) {
+        self.dht = Some(dht);
+    }
+
+    /// Set the message sender callback
+    ///
+    /// This callback is invoked to send messages via network adapters.
+    /// The callback should handle adapter selection and actual transmission.
+    ///
+    /// # Arguments
+    /// * `sender` - Async callback that sends messages to a destination node
+    ///
+    /// # Example
+    /// ```ignore
+    /// router.set_message_sender(Arc::new(|dest, msg| {
+    ///     Box::pin(async move {
+    ///         // Select adapter and send message
+    ///         adapter_manager.send_to(dest, msg).await
+    ///     })
+    /// }));
+    /// ```
+    pub fn set_message_sender(&mut self, sender: MessageSenderCallback) {
+        self.message_sender = Some(sender);
+    }
+
+    /// Set the multi-path router
+    ///
+    /// Used for high-priority messages (Emergency/High) that require
+    /// redundancy and anonymity through parallel path transmission.
+    ///
+    /// # Arguments
+    /// * `router` - Arc-wrapped multi-path router
+    pub fn set_multipath_router(&mut self, router: Arc<RwLock<MultiPathRouter>>) {
+        self.multipath_router = Some(router);
+    }
+
+    /// Set the geographic router
+    ///
+    /// Used for normal-priority messages that benefit from location-based
+    /// greedy forwarding for efficient routing.
+    ///
+    /// # Arguments
+    /// * `router` - Arc-wrapped geographic routing table
+    pub fn set_geo_router(&mut self, router: Arc<RwLock<GeoRoutingTable>>) {
+        self.geo_router = Some(router);
+    }
+
+    /// Set the adaptive router
+    ///
+    /// Used for low-priority and background messages that prioritize
+    /// cost optimization and power efficiency.
+    ///
+    /// # Arguments
+    /// * `router` - Arc-wrapped adaptive routing table
+    pub fn set_adaptive_router(&mut self, router: Arc<RwLock<AdaptiveRoutingTable>>) {
+        self.adaptive_router = Some(router);
     }
 
     /// Create a channel for receiving locally delivered messages
@@ -392,80 +494,143 @@ impl Router {
             return Err(RoutingError::TtlExceeded);
         }
 
-        // TODO: Phase 2 Step 1 - DHT Integration
-        // Query DHT to determine if destination is reachable and get routing info:
-        //
-        // let dest_info = self.dht.find_node(&message.destination).await?;
-        //
-        // if !dest_info.is_reachable() {
-        //     // Destination is offline - cache for later delivery
-        //     return self.cache_for_offline(message.destination, message).await;
-        // }
+        // Step 1: DHT Integration - Check destination reachability
+        let destination_reachable = if let Some(dht) = &self.dht {
+            let dht_lock = dht.read().await;
+            let closest_nodes = dht_lock.get_k_closest(&message.destination, 3);
+            drop(dht_lock);
 
-        // TODO: Phase 2 Step 2 - Path Selection
-        // Determine next hop using routing strategy based on message priority:
-        //
-        // let next_hop = match message.priority.as_u8() {
-        //     224..=255 => { // Emergency
-        //         self.multipath_router.get_best_path(&message.destination).await
-        //     }
-        //     192..=223 => { // High
-        //         self.multipath_router.get_best_path(&message.destination).await
-        //     }
-        //     128..=191 => { // Normal
-        //         if let Some(location) = dest_info.location {
-        //             self.geo_router.greedy_next_hop(&location).await
-        //         } else {
-        //             Ok(dest_info.node_id) // Direct DHT routing
-        //         }
-        //     }
-        //     64..=127 | 0..=63 => { // Low or Background
-        //         self.adaptive_router.get_path(&message.destination).await
-        //     }
-        // }?;
+            if closest_nodes.is_empty() {
+                // No route to destination - cache for offline delivery (store-and-forward)
+                return self.cache_for_offline(message.destination, message).await;
+            }
+            true
+        } else {
+            // No DHT available - assume reachable and try direct routing
+            true
+        };
 
-        // TODO: Phase 2 Step 3 - Weighted Tier System (Adapter Selection)
-        // Select best network adapter based on priority and performance metrics:
+        if !destination_reachable {
+            return self.cache_for_offline(message.destination, message).await;
+        }
+
+        // Step 2: Smart Path Selection based on message priority
+        // This implements privacy/security-aware routing:
+        // - Emergency/High: Multi-path for redundancy and anonymity
+        // - Normal: Geographic routing for efficiency
+        // - Low/Background: Adaptive routing for cost optimization
+        let next_hop = match message.priority.as_u8() {
+            224..=255 => {
+                // Emergency priority: Use multi-path routing for maximum reliability and anonymity
+                if let Some(multipath) = &self.multipath_router {
+                    let router = multipath.read().await;
+                    if let Some(paths) = router.get_paths(&message.destination) {
+                        // Select best path and get next hop
+                        if let Some(path) = paths.first() {
+                            path.next_hop(&self.node_id).unwrap_or(message.destination)
+                        } else {
+                            message.destination
+                        }
+                    } else {
+                        message.destination
+                    }
+                } else {
+                    message.destination // Fallback to direct routing
+                }
+            }
+            192..=223 => {
+                // High priority: Also use multi-path for reliability
+                if let Some(multipath) = &self.multipath_router {
+                    let router = multipath.read().await;
+                    if let Some(paths) = router.get_paths(&message.destination) {
+                        if let Some(path) = paths.first() {
+                            path.next_hop(&self.node_id).unwrap_or(message.destination)
+                        } else {
+                            message.destination
+                        }
+                    } else {
+                        message.destination
+                    }
+                } else {
+                    message.destination
+                }
+            }
+            128..=191 => {
+                // Normal priority: Use geographic routing if available
+                // TODO: Implement geographic routing when location data is available
+                // For now, use direct routing as geographic router needs coordinates
+                message.destination
+            }
+            0..=127 => {
+                // Low/Background priority: Use adaptive routing for cost efficiency
+                if let Some(adaptive) = &self.adaptive_router {
+                    let router = adaptive.read().await;
+                    if let Some(dht) = &self.dht {
+                        let dht_lock = dht.read().await;
+                        let neighbors: Vec<NodeId> = dht_lock
+                            .get_k_closest(&message.destination, 10)
+                            .into_iter()
+                            .map(|node_info| node_info.node_id)
+                            .collect();
+                        drop(dht_lock);
+
+                        if let Some((best_node, _cost)) =
+                            router.select_best_neighbor(&self.node_id, &neighbors)
+                        {
+                            best_node
+                        } else {
+                            message.destination
+                        }
+                    } else {
+                        message.destination
+                    }
+                } else {
+                    message.destination
+                }
+            }
+        };
+
+        // Step 3 & 4: Adapter Selection and Transmission
+        // The message_sender callback handles both:
+        // - Weighted adapter selection (via FailoverManager with priority-aware scoring)
+        // - Actual transmission via selected adapter
         //
-        // let adapter = self.select_adapter(&next_hop, &message).await?;
-        //
-        // Where select_adapter() implements weighted scoring:
+        // Weighted scoring is implemented in FailoverManager:
         // - Emergency: 80% latency, 20% reliability
         // - High: 60% latency, 40% reliability
         // - Normal: balanced score
         // - Low: 60% bandwidth, 40% cost
         // - Background: 80% cost, 20% power
+        if let Some(sender) = &self.message_sender {
+            match sender(next_hop, message.clone()).await {
+                Ok(_) => {
+                    // Message sent successfully
+                    let mut stats = self.stats.write().await;
+                    stats.messages_routed += 1;
 
-        // TODO: Phase 2 Step 4 - Actual Transmission
-        // Send message via selected network adapter:
-        //
-        // match self.network_manager.send_via_adapter(adapter, &next_hop, &message).await {
-        //     Ok(_) => {
-        //         let mut stats = self.stats.write().await;
-        //         stats.messages_routed += 1;
-        //         return Ok(());
-        //     }
-        //     Err(e) => {
-        //         // Transmission failed - queue for retry
-        //         // Retry logic will be handled by queue processor
-        //         return Err(RoutingError::ForwardingFailed(e.to_string()));
-        //     }
-        // }
+                    // Call confirmation callback for ledger integration
+                    if let Some(callback) = &self.confirmation_callback {
+                        callback(message.id, message.source, message.destination, false);
+                    }
 
-        // CURRENT IMPLEMENTATION: Queue for future processing
-        // Messages are queued but need a background task to dequeue and send them.
-        // This prevents message loss while full routing is being implemented.
-        //
-        // The queue processor task should:
-        // 1. Dequeue messages by priority (emergency first)
-        // 2. Attempt transmission via network adapters
-        // 3. Handle retry logic with exponential backoff
-        // 4. Cache messages when destination is unreachable
-        //
-        // NOTE: The retry_count and next_retry fields in QueuedMessage are
-        // available but not yet used. They should be utilized by the queue
-        // processor for exponential backoff retry logic.
+                    return Ok(());
+                }
+                Err(e) => {
+                    // Transmission failed - queue for retry with exponential backoff
+                    // The background queue processor (P0.1.3) will handle retries
+                    let mut queue = self.outbound_queue.write().await;
+                    queue
+                        .enqueue(message)
+                        .map_err(|e| RoutingError::QueueFull(e.to_string()))?;
 
+                    return Err(RoutingError::Other(format!("Forwarding failed: {}", e)));
+                }
+            }
+        }
+
+        // FALLBACK: No message sender configured yet
+        // Queue message for processing by background queue processor (P0.1.3)
+        // This provides graceful degradation during initialization
         let mut queue = self.outbound_queue.write().await;
         queue
             .enqueue(message)
@@ -575,6 +740,113 @@ impl Router {
         {
             let mut cache = self.offline_cache.write().await;
             cache.cleanup_expired();
+        }
+    }
+
+    /// Background queue processor - processes queued messages with retry logic
+    ///
+    /// This method should be spawned as a background task. It continuously:
+    /// 1. Dequeues messages ready for transmission (by priority)
+    /// 2. Attempts to forward them via message_sender
+    /// 3. Implements exponential backoff retry on failures
+    /// 4. Moves to offline cache after max retries
+    ///
+    /// # Configuration
+    /// - Max retries: 5
+    /// - Base retry delay: 2 seconds
+    /// - Exponential backoff: delay = base * 2^retry_count
+    /// - Max retry delay: 300 seconds (5 minutes)
+    ///
+    /// # Returns
+    /// Never returns - runs until cancelled
+    pub async fn run_queue_processor(self: Arc<Self>) {
+        const MAX_RETRIES: u32 = 5;
+        const BASE_RETRY_DELAY_SECS: u64 = 2;
+        const MAX_RETRY_DELAY_SECS: u64 = 300; // 5 minutes
+        const POLL_INTERVAL_MS: u64 = 100; // Check queue every 100ms
+
+        tracing::info!("Queue processor started");
+
+        loop {
+            // Dequeue next ready message (highest priority first)
+            let queued_msg = {
+                let mut queue = self.outbound_queue.write().await;
+                queue.dequeue_ready_for_retry()
+            };
+
+            match queued_msg {
+                Some(queued_msg) => {
+                    tracing::debug!(
+                        "Processing queued message {:?} (retry {})",
+                        queued_msg.message.id,
+                        queued_msg.retry_count
+                    );
+
+                    // Attempt to forward the message
+                    match self.forward_message(queued_msg.message.clone()).await {
+                        Ok(_) => {
+                            tracing::debug!(
+                                "Successfully forwarded queued message {:?}",
+                                queued_msg.message.id
+                            );
+                            // Success - message sent
+                        }
+                        Err(e) => {
+                            // Failed to forward
+                            tracing::warn!(
+                                "Failed to forward message {:?}: {} (retry {}/{})",
+                                queued_msg.message.id,
+                                e,
+                                queued_msg.retry_count,
+                                MAX_RETRIES
+                            );
+
+                            if queued_msg.retry_count >= MAX_RETRIES {
+                                // Max retries exceeded - move to offline cache
+                                tracing::info!(
+                                    "Max retries exceeded for message {:?}, moving to offline cache",
+                                    queued_msg.message.id
+                                );
+
+                                if let Err(cache_err) = self
+                                    .cache_for_offline(
+                                        queued_msg.message.destination,
+                                        queued_msg.message,
+                                    )
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "Failed to cache message for offline delivery: {}",
+                                        cache_err
+                                    );
+                                }
+                            } else {
+                                // Calculate exponential backoff delay
+                                let retry_delay = std::cmp::min(
+                                    BASE_RETRY_DELAY_SECS * 2u64.pow(queued_msg.retry_count),
+                                    MAX_RETRY_DELAY_SECS,
+                                );
+
+                                tracing::debug!(
+                                    "Re-queuing message {:?} with {}s delay",
+                                    queued_msg.message.id,
+                                    retry_delay
+                                );
+
+                                // Re-queue with retry metadata
+                                let mut queue = self.outbound_queue.write().await;
+                                if let Err(e) = queue.requeue_with_retry(queued_msg, retry_delay) {
+                                    tracing::error!("Failed to re-queue message: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+                None => {
+                    // No messages ready - sleep briefly before checking again
+                    tokio::time::sleep(tokio::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
+                }
+            }
         }
     }
 }

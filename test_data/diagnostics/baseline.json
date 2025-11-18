@@ -1,0 +1,39 @@
+{
+  "performance": {
+    "max_init_duration_ms": 5000,
+    "max_phase_durations": {
+      "StorageInit": 100,
+      "AdapterManagerInit": 50,
+      "MessageQueueInit": 50,
+      "DhtInit": 200,
+      "RouterInit": 50,
+      "RouterCallbacksSet": 10,
+      "LedgerInit": 500,
+      "NetworkMonitorInit": 50,
+      "FailoverManagerInit": 50,
+      "HeartbeatServiceInit": 50,
+      "ApiServerInit": 100,
+      "ApplianceManagerInit": 50,
+      "Complete": 5000
+    }
+  },
+  "reliability": {
+    "max_failures_per_100": 5,
+    "zero_tolerance_failures": [
+      "InitializationFailure",
+      "RouterIntegrationFailure"
+    ]
+  },
+  "integration": {
+    "require_complete_router_integration": true,
+    "require_queue_processor": true,
+    "require_local_delivery_processor": true,
+    "required_lifecycle_events": [
+      "NodeStarting",
+      "QueueProcessorStarted",
+      "NodeReady"
+    ]
+  },
+  "last_updated": 1700000000,
+  "sample_size": 1
+}
